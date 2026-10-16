@@ -335,7 +335,7 @@
       this.fallT = 0;
       this.spin.set(RJ.rand(-1.5, 1.5), RJ.rand(-0.6, 0.6), RJ.rand(-3, 3));
       const MF = RJ.missileFx;
-      if (MF) { MF.explosion(this.pos, 1.3 + this.radius / 10, this.vel); MF.debris(this.pos, this.vel, 8 + Math.round(this.radius / 2)); }
+      if (MF) MF.jetBlast(this);
       else RJ.fx.explosion(this.pos, 1 + this.radius / 12, this.vel);
       RJ.fx.debris(this.pos, this.vel, 1);
       RJ.emit("explosion", { pos: this.pos.clone(), big: 1 });
@@ -361,7 +361,9 @@
       if (this.fxT > 0.03) {
         this.fxT = 0;
         RJ.fx.fire(this.pos, this.vel.clone().multiplyScalar(0.2), 5 + this.radius * 0.3);
-        RJ.fx.smoke(this.pos, this.vel.clone().multiplyScalar(0.1), 4 + this.radius * 0.3, 0.12, 6, 0.75);
+        RJ.fx.smoke(this.pos, this.vel.clone().multiplyScalar(0.1), (4 + this.radius * 0.3) * (0.7 + Math.random() * 0.6), 0.14, 6, 0.42);
+        // burning fuel streaming off the wreck
+        if (this.fallT < 6) RJ.fx.fireP.spawn(this.pos.x, this.pos.y, this.pos.z, this.vel.x * 0.55, this.vel.y * 0.55 + 3, this.vel.z * 0.55, 0.5 + Math.random() * 0.4, 3 + this.radius * 0.2, 9 + this.radius * 0.5, 1, 0.5, 0.15, 0.85, 3, 1.2);
       }
       const gnd = RJ.world.ground(this.pos.x, this.pos.z);
       if (this.pos.y < gnd + 1 || this.fallT > 14) { this.pos.y = Math.max(this.pos.y, gnd); this.finalBlast(gnd <= 0.5 ? "water" : "terrain"); }

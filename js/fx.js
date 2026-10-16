@@ -44,7 +44,7 @@
         vertexShader: [
           "attribute vec3 velocity; attribute vec4 params; attribute vec4 tint; attribute vec2 extra;",
           "uniform float time; uniform float pixelScale; uniform vec3 sunDir;",
-          "varying float vAlpha; varying vec3 vCol; varying float vT; varying float vDepth; varying float vFwd;",
+          "varying float vAlpha; varying vec3 vCol; varying float vT; varying float vDepth; varying float vFwd; varying float vNear;",
           "void main(){",
           "  float age = time - params.x; float t = age / params.y;",
           "  if (t < 0.0 || t > 1.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); gl_PointSize = 0.0; return; }",
@@ -56,6 +56,7 @@
           "  float size = mix(params.z, params.w, sqrt(t));",
           "  gl_PointSize = clamp(size * pixelScale / max(-mv.z, 0.5), 0.0, 1024.0);",
           "  vAlpha = tint.a * (1.0 - t) * smoothstep(0.0, 0.06, t + 0.01);",
+          "  vNear = smoothstep(0.35, 1.6, -mv.z / max(size, 0.1));",          // a puff about to engulf the camera fades out instead of becoming a flat disc
           "  vCol = tint.rgb; vT = t; vDepth = -mv.z;",
           "  vFwd = pow(max(dot(normalize(p - cameraPosition), normalize(sunDir)), 0.0), 8.0);",
           "}"
@@ -63,7 +64,7 @@
         fragmentShader: [
           "uniform sampler2D map; uniform float additive; uniform vec3 fogColor; uniform float fogNear; uniform float fogFar;",
           "uniform vec3 lightCol; uniform vec3 ambCol;",
-          "varying float vAlpha; varying vec3 vCol; varying float vT; varying float vDepth; varying float vFwd;",
+          "varying float vAlpha; varying vec3 vCol; varying float vT; varying float vDepth; varying float vFwd; varying float vNear;",
           "void main(){",
           "  float a; vec3 col = vCol;",
           "  if (additive > 0.5) { float r = length(gl_PointCoord - 0.5); a = 1.0 - smoothstep(0.05, 0.5, r); col *= mix(vec3(1.6, 1.4, 1.1), vec3(1.0, 0.45, 0.18), vT); }",
@@ -72,7 +73,7 @@
           "    float lum = max(max(col.r, col.g), col.b);",
           "    col = col * mix(ambCol, lightCol, 0.7) + lightCol * vFwd * 0.9 * lum;",
           "  }",
-          "  a *= vAlpha; if (a < 0.004) discard;",
+          "  a *= vAlpha; if (additive < 0.5) a *= vNear; if (a < 0.004) discard;",
           "  float f = smoothstep(fogNear, fogFar, vDepth);",
           "  if (additive > 0.5) { a *= (1.0 - f); } else { col = mix(col, fogColor, f); }",
           "  gl_FragColor = vec4(col, a);",

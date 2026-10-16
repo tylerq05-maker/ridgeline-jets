@@ -314,7 +314,8 @@
     // 3 sparks and burning fragments
     for (let i = 0; i < 40 * s; i++) { const v = tv.set(R(1), R(1), R(1)).normalize().multiplyScalar(40 + Math.random() * 90 * s); fx.fireP.spawn(p.x, p.y, p.z, vx + v.x, vy + v.y + 8, vz + v.z, 0.5 + Math.random() * 0.9, 1.3, 0.4, 1, 0.82, 0.45, 1, -20, 0.5); }
     // 4 smoke: grey-black, rolling up and spreading, lingers long after the fire
-    for (let i = 0; i < 24 * Math.sqrt(s); i++) { const d = 0.1 + Math.random() * 0.16, v = tv.set(R(1), R(1), R(1)).normalize().multiplyScalar(3 + Math.random() * 9 * s); fx.smokeP.spawn(p.x + R(5 * s), p.y + R(5 * s), p.z + R(5 * s), vx + v.x, vy + v.y + 3, vz + v.z, 5 + Math.random() * 6, 12 * s, 60 * s, d, d, d * 1.05, 0.85, 2.5, 0.7); }
+    // (spread out, translucent and varied, so it billows like a cloud instead of reading as one dark ball)
+    for (let i = 0; i < 26 * Math.sqrt(s); i++) { const d = 0.13 + Math.random() * 0.22, v = tv.set(R(1), R(1), R(1)).normalize().multiplyScalar(5 + Math.random() * 14 * s); fx.smokeP.spawn(p.x + R(8 * s), p.y + R(8 * s), p.z + R(8 * s), vx + v.x, vy + v.y + 3, vz + v.z, 4 + Math.random() * 6, 8 * s, (30 + Math.random() * 30) * s, d * 1.05, d, d * 0.95, 0.42 + Math.random() * 0.2, 2.5, 0.7); }
     // 5 shockwave: screen-space refraction ring (shared with the sonic boom) and a light flash
     if (RJ.sonic && RJ.sonic.shocks) { RJ.sonic.shocks.push({ pos: p.clone(), t: 0, R0: 6 * s, vis: 0.7 }); if (RJ.sonic.shocks.length > 3) RJ.sonic.shocks.shift(); }
     fx.light.position.copy(p); fx.light.color.setHex(tint ? 0x8fdcff : 0xffb070); fx.lightLevel = Math.max(fx.lightLevel, Math.min(2.4, 1.1 * s));
@@ -336,8 +337,133 @@
       DEB.push({ m, v: v.clone(), w: V3(R(9), R(9), R(9)), t: 0, life: 6 + Math.random() * 4, burn: burning && Math.random() < 0.6, fxT: 0 });
     }
   };
+  /* ---------------- jet kills: volumetric fireball, shock ring, secondary blasts ----------------
+   * A real 3D fireball (noise-displaced sphere whose colour runs white-hot → orange → dull red → black smoke as it
+   * swells and cools), a bright shock ring racing outward, and fuel tanks cooking off on the falling wreck. */
+  const NOISE = [
+    "float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }",
+    "float n3(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
+    "  return mix(mix(mix(h(i), h(i + vec3(1,0,0)), f.x), mix(h(i + vec3(0,1,0)), h(i + vec3(1,1,0)), f.x), f.y),",
+    "             mix(mix(h(i + vec3(0,0,1)), h(i + vec3(1,0,1)), f.x), mix(h(i + vec3(0,1,1)), h(i + vec3(1,1,1)), f.x), f.y), f.z); }"
+  ].join("\n");
+  let ballGeo = null;
+  const BALLS = [], RINGS = [], POPS = [];
+  function fireballMat() {
+    return new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, fog: false,
+      uniforms: { k: { value: 0 }, seed: { value: 0 }, heat: { value: 1 } },
+      vertexShader: NOISE + "\n" + [
+        "uniform float k; uniform float seed; varying float vN; varying vec3 vNor; varying vec3 vView;",
+        "void main(){",
+        "  vec3 p = position;",
+        "  float n = n3(p * 1.8 + seed + vec3(0.0, -k * 2.0, 0.0)) * 0.6 + n3(p * 4.3 + seed * 1.7 + k) * 0.4;",
+        "  vN = n; p *= 0.62 + 0.62 * n;",
+        "  vNor = normalize(normalMatrix * normal);",
+        "  vec4 mv = modelViewMatrix * vec4(p, 1.0); vView = -mv.xyz; gl_Position = projectionMatrix * mv; }"
+      ].join("\n"),
+      fragmentShader: [
+        "uniform float k; uniform float heat; varying float vN; varying vec3 vNor; varying vec3 vView;",
+        "void main(){",
+        "  float facing = abs(dot(normalize(vNor), normalize(vView)));",
+        "  float temp = clamp((1.15 - k * 1.55) * heat + (vN - 0.5) * 0.9 + facing * 0.35, 0.0, 1.2);",
+        "  vec3 smoke = vec3(0.07, 0.065, 0.06), red = vec3(0.75, 0.12, 0.02), orange = vec3(1.6, 0.62, 0.12), white = vec3(2.6, 2.1, 1.4);",
+        "  vec3 col = temp < 0.3 ? mix(smoke, red, temp / 0.3) : temp < 0.65 ? mix(red, orange, (temp - 0.3) / 0.35) : mix(orange, white, min(1.0, (temp - 0.65) / 0.45));",
+        "  float a = smoothstep(0.12, 0.8, facing + (vN - 0.5) * 0.3) * (1.0 - smoothstep(0.5, 1.0, k)) * (0.75 + 0.25 * vN);",
+        "  a *= smoothstep(0.1, 0.45, temp);",                       // cooled lobes thin out; the smoke particles take over
+        "  gl_FragColor = vec4(col, clamp(a, 0.0, 1.0));",
+        "}"
+      ].join("\n")
+    });
+  }
+  /** One fireball: p position, R final radius, life seconds, vel drift (m/s), heat 0..1 (cooler = more smoke). */
+  MF.fireball = function (p, R, life, vel, heat = 1, follow = null) {
+    if (!ballGeo) ballGeo = new THREE.IcosahedronGeometry(1, 4);
+    let b = BALLS.find((x) => x.k >= 1);
+    if (!b) {
+      if (BALLS.length >= 14) b = BALLS.reduce((a, x) => (x.k > a.k ? x : a));
+      else { const m = new THREE.Mesh(ballGeo, fireballMat()); m.layers.set(RJ.LATE); m.renderOrder = 9; m.frustumCulled = false; b = { m }; BALLS.push(b); RJ.scene.add(m); }
+    }
+    b.k = 0; b.t = 0; b.life = life; b.R = R; b.v = (vel ? vel.clone() : V3()).multiplyScalar(0.3); b.follow = follow;
+    b.m.position.copy(p); b.m.visible = true; b.m.rotation.set(Math.random() * 6, Math.random() * 6, 0);
+    const U = b.m.material.uniforms; U.seed.value = Math.random() * 50; U.heat.value = heat;
+    return b;
+  };
+  let ringTex = null;
+  MF.shockRing = function (p, R) {
+    if (!ringTex) {
+      const c = document.createElement("canvas"); c.width = c.height = 128;
+      const x = c.getContext("2d"), g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+      g.addColorStop(0, "rgba(255,255,255,0)"); g.addColorStop(0.72, "rgba(255,240,215,0)"); g.addColorStop(0.86, "rgba(255,235,200,0.9)"); g.addColorStop(1, "rgba(255,220,180,0)");
+      x.fillStyle = g; x.fillRect(0, 0, 128, 128); ringTex = new THREE.CanvasTexture(c);
+    }
+    let r = RINGS.find((x) => x.k >= 1);
+    if (!r) {
+      if (RINGS.length >= 8) r = RINGS[0];
+      else { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: ringTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending })); s.layers.set(RJ.LATE); s.renderOrder = 10; r = { s }; RINGS.push(r); RJ.scene.add(s); }
+    }
+    r.k = 0; r.R = R; r.s.position.copy(p); r.s.visible = true;
+  };
+  /** A jet destroyed in the air: the full show. */
+  MF.jetBlast = function (ac) {
+    const p = ac.pos, s = 1.3 + ac.radius / 10, cam = RJ.camera, far = cam && cam.position.distanceTo(p) > 9000;
+    MF.explosion(p, s, ac.vel);
+    MF.debris(p, ac.vel, 8 + Math.round(ac.radius / 2));
+    if (far) return; // beyond 9 km the particle blast reads the same; skip the meshes
+    MF.fireball(p, 12 * s, 1.6, ac.vel, 1.15);
+    MF.fireball(p.clone().add(V3(R(4), R(4), R(4))), 8 * s, 2.2, ac.vel, 0.85); // a slower second lobe that rolls out of the first
+    MF.shockRing(p, 30 * s);
+    // fuel tanks and ordnance cooking off on the falling wreck
+    const n = 2 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < n; i++) POPS.push({ ac, t: 0.35 + i * RJ.rand(0.35, 0.6), s: s * RJ.rand(0.45, 0.7) });
+  };
+  /** Cannon strike that doesn't kill: a flash, a spray of sparks and a puff of torn metal and smoke. */
+  MF.hitFlash = function (ac) {
+    const fx = RJ.fx, p = ac.pos, v = ac.vel;
+    const o = V3(R(ac.radius * 0.4), R(ac.radius * 0.2), R(ac.radius * 0.4)).add(p);
+    fx.fireP.spawn(o.x, o.y, o.z, v.x, v.y, v.z, 0.07, 3, 7, 1, 0.9, 0.6, 1, 0, 0);
+    for (let i = 0; i < 7; i++) fx.fireP.spawn(o.x, o.y, o.z, v.x * 0.9 + R(30), v.y * 0.9 + R(30), v.z * 0.9 + R(30), 0.3 + Math.random() * 0.3, 0.8, 0.25, 1, 0.8, 0.45, 1, -12, 0.8);
+    fx.smokeP.spawn(o.x, o.y, o.z, v.x * 0.6, v.y * 0.6, v.z * 0.6, 1.4, 2, 7, 0.2, 0.19, 0.18, 0.6, 1, 1.5);
+  };
+  RJ.on("damage", (e) => {
+    const ac = e.ac;
+    if (e.kind !== "gun" || !ac.alive || !RJ.camera || ac.pos.distanceTo(RJ.camera.position) > 4000) return;
+    if ((ac._hitFx || 0) > ac.time - 0.1) return; // a burst of hits = a few flashes, not one per round
+    ac._hitFx = ac.time; MF.hitFlash(ac);
+  });
+  function tickBlasts(dt) {
+    for (const b of BALLS) {
+      if (b.k >= 1) continue;
+      b.t += dt; b.k = Math.min(1, b.t / b.life);
+      const g = 1 - Math.exp(-b.k * 7); // fast swell, then hangs and rises as it cools
+      b.m.scale.setScalar(b.R * (0.15 + 0.85 * g) * (1 + b.k * 0.35));
+      b.m.position.addScaledVector(b.v, dt); b.m.position.y += dt * 6 * b.k;
+      b.v.multiplyScalar(Math.pow(0.4, dt));
+      b.m.material.uniforms.k.value = b.k;
+      if (b.k >= 1) b.m.visible = false;
+    }
+    for (const r of RINGS) {
+      if (r.k >= 1) continue;
+      r.k = Math.min(1, r.k + dt / 0.45);
+      r.s.scale.setScalar(r.R * (0.2 + 1.8 * Math.sqrt(r.k)));
+      r.s.material.opacity = 0.85 * (1 - r.k) * (1 - r.k);
+      if (r.k >= 1) r.s.visible = false;
+    }
+    for (let i = POPS.length - 1; i >= 0; i--) {
+      const q = POPS[i]; q.t -= dt;
+      if (q.t > 0) continue;
+      POPS.splice(i, 1);
+      if (q.ac.state !== "falling") continue;
+      const p = q.ac.pos, fx = RJ.fx, v = q.ac.vel;
+      MF.fireball(p, 8 * q.s, 1.1, v, 0.9);
+      for (let k = 0; k < 14; k++) fx.fireP.spawn(p.x, p.y, p.z, v.x * 0.4 + R(45 * q.s), v.y * 0.4 + R(45 * q.s) + 6, v.z * 0.4 + R(45 * q.s), 0.4 + Math.random() * 0.6, 1.1, 0.35, 1, 0.8, 0.45, 1, -18, 0.5);
+      fx.light.position.copy(p); fx.light.color.setHex(0xffa060); fx.lightLevel = Math.max(fx.lightLevel, 1.1 * q.s);
+      if (RJ.camera && RJ.camera.position.distanceTo(p) < 1500) RJ.camKick(0.15);
+    }
+  }
+
   MF.tick = function (dt) {
     MF.tickRibbons(dt);
+    tickBlasts(dt);
     for (let i = DEB.length - 1; i >= 0; i--) {
       const d = DEB[i]; d.t += dt;
       d.v.y -= RJ.G0 * dt; d.v.multiplyScalar(Math.pow(0.96, dt * 10 * 0.1));
@@ -414,6 +540,7 @@
     if (f.rib) { f.rib.dead = true; f.rib = null; }
   };
   MF.clear = function () {
+    for (const b of BALLS) { b.k = 1; b.m.visible = false; } for (const r of RINGS) { r.k = 1; r.s.visible = false; } POPS.length = 0;
     for (const d of DEB) RJ.scene.remove(d.m); DEB.length = 0;
     for (const r of RIBBONS) { RJ.scene.remove(r.mesh); r.g.dispose(); } RIBBONS.length = 0; MF.nCon = 0;
   };
