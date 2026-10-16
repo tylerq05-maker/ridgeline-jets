@@ -1,4 +1,4 @@
-# Ridgeline Jets
+# Jet City
 
 Open-world jet flight in the browser: a real-scale Mount Everest (8,848.86 m), 22 landmarks to discover,
 dogfights, missions, challenges, replays and photo mode, plus online multiplayer for up to 4 pilots.

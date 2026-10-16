@@ -43,7 +43,7 @@
   async function unpackDesc(code) {
     code = String(code || "").replace(/\s+/g, "");
     const kind = code.slice(0, 3);
-    if (kind !== "RJZ" && kind !== "RJT") throw new Error("That isn't a Ridgeline Jets code. Copy the whole code and try again.");
+    if (kind !== "RJZ" && kind !== "RJT") throw new Error("That isn't a Jet City code. Copy the whole code and try again.");
     let u8;
     try { u8 = unb64(code.slice(3)); if (kind === "RJZ") u8 = await pipe(u8, DecompressionStream); } catch (e) { throw new Error("That code is incomplete or damaged. Copy the whole code and try again."); }
     const t = new TextDecoder().decode(u8);

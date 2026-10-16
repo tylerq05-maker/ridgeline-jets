@@ -466,7 +466,7 @@
     try { url = v.renderer.domElement.toDataURL("image/jpeg", 0.93); } catch (e) { RJ.ui.toast("Couldn't capture the image in this browser."); return; }
     const a = document.createElement("a");
     const d = new Date(), pad = (n) => String(n).padStart(2, "0");
-    a.download = `ridgeline-jets-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.jpg`;
+    a.download = `jet-city-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.jpg`;
     a.href = url; document.body.appendChild(a); a.click(); a.remove();
     RJ.audio.click();
     RJ.ui.toast("Photo saved to your downloads.", 2200);
