@@ -49,7 +49,7 @@
   /* ---------------- Cockpit frame ---------------- */
   function cockpitFrame(pl) {
     const hist = pl.spec.cat === "historic" || pl.spec.hudStyle === "gunsight";
-    const bomber = pl.spec.cat === "bomber";
+    const bomber = pl.spec.cat === "bomber" || pl.spec.cat === "airliner";
     x.save();
     x.fillStyle = "rgba(14,17,21,0.96)";
     const top = Hh * (bomber ? 0.7 : 0.76);

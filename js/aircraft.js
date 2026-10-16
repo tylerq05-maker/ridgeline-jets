@@ -428,6 +428,52 @@
       engine(g, M, 0.55, 0, 0, 8.4, { rocket: true, color: 0xff9a50, core: 0xfff7e0 });
       cockpit(g, 0.9, -5.0); tips(g, 3.4, 0, 3.0);
     },
+    /** Passenger jets, one parametric builder: o = {L, R, sy, half, c0, ct, sweep, dih, engs:[x...], nacR, nacL, finH, stabHalf, rows, winW, winH, wingY} */
+    airliner(g, M, o) {
+      const L = o.L, R = o.R, sy = o.sy || 1, z0 = -L / 2, z1 = L / 2;
+      lathe(g, [[z0, 0], [z0 + 0.25 * R, 0.5 * R], [z0 + 0.7 * R, 0.8 * R], [z0 + 1.4 * R, 0.96 * R], [z0 + 2.4 * R, R], [z1 - 3.4 * R, R], [z1 - 1.8 * R, 0.72 * R], [z1 - 0.6 * R, 0.38 * R], [z1, 0.18 * R]], M.body, { sy, segs: 24 });
+      // cockpit windscreen band and the cheatline down each side
+      blob(g, 0.72 * R, 0.24 * R, 0.55 * R, 0, 0.42 * R * sy, z0 + 1.2 * R, M.dark);
+      pair((x) => box(g, 0.05, 0.14 * R, L * 0.72, x, -0.05 * R * sy, -L * 0.02, M.accent), R * 1.002);
+      // cabin windows: one instanced strip per deck and side
+      const wins = [];
+      const deckY = o.rows || [0.18];
+      for (const dy of deckY) {
+        const y = dy * R * sy, xs = R * Math.sqrt(Math.max(0, 1 - Math.pow(dy, 2))) + 0.02;
+        for (let z = z0 + 2.6 * R; z < z1 - 3.0 * R; z += o.winW * 2.1) for (const sx of [1, -1]) wins.push([xs * sx, y, z]);
+      }
+      const wg = new THREE.BoxGeometry(0.06, o.winH, o.winW);
+      const wi = new THREE.InstancedMesh(wg, M.dark, wins.length);
+      const m4 = new THREE.Matrix4();
+      wins.forEach((w, i) => { m4.makeTranslation(w[0], w[1], w[2]); wi.setMatrixAt(i, m4); });
+      g.add(wi);
+      // swept low wing with winglets
+      const wy = (o.wingY != null ? o.wingY : -0.55) * R * sy, tanS = Math.tan(o.sweep), rx = 0.6 * R;
+      const zLE0 = -L * 0.1, zLEt = zLE0 + (o.half - rx) * tanS;
+      plate(g, [[rx, zLE0], [o.half, zLEt], [o.half, zLEt + o.ct], [rx, zLE0 + o.c0]], o.c0 * 0.07, M.body, { y: wy, dihedral: o.dih });
+      const tipY = wy + o.half * Math.sin(o.dih);
+      const wl = o.ct * 1.1;
+      pair((x) => fin(g, [[zLEt + o.ct * 0.15, 0], [zLEt + o.ct * 0.15 + wl * 0.6, wl * 1.2], [zLEt + o.ct * 0.15 + wl * 0.95, wl * 1.25], [zLEt + o.ct, 0.1], [zLEt + o.ct * 0.6, 0]], M.trim, { x, y: tipY, thick: 0.12, tilt: x > 0 ? -0.12 : 0.12 }), o.half);
+      // belly fairing where the wing meets the body
+      blob(g, R * 0.95, R * 0.45, o.c0 * 0.75, 0, wy + 0.1 * R, zLE0 + o.c0 * 0.45, M.body);
+      // engines on pylons under the wing
+      for (const ex of o.engs) pair((x) => {
+        const zle = zLE0 + (Math.abs(x) - rx) * tanS, yw = wy + Math.abs(x) * Math.sin(o.dih);
+        const r = o.nacR, len = o.nacL, zc = zle - len * 0.18, yc = yw - r * 1.25;
+        tube(g, r, r * 0.82, len, x, yc, zc, M.white);
+        tube(g, r * 0.86, r * 0.86, 0.12, x, yc, zc - len / 2 - 0.02, M.dark);
+        tube(g, r * 0.45, r * 0.2, len * 0.35, x, yc, zc + len / 2 + len * 0.12, M.metal);
+        box(g, r * 0.25, r * 1.1, len * 0.75, x, yw - r * 0.45, zc + len * 0.2, M.body);
+        engine(g, M, r * 0.55, x, yc, zc + len / 2 + len * 0.28, { small: true, noNozzle: true, color: 0x9a8a78, core: 0xd8d0c4 });
+      }, ex);
+      // tail: fin with rudder, all-moving stabilisers
+      const fc0 = o.finH * 1.05, finY = R * sy * 0.62, fz0 = z1 - fc0 - 0.45 * R, ftan = Math.tan(0.62);
+      fin(g, [[fz0, finY], [fz0 + o.finH * ftan, finY + o.finH], [fz0 + o.finH * ftan + fc0 * 0.38, finY + o.finH], [z1 - 0.35 * R, finY]], M.trim, { thick: Math.max(0.2, R * 0.14) });
+      const sc0 = o.stabHalf * 0.55, sz0 = z1 - 2.6 * R - sc0 * 0.35, stan = Math.tan(o.sweep + 0.08);
+      moving(g, [[0.3 * R, sz0], [o.stabHalf, sz0 + o.stabHalf * stan], [o.stabHalf, sz0 + o.stabHalf * stan + sc0 * 0.4], [0.3 * R, sz0 + sc0]], Math.max(0.12, sc0 * 0.07), M.body, sz0 + sc0 * 0.5, { y: 0.15 * R * sy });
+      cockpit(g, 0.42 * R * sy, z0 + 1.35 * R);
+      tips(g, o.half, tipY, zLEt + o.ct * 0.5);
+    },
     hyperion(g, M) {
       lathe(g, [[-15, 0], [-13, 0.3], [-9, 0.75], [-4, 1.05], [2, 1.2], [8, 1.1], [13, 0.9], [14.5, 0.7]], M.facet, { sx: 1.8, sy: 0.55, segs: 8 });
       plate(g, [[0.6, -14.5], [3.6, -2.0], [3.6, 1.0], [0.6, 1.0]], 0.15, M.facet);
@@ -591,10 +637,32 @@
     hp: 180, stealth: 1.8, radar: 15000, gun: null, msl: { n: 4, name: "Hypersonic missiles (fictional)", lock: 0.8, cone: 40, range: 14000, speed: 1500 }, flares: 30,
     unlock: { challenge: "mach5" }, sound: { type: "jet", pitch: 0.6 } });
 
+  add("e175", { name: "Embraer E175", short: "E175", cat: "airliner", role: "Regional jet · 76 seats", status: "In service worldwide", year: 2005,
+    desc: "The small one: a twin-engine regional airliner for short hops between cities. Light on the controls for a passenger jet. Unarmed, Free Flight only.",
+    colors: { body: 0xf2f3f5, trim: 0xc8312b, glass: 0x1a2430, accent: 0xc8312b }, build: "airliner",
+    buildOpts: { L: 31.7, R: 1.5, half: 13.0, c0: 5.2, ct: 1.4, sweep: 0.4, dih: 0.07, engs: [4.6], nacR: 0.72, nacL: 3.6, finH: 5.2, stabHalf: 5.0, winW: 0.24, winH: 0.34 },
+    flight: { vmax: 245, ref: 11000, mil: 3.7, ab: 0, vstall: 56, gmax: 2.5, roll: 48, pitch: 9, yaw: 7, ind: 1.6, eng: "fan" },
+    hp: 200, stealth: 1, radar: 6000, gun: null, msl: { n: 0 }, flares: 0, freeOnly: true,
+    unlock: { start: true }, sound: { type: "heavy", pitch: 1.15 } });
+  add("b738", { name: "Boeing 737-800", short: "737", cat: "airliner", role: "Narrow-body airliner · 189 seats", status: "In service worldwide", year: 1998,
+    desc: "The medium one: the world's everyday airliner, with two big turbofans slung under its wings and upturned winglets. Unarmed, Free Flight only.",
+    colors: { body: 0xf2f3f5, trim: 0x1f5fb8, glass: 0x1a2430, accent: 0x1f5fb8 }, build: "airliner",
+    buildOpts: { L: 39.5, R: 1.88, half: 17.2, c0: 7.3, ct: 1.3, sweep: 0.44, dih: 0.1, engs: [4.9], nacR: 0.98, nacL: 4.6, finH: 7.0, stabHalf: 6.6, winW: 0.26, winH: 0.36 },
+    flight: { vmax: 245, ref: 11000, mil: 3.5, ab: 0, vstall: 61, gmax: 2.5, roll: 40, pitch: 8, yaw: 6, ind: 1.7, eng: "fan" },
+    hp: 260, stealth: 1, radar: 6000, gun: null, msl: { n: 0 }, flares: 0, freeOnly: true,
+    unlock: { start: true }, sound: { type: "heavy", pitch: 1.0 } });
+  add("a380", { name: "Airbus A380", short: "A380", cat: "airliner", role: "Double-deck superjumbo · 555 seats", status: "In service · largest airliner", year: 2007,
+    desc: "The huge one: a full-length double-deck airliner with four engines and an 80 m wing. Slow to turn, slow to stop, and amazing to fly low past a mountain. Unarmed, Free Flight only.",
+    colors: { body: 0xf2f3f5, trim: 0x15294d, glass: 0x1a2430, accent: 0xc9a14a }, build: "airliner",
+    buildOpts: { L: 72.7, R: 3.55, sy: 1.18, half: 39.9, c0: 17.5, ct: 4.0, sweep: 0.58, dih: 0.09, engs: [14.6, 25.8], nacR: 1.6, nacL: 7.2, finH: 13.0, stabHalf: 15.3, winW: 0.32, winH: 0.44, rows: [-0.12, 0.5], wingY: -0.6, bodyGear: true },
+    flight: { vmax: 255, ref: 11000, mil: 3.1, ab: 0, vstall: 69, gmax: 2.5, roll: 26, pitch: 5.5, yaw: 4, ind: 1.9, eng: "fan" },
+    hp: 480, stealth: 1, radar: 6000, gun: null, msl: { n: 0 }, flares: 0, freeOnly: true,
+    unlock: { start: true }, sound: { type: "heavy", pitch: 0.85 } });
+
   RJ.AIRCRAFT = A;
-  RJ.AIRCRAFT_ORDER = ["f16", "fa18e", "f15c", "a10", "f35a", "f15ex", "f22", "f14", "f4", "p51", "f117", "ea18g", "yf23", "b52", "b1b", "b2", "b21", "xb70", "sr71", "yf12", "x15", "hyperion"];
+  RJ.AIRCRAFT_ORDER = ["f16", "fa18e", "f15c", "a10", "f35a", "f15ex", "f22", "f14", "f4", "p51", "f117", "ea18g", "yf23", "b52", "b1b", "b2", "b21", "xb70", "sr71", "yf12", "x15", "hyperion", "e175", "b738", "a380"];
   RJ.CATEGORIES = [
-    ["modern", "Modern fighters"], ["historic", "Historic fighters"], ["special", "Stealth and specialized"], ["bomber", "Bombers"], ["recon", "Reconnaissance and experimental"]
+    ["modern", "Modern fighters"], ["historic", "Historic fighters"], ["special", "Stealth and specialized"], ["bomber", "Bombers"], ["recon", "Reconnaissance and experimental"], ["airliner", "Passenger airliners"]
   ];
 
   /* ======================= DERIVED FLIGHT CONSTANTS ======================= */
@@ -610,7 +678,7 @@
   };
   // Rotational inertia (1 = light fighter): how quickly rates and G build. Heavy airframes respond slowly.
   const INERTIA = { f22: 0.85, f16: 0.85, f35a: 0.95, fa18e: 1.0, ea18g: 1.05, f15c: 1.05, f15ex: 1.1, yf23: 1.0, f14: 1.25, f4: 1.35, a10: 1.45, p51: 0.9, f117: 1.6,
-    b2: 3.4, b21: 3.0, b1b: 2.8, b52: 4.2, xb70: 3.3, sr71: 2.6, yf12: 2.5, x15: 1.9, hyperion: 2.0 };
+    b2: 3.4, b21: 3.0, b1b: 2.8, b52: 4.2, xb70: 3.3, sr71: 2.6, yf12: 2.5, x15: 1.9, hyperion: 2.0, e175: 2.4, b738: 3.0, a380: 4.6 };
   for (const id in A) {
     const F = A[id].flight;
     const top = F.ab || F.mil;
@@ -765,8 +833,8 @@
   function addGear(g, M, a, bb) {
     const d = g.userData.dims, legs = [];
     const yb = bb.min.y + 0.15;
-    const heavy = a.cat === "bomber";
-    const H = heavy ? RJ.clamp(d.height * 0.55, 2.2, 3.6) : RJ.clamp(d.height * 0.5, 1.1, 2.3);
+    const liner = a.cat === "airliner", heavy = a.cat === "bomber" || liner;
+    const H = liner ? RJ.clamp(a.buildOpts.R * 0.75, 1.2, 2.8) : heavy ? RJ.clamp(d.height * 0.55, 2.2, 3.6) : RJ.clamp(d.height * 0.5, 1.1, 2.3);
     const wr = heavy ? 0.6 : 0.33;
     const leg = (x, z, h, r, nose, twin) => {
       const grp = new THREE.Group(); grp.position.set(x, yb, z);
@@ -787,10 +855,11 @@
     }
     const noseZ = Math.max(d.minZ + d.len * 0.12, ck.z + 1.0);
     const mainZ = d.minZ + d.len * 0.6;
-    const mainX = heavy ? Math.min(d.span * 0.09, 4.5) : RJ.clamp(d.span * 0.13, 1.0, 2.6);
+    const mainX = liner ? a.buildOpts.R * 1.5 : heavy ? Math.min(d.span * 0.09, 4.5) : RJ.clamp(d.span * 0.13, 1.0, 2.6);
     leg(0, noseZ, H, wr * 0.8, true, heavy);
     if (a.id === "b52") { for (const z of [mainZ - 18, mainZ - 2]) { leg(1.3, z, H, wr, false, true); leg(-1.3, z, H, wr, false, true); } }
     else { leg(mainX, mainZ, H, wr, false, heavy); leg(-mainX, mainZ, H, wr, false, heavy); }
+    if (a.buildOpts && a.buildOpts.bodyGear) for (const z of [mainZ + 3, mainZ + 6.5]) { leg(1.5, z, H, wr, false, true); leg(-1.5, z, H, wr, false, true); }
     d.gearH = -yb + H + wr;
     g.userData.gear = { legs, t: 1 };
   }
@@ -854,7 +923,7 @@
     const a = A[id];
     const grp = new THREE.Group();
     const hist = a.cat === "historic" || a.hudStyle === "gunsight";
-    const bomber = a.cat === "bomber";
+    const bomber = a.cat === "bomber" || a.cat === "airliner";
     const dark = new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.8, metalness: 0.2 });
     const mid = new THREE.MeshStandardMaterial({ color: hist ? 0x454b3c : 0x3b4048, roughness: 0.62, metalness: 0.3 });
     const frame = new THREE.MeshStandardMaterial({ color: 0x25282c, roughness: 0.5, metalness: 0.55 });
