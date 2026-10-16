@@ -401,7 +401,7 @@
     /** opts: role (fighter | wingman | strike | route | runner), style, order, leader, route, objective, alt */
     constructor(ac, skill, opts) {
       opts = opts || {};
-      this.ac = ac; this.sk = typeof skill === "string" ? DIFF[skill] : skill;
+      this.ac = ac; this.sk = (typeof skill === "string" ? DIFF[skill] : skill) || DIFF.veteran;
       this.t = Math.random() * 0.3; this.mode = "attack"; this.jinkT = 0; this.jinkDir = 1; this.burstT = 0;
       this.desired = V3().copy(ac.fwd); this.thr = 0.85; this.ab = false; this.fireWish = false;
       this.mslWait = RJ.rand(2, 5);

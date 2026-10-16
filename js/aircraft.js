@@ -978,8 +978,69 @@
     addLights(g, M, a);
     g.userData.materials = M;
     g.traverse((o) => { if (o.isMesh && o.material !== M.glass && o.material.blending !== THREE.AdditiveBlending) o.castShadow = true; });
+    if (!RJ.noMerge) mergeStatic(g);
     return g;
   };
+
+  /** Draw-call reduction: every static part (a direct child of the airframe that no animation code holds a
+   * reference to) is merged into one mesh per material. A fighter drops from ~60 draw calls to ~15. */
+  function mergeStatic(g) {
+    const refs = new Set(), seen = new Set();
+    const scan = (v, depth) => {
+      if (!v || typeof v !== "object" || depth > 4 || seen.has(v)) return;
+      seen.add(v);
+      if (v.isObject3D) { v.traverse((o) => refs.add(o)); return; }
+      if (v.isMaterial || v.isVector3 || v.isTexture) return;
+      for (const k in v) if (k !== "materials" && k !== "dims") scan(v[k], depth + 1);
+    };
+    scan(g.userData, 0);
+    const groups = new Map(), cand = [];
+    g.updateMatrixWorld(true);
+    const inv = new THREE.Matrix4().copy(g.matrixWorld).invert();
+    g.traverse((m) => { if (m !== g) cand.push(m); });
+    for (const m of cand) {
+      if (!m.isMesh || m.isInstancedMesh || refs.has(m) || m.children.length || !m.visible || Array.isArray(m.material)) continue;
+      let ok = true;
+      for (let q = m.parent; q && q !== g; q = q.parent) if (refs.has(q) || !q.visible || q.isMesh) { ok = false; break; }
+      if (!ok) continue;
+      if (m.material.blending === THREE.AdditiveBlending || m.renderOrder) continue;
+      const attrs = Object.keys(m.geometry.attributes).sort().join(",");
+      if (!/^normal,position(,uv)?$/.test(attrs)) continue;
+      const key = m.material.uuid + "|" + attrs;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(m);
+    }
+    for (const list of groups.values()) {
+      if (list.length < 2) continue;
+      const parts = [];
+      let total = 0;
+      for (const m of list) {
+        const mat = new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld);
+        const geo = (m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone()).applyMatrix4(mat);
+        if (mat.determinant() < 0) { // mirrored part: restore the triangle winding
+          for (const name of Object.keys(geo.attributes)) {
+            const at = geo.attributes[name], n = at.itemSize, arr = at.array;
+            for (let i = 0; i < at.count; i += 3) for (let k = 0; k < n; k++) { const t = arr[(i + 1) * n + k]; arr[(i + 1) * n + k] = arr[(i + 2) * n + k]; arr[(i + 2) * n + k] = t; }
+          }
+        }
+        parts.push(geo); total += geo.attributes.position.count;
+      }
+      const out = new THREE.BufferGeometry();
+      for (const name of Object.keys(parts[0].attributes)) {
+        const n = parts[0].attributes[name].itemSize, arr = new Float32Array(total * n);
+        let o = 0;
+        for (const p of parts) { arr.set(p.attributes[name].array, o); o += p.attributes[name].array.length; }
+        out.setAttribute(name, new THREE.BufferAttribute(arr, n));
+      }
+      out.computeBoundingSphere();
+      const mm = new THREE.Mesh(out, list[0].material);
+      mm.castShadow = list.some((m) => m.castShadow); mm.receiveShadow = list.some((m) => m.receiveShadow);
+      mm.layers.mask = list[0].layers.mask;
+      for (const m of list) m.parent.remove(m);
+      for (const p of parts) p.dispose();
+      g.add(mm);
+    }
+  }
 
   /* ======================= 3D COCKPIT ======================= */
   /** First-person cockpit drawn as an overlay in camera space. Returns {group, update(ac, dt)}. */

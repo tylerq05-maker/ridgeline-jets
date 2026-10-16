@@ -346,6 +346,9 @@
     const t = UI.setTab;
     if (t === "graphics") {
       h += row("Quality preset", "Low skips post-processing. Ultra raises terrain detail, view distance and shadow resolution.", chipCtl("quality", [["low", "Low"], ["medium", "Medium"], ["high", "High"], ["ultra", "Ultra"]]));
+      h += row("Frame rate limit", "Unlimited runs at your monitor's refresh rate (60/120/144/240 Hz)", chipCtl("fpsLimit", [["60", "60"], ["120", "120"], ["144", "144"], ["0", "Unlimited"]]));
+      h += row("FPS counter", "Frame rate and frame time, top of the screen", toggle("showFps"));
+      h += row("Dynamic resolution", "Lowers the render resolution a little when the frame rate drops, restores it when there's headroom", toggle("dynRes"));
       h += row("Shadows", "Real-time aircraft and airbase shadows (mountain shadows are always on)", toggle("shadows"));
       h += row("Bloom", "Glow from the sun, afterburners and runway lights", toggle("bloom"));
       h += row("Motion blur", "Subtle radial blur at very high speed", toggle("motionBlur"));

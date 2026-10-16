@@ -375,7 +375,8 @@ body.is-touch .touch { display: block; }
 
 /* throttle lever, hypersonic button, map */
 .thr { display: none !important; }
-#lever[hidden], #btn-hyper[hidden], #map[hidden] { display: none !important; }
+#lever[hidden], #btn-hyper[hidden], #map[hidden], #fps[hidden] { display: none !important; }
+#fps { position: fixed; left: 50%; transform: translateX(-50%); top: 4px; z-index: 50; font: 12px var(--font-mono); color: #8dffb0; background: rgba(0,0,0,.45); padding: 2px 6px; border-radius: 3px; pointer-events: none; }
 #lever { position: absolute; right: calc(max(10px, env(safe-area-inset-right, 0px))); top: 27%; width: 72px; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: auto; user-select: none; }
 #lever .lv-track { position: relative; width: 34px; height: 170px; border-radius: 6px; background: rgba(10,15,21,.55); border: 1px solid var(--line); cursor: ns-resize; touch-action: none; }
 #lever .lv-detent { position: absolute; left: 0; right: 0; top: 0; height: 14%; border-bottom: 2px dashed rgba(255,140,60,.8); color: #ffae6b; font: 600 10px var(--font-mono); text-align: center; line-height: 22px; }

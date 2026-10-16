@@ -12,7 +12,7 @@
   /* ======================= GRAPHICS ======================= */
   RJ.applyGraphics = function () {
     const Q = RJ.world.QUALITY[RJ.settings.quality] || RJ.world.QUALITY.high;
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, Q.pixel));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, Q.pixel) * (RJ.perf ? RJ.perf.scale : 1));
     RJ.post.enabled = !!Q.post && RJ.post.ok;
     RJ.world.setQuality(RJ.settings.quality);
     camera.far = RJ.world.viewRange * 1.05 + 2000;
@@ -407,7 +407,7 @@
     RJ.ui.gameChrome(true);
     cam.set(RJ.settings.cam, true);
     cam.reset(mode.player);
-    RJ.lever.reset(mode.player); RJ.nav.reset();
+    RJ.lever.reset(mode.player); RJ.nav.reset(); RJ.sim.reset();
     cam.fov = RJ.settings.fov;
     RJ.state.mode = "playing";
     RJ.input.keys.clear();
@@ -459,7 +459,30 @@
 
   /* ======================= PLAY FRAME ======================= */
   let gStress = 0, dmgFlash = 0, lastOverlays = null;
+  /* Fixed-timestep simulation: physics, AI and weapons always step at SIM_DT whatever the frame rate, so the
+   * aircraft fly identically at 30, 60 or 240 fps. Rendering then shows each aircraft interpolated between its
+   * last two physics states (alpha = leftover time / SIM_DT), and the true state is restored before the next step. */
+  const SIM_DT = 1 / 120, SIM_MAX = 6;
+  let simAcc = 0;
+  function restoreSim() {
+    // put back the true physics state, unless something outside the sim moved the aircraft meanwhile (respawn, reset)
+    for (const a of RJ.combat.aircraft) if (a._interp) { if (a.pos.equals(a._ip) && a.q.equals(a._iq)) { a.pos.copy(a._sp); a.q.copy(a._sq); a.updateBasis(); } else a._hasPrev = false; a._interp = false; }
+  }
+  function snapPrev() {
+    for (const a of RJ.combat.aircraft) { if (!a._pp) { a._pp = V3(); a._pq = new THREE.Quaternion(); a._sp = V3(); a._sq = new THREE.Quaternion(); a._ip = V3(); a._iq = new THREE.Quaternion(); } a._pp.copy(a.pos); a._pq.copy(a.q); a._hasPrev = true; }
+  }
+  function applyInterp(alpha) {
+    for (const a of RJ.combat.aircraft) {
+      if (!a._hasPrev || a.state === "dead" || a._pp.distanceToSquared(a.pos) > 250000) continue; // skip respawns/teleports
+      a._sp.copy(a.pos); a._sq.copy(a.q);
+      a.pos.lerpVectors(a._pp, a._sp, alpha); a.q.copy(a._pq).slerp(a._sq, alpha); a.updateBasis();
+      a._ip.copy(a.pos); a._iq.copy(a.q); a._interp = true;
+      if (a.mesh && a.state !== "dead") a.syncMesh();
+    }
+  }
+  RJ.sim = { dt: SIM_DT, reset() { simAcc = 0; for (const a of RJ.combat.aircraft) { a._hasPrev = false; a._interp = false; } }, frame: (dt) => playFrame(dt) }; // frame(): test hook
   function playFrame(dt) {
+    restoreSim();
     const mode = RJ.game.mode, pl = mode.player, I = RJ.input;
     if (I.action("pause")) { RJ.pause(); return; }
     if (I.action("retry") && mode.kind === "challenge") { RJ.restartGame(); return; }
@@ -490,12 +513,20 @@
       } else { I.action("missile"); I.action("target"); }
       if (I.action("flares")) RJ.combat.dropFlares(pl);
     }
-    RJ.combat.update(dt);
-    if (mode !== RJ.game.mode) return;
-    RJ.sonic.update(dt, RJ.combat.aircraft);
-    mode.update(dt);
-    RJ.replay.record(dt);
-    if (RJ.state.mode !== "playing") return;
+    simAcc += dt;
+    let steps = 0;
+    while (simAcc >= SIM_DT && steps < SIM_MAX) {
+      snapPrev();
+      RJ.combat.update(SIM_DT);
+      if (mode !== RJ.game.mode) return;
+      RJ.sonic.update(SIM_DT, RJ.combat.aircraft);
+      mode.update(SIM_DT);
+      RJ.replay.record(SIM_DT);
+      if (RJ.state.mode !== "playing") return;
+      simAcc -= SIM_DT; steps++;
+    }
+    if (steps === SIM_MAX) simAcc = Math.min(simAcc, SIM_DT); // too slow to keep up: drop time rather than spiral
+    applyInterp(simAcc / SIM_DT);
     const player = RJ.game.mode.player;
     const focus = !player.alive && mode.spectate && mode.spectate.alive ? mode.spectate : player;
     // continuous shake sources: transonic buffet and low, fast turbulence
@@ -615,9 +646,45 @@
   }
 
   /* ======================= LOOP ======================= */
-  function frame() {
+  /* Frame pacing: requestAnimationFrame already runs at the display's refresh rate (60/120/144/240 Hz);
+   * the optional limit skips frames to hold a lower rate. Dynamic resolution trims the render scale when the
+   * frame rate falls well below target and restores it when there is headroom. */
+  const PERF = { last: 0, n: 0, t0: 0, fps: 0, ms: 0, scale: 1, lowT: 0, highT: 0, vsync: 1000 / 60, el: null };
+  RJ.perf = PERF;
+  function perfTick(now, frameMs) {
+    PERF.n++;
+    if (frameMs > 2 && frameMs < PERF.vsync * 0.97) PERF.vsync = PERF.vsync * 0.9 + frameMs * 0.1; // learn the display interval
+    if (now - PERF.t0 < 500) return;
+    PERF.fps = (PERF.n * 1000) / (now - PERF.t0); PERF.ms = (now - PERF.t0) / PERF.n; PERF.n = 0; PERF.t0 = now;
+    const lim = +RJ.settings.fpsLimit || 0;
+    const target = Math.min(lim || 1000, 1000 / PERF.vsync);
+    if (RJ.settings.dynRes !== false && RJ.state.mode === "playing") {
+      if (PERF.fps < target * 0.85) { PERF.lowT += 0.5; PERF.highT = 0; } else if (PERF.fps > target * 0.96) { PERF.highT += 0.5; PERF.lowT = 0; } else { PERF.lowT = PERF.highT = 0; }
+      if (PERF.lowT >= 1.5 && PERF.scale > 0.6) { PERF.scale = Math.max(0.6, PERF.scale - 0.1); PERF.lowT = 0; applyPixelRatio(); }
+      else if (PERF.highT >= 4 && PERF.scale < 1) { PERF.scale = Math.min(1, PERF.scale + 0.1); PERF.highT = 0; applyPixelRatio(); }
+    } else if (PERF.scale !== 1 && RJ.settings.dynRes === false) { PERF.scale = 1; applyPixelRatio(); }
+    if (!PERF.el) { PERF.el = document.createElement("div"); PERF.el.id = "fps"; document.body.appendChild(PERF.el); }
+    PERF.el.hidden = !RJ.settings.showFps;
+    if (RJ.settings.showFps) PERF.el.textContent = `${Math.round(PERF.fps)} FPS · ${PERF.ms.toFixed(1)} ms${PERF.scale < 1 ? ` · res ${Math.round(PERF.scale * 100)}%` : ""}`;
+  }
+  function applyPixelRatio() {
+    const Q = RJ.world.QUALITY[RJ.settings.quality] || RJ.world.QUALITY.high;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, Q.pixel) * PERF.scale);
+    resize();
+  }
+  function frame(now) {
     requestAnimationFrame(frame);
-    const dt = Math.min(clock.getDelta(), 0.05);
+    now = now || performance.now();
+    const lim = +RJ.settings.fpsLimit || 0;
+    if (lim) {
+      const min = 1000 / lim;
+      const el = now - PERF.last;
+      if (el < min - 1.5) return; // too early for the next frame at this cap
+      PERF.last = el > min * 2 ? now : PERF.last + min; // keep an even cadence
+    } else PERF.last = now;
+    const frameMs = clock.getDelta() * 1000;
+    perfTick(now, frameMs);
+    const dt = Math.min(frameMs / 1000, 0.05);
     try { RJ.input.pollGamepad(); } catch (e) { /* ignore */ }
     const st = RJ.state.mode;
     try {
