@@ -1,0 +1,794 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Open-world jet flight: real-scale Everest, 22 landmarks, dogfights and up to 4-player online play.">
+<title>Ridgeline Jets</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Stencil+One&family=Saira:wght@400;500;600;700&family=Share+Tech+Mono&display=swap">
+<style>
+/* Layout: full-bleed WebGL world; menus are flight-briefing panels docked over it; in flight a thin HUD canvas + corner chrome. One dark cockpit look by design. */
+:root {
+  --night: #0a0f15;                 /* hangar dark */
+  --panel: rgba(10, 15, 21, .88);
+  --panel-solid: #111821;
+  --panel-2: rgba(255, 255, 255, .055);
+  --panel-3: rgba(255, 255, 255, .1);
+  --text: #e8edf2;
+  --muted: #8e9cad;
+  --line: rgba(255, 255, 255, .13);
+  --hazard: #ffb81c;                /* deck-crew yellow */
+  --hazard-ink: #161006;
+  --hud: #8dffb0;                   /* HUD symbology green */
+  --danger: #ff5a4f;
+  --friend: #6cc4ff;
+  --font-display: "Saira Stencil One", "Arial Black", Impact, sans-serif;
+  --font-body: "Saira", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Share Tech Mono", ui-monospace, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body {
+  margin: 0; overflow: hidden; background: var(--night); color: var(--text);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.45;
+  -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none;
+}
+#gl, #hud { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+#gl { touch-action: none; }
+#hud { pointer-events: none; z-index: 2; }
+button { font-family: inherit; color: inherit; font-size: inherit; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--hazard); outline-offset: 2px; }
+
+/* ---------- Screens ---------- */
+[hidden] { display: none !important; }
+.screen {
+  position: fixed; inset: 0; z-index: 10; overflow-y: auto; overscroll-behavior: contain;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px));
+}
+.scrim-left { background: linear-gradient(90deg, rgba(10,15,21,.82) 0%, rgba(10,15,21,.45) 42%, rgba(10,15,21,0) 68%); }
+.scrim-full { background: rgba(6, 9, 13, .62); }
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  padding: 20px; display: grid; gap: 16px; align-content: start;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--hazard); margin: 0; }
+.logo { font-family: var(--font-display); font-weight: 400; font-size: clamp(44px, 8vw, 76px); line-height: .88; margin: 2px 0 0; }
+h2.title { font-family: var(--font-display); font-weight: 400; font-size: clamp(30px, 5vw, 42px); line-height: .95; margin: 0; }
+.lede { margin: 0; color: var(--muted); max-width: 52ch; }
+.sub { margin: 0; color: var(--muted); font-size: 14px; }
+.group { display: grid; gap: 8px; }
+.group > h3 { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.spacer { flex: 1; }
+
+.btn {
+  cursor: pointer; font-family: var(--font-display); font-size: 22px; letter-spacing: .04em;
+  background: var(--hazard); color: var(--hazard-ink); border: 0; border-radius: 4px; padding: 11px 20px;
+  background-image: repeating-linear-gradient(-45deg, transparent 0 14px, rgba(0,0,0,.08) 14px 28px);
+}
+.btn:hover { filter: brightness(1.08); }
+.btn:disabled { filter: grayscale(1) brightness(.6); cursor: not-allowed; }
+.ghost { cursor: pointer; background: transparent; border: 1px solid var(--line); border-radius: 4px; padding: 10px 16px; font-weight: 700; }
+.ghost:hover { border-color: rgba(255,255,255,.35); background: var(--panel-2); }
+.ghost.small { padding: 6px 10px; font-size: 13px; }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { cursor: pointer; background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; padding: 6px 11px; font-size: 13px; font-weight: 600; }
+.chip[aria-pressed="true"] { border-color: var(--hazard); color: var(--hazard); background: rgba(255,184,28,.08); }
+.chip:disabled { opacity: .4; cursor: not-allowed; }
+
+.opts { display: grid; gap: 6px; }
+.opts.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.opt {
+  text-align: left; cursor: pointer; background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 4px; padding: 10px 12px; display: grid; gap: 2px; min-width: 0;
+}
+.opt:hover { border-color: rgba(255,255,255,.32); }
+.opt[aria-pressed="true"] { border-color: var(--hazard); box-shadow: inset 0 0 0 1px var(--hazard); }
+.opt .nm { font-family: var(--font-display); font-size: 19px; line-height: 1.05; }
+.opt .ds { font-size: 13px; color: var(--muted); }
+
+.acrow { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; }
+.acrow .nm { font-family: var(--font-display); font-size: 22px; line-height: 1; }
+.acrow .ds { font-size: 13px; color: var(--muted); }
+.warn { color: var(--danger); font-size: 13px; margin: 0; }
+
+/* ---------- Main menu ---------- */
+#scr-main { display: grid; grid-template-columns: minmax(0, 560px) 1fr; align-items: center; }
+.mainwrap { display: grid; gap: 18px; padding-block: 8px; }
+.modes { display: grid; gap: 10px; }
+.mode {
+  cursor: pointer; text-align: left; border: 1px solid var(--line); border-radius: 6px; padding: 18px 20px;
+  background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.02)), var(--panel);
+  display: grid; gap: 4px; position: relative; overflow: hidden;
+  transition: border-color .15s, transform .15s;
+}
+.mode:hover { border-color: var(--hazard); transform: translateX(4px); }
+.mode .k { font-family: var(--font-mono); font-size: 12px; letter-spacing: .14em; color: var(--hazard); }
+.mode .nm { font-family: var(--font-display); font-size: clamp(34px, 6vw, 50px); line-height: .95; }
+.mode .ds { color: var(--muted); font-size: 14px; max-width: 44ch; }
+.mode::after {
+  content: ""; position: absolute; right: -30px; top: 0; bottom: 0; width: 120px; transform: skewX(-18deg);
+  background: repeating-linear-gradient(90deg, rgba(255,184,28,.13) 0 10px, transparent 10px 22px);
+}
+.minor { display: flex; flex-wrap: wrap; gap: 8px; }
+.pilot { display: grid; gap: 6px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.pilot .top { display: flex; justify-content: space-between; gap: 10px; font-family: var(--font-mono); font-size: 13px; }
+.xpbar { height: 6px; background: rgba(255,255,255,.1); }
+.xpbar i { display: block; height: 100%; background: var(--hazard); width: 0; }
+
+.modes.three .mode { padding: 13px 18px; }
+.modes.three .mode .nm { font-size: clamp(28px, 4.6vw, 40px); }
+.minor .cnt { font-family: var(--font-mono); font-size: 12px; color: var(--hazard); margin-left: 4px; }
+
+/* ---------- Challenges and atlas ---------- */
+.panel.wide { max-width: 1040px; margin-inline: auto; }
+.chal-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.chal-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.chal-card { position: relative; padding-right: 66px; }
+.chal-card .nm { font-size: 17px; }
+.chal-card.blocked { opacity: .55; }
+.pips { position: absolute; right: 10px; top: 11px; display: flex; gap: 4px; }
+.pip { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid rgba(255,255,255,.25); }
+.pip.bronze.on { background: #c27c42; border-color: #e7a46a; }
+.pip.silver.on { background: #c9ced6; border-color: #f0f3f7; }
+.pip.gold.on { background: #f3c24c; border-color: #ffe08e; box-shadow: 0 0 8px rgba(243,194,76,.55); }
+.chal-detail { display: grid; gap: 14px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 16px; }
+.chal-head { display: flex; gap: 12px; align-items: center; }
+.chal-head .ic, .atlas-card .ic { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: 50%; background: rgba(255,184,28,.12); color: var(--hazard); }
+.chal-head .ic svg, .atlas-card .ic svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.chal-name { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 28px; line-height: 1; }
+.targets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.targets .t { border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; display: grid; gap: 2px; }
+.targets .t .k { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; font-weight: 700; }
+.targets .t .v { font-family: var(--font-mono); font-size: 16px; }
+.targets .t.gold .k { color: #f3c24c; } .targets .t.silver .k { color: #d5dae1; } .targets .t.bronze .k { color: #e09a5e; }
+.targets .t.got { background: rgba(255,255,255,.06); }
+.medal-sum { font-family: var(--font-mono); font-size: 13px; color: var(--muted); }
+.medal-chip { font-family: var(--font-display); font-size: 20px; letter-spacing: .04em; padding: 6px 14px 5px; border-radius: 999px; color: #161006; }
+.medal-chip.gold { background: linear-gradient(180deg, #ffe08e, #e0a92a); }
+.medal-chip.silver { background: linear-gradient(180deg, #f4f6f9, #aab1bb); }
+.medal-chip.bronze { background: linear-gradient(180deg, #f1b57f, #a8622d); }
+.status .ahead { color: var(--hud); } .status .behind { color: var(--danger); }
+.atlas-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.atlas-card { border: 1px solid var(--line); border-radius: 6px; padding: 12px; display: grid; gap: 6px; align-content: start; background: var(--panel-2); }
+.atlas-card .top { display: flex; gap: 10px; align-items: center; }
+.atlas-card .nm { font-family: var(--font-display); font-size: 19px; line-height: 1.05; }
+.atlas-card .ds { font-size: 13px; color: var(--muted); }
+.atlas-card .st { font-family: var(--font-mono); font-size: 12px; color: var(--hud); }
+.atlas-card.unknown .ic { background: rgba(255,255,255,.06); color: var(--muted); }
+.atlas-card.unknown .nm { color: var(--muted); }
+.atlas-card.unknown .st { color: var(--muted); }
+@media (max-width: 820px) { .chal-grid { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .chal-list { grid-template-columns: 1fr; } .targets { grid-template-columns: 1fr; } }
+
+/* ---------- Multiplayer ---------- */
+.mode.mp { border-color: rgba(108,196,255,.45); }
+.mode.mp .k { color: var(--friend); }
+.mp-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+.mp-col { display: grid; gap: 14px; }
+.txt { font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 9px 12px; min-width: 0; width: 100%; box-sizing: border-box; user-select: text; -webkit-user-select: text; }
+.txt.code { width: 170px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
+.txt:focus { outline: 2px solid var(--hazard); outline-offset: 1px; }
+.mdcode { font-family: var(--font-mono); font-size: 11px; line-height: 1.35; resize: vertical; word-break: break-all; margin: 4px 0 6px; }
+.md-h { margin-top: 18px; }
+.codebig { font-family: var(--font-mono); font-size: 28px; letter-spacing: .1em; color: var(--hazard); }
+.mp-players { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.mp-players li { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; padding: 9px 12px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-2); }
+.mp-players li.empty { color: var(--muted); border-style: dashed; background: none; }
+.mp-players .nm { font-weight: 700; } .mp-players .ac { color: var(--muted); font-size: 13px; }
+.mp-players .tag { font-family: var(--font-mono); font-size: 11px; letter-spacing: .1em; padding: 2px 7px; border-radius: 3px; border: 1px solid var(--line); }
+.mp-players .tag.ok { color: var(--hud); border-color: rgba(141,255,176,.4); } .mp-players .tag.red { color: var(--danger); } .mp-players .tag.blue { color: var(--friend); }
+.mp-board { position: fixed; z-index: 7; left: 50%; top: 18%; transform: translateX(-50%); min-width: min(440px, calc(100% - 32px)); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; font-family: var(--font-mono); font-size: 14px; }
+.mp-board table { width: 100%; border-collapse: collapse; } .mp-board td, .mp-board th { padding: 4px 6px; text-align: left; } .mp-board th { color: var(--muted); font-weight: 400; font-size: 12px; }
+.mp-board tr.me td { color: var(--hazard); }
+@media (max-width: 820px) { .mp-grid { grid-template-columns: 1fr; } }
+
+/* ---------- Replay & photo mode ---------- */
+.rpl { position: fixed; z-index: 8; left: 50%; transform: translateX(-50%); bottom: max(14px, env(safe-area-inset-bottom, 0px)); width: min(980px, calc(100% - 32px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; display: grid; gap: 8px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.rpl-top { display: flex; gap: 12px; align-items: baseline; font-family: var(--font-mono); font-size: 13px; }
+.rpl .rec { color: var(--danger); letter-spacing: .16em; }
+.rpl .rec::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); margin-right: 7px; animation: blink 1.2s infinite; }
+@keyframes blink { 50% { opacity: .25; } }
+.rpl .shot { color: var(--hazard); }
+.rpl input[type=range] { width: 100%; accent-color: var(--hazard); }
+.rpl-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.rpl-keys { margin: 0; font-size: 12px; color: var(--muted); }
+.btn.small { font-size: 16px; padding: 7px 12px; }
+.photo { position: fixed; z-index: 8; right: max(14px, env(safe-area-inset-right, 0px)); top: max(14px, env(safe-area-inset-top, 0px)); width: min(320px, calc(100% - 28px));
+  max-height: calc(100% - 28px); overflow-y: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; display: grid; gap: 10px; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.ph-row { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: center; font-size: 13px; }
+.ph-row .lb { color: var(--muted); font-weight: 600; }
+.ph-row input[type=range] { width: 100%; accent-color: var(--hazard); }
+.ph-hint { position: fixed; z-index: 8; right: 14px; top: 14px; cursor: pointer; background: rgba(10,15,21,.55); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; font-size: 12px; color: var(--muted); }
+@media (max-width: 640px) { .rpl-keys { display: none; } .photo { top: auto; bottom: 14px; max-height: 52%; } }
+
+/* ---------- Setup screens ---------- */
+.setup { max-width: 620px; }
+
+/* ---------- Hangar ---------- */
+#scr-hangar { display: grid; grid-template-columns: 290px 1fr 360px; gap: 14px; padding-block: max(14px, env(safe-area-inset-top, 0px)) max(14px, env(safe-area-inset-bottom, 0px)); overflow: hidden; }
+#scr-hangar .panel { overflow-y: auto; min-height: 0; }
+.hg-list { display: grid; gap: 14px; align-content: start; }
+.hg-cat h3 { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.hg-items { display: grid; gap: 3px; }
+.hg-item { cursor: pointer; display: flex; justify-content: space-between; gap: 8px; align-items: center; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 3px; padding: 6px 8px; }
+.hg-item:hover { background: var(--panel-2); }
+.hg-item[aria-pressed="true"] { border-color: var(--hazard); background: rgba(255,184,28,.08); }
+.hg-item .n { font-weight: 600; font-size: 14px; }
+.hg-item .t { font-family: var(--font-mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.hg-item.locked .n { color: var(--muted); }
+.hg-view { position: relative; min-height: 0; cursor: grab; touch-action: none; }
+.hg-view:active { cursor: grabbing; }
+.hg-view .tip { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); font-size: 12px; color: var(--muted); background: rgba(10,15,21,.6); padding: 4px 10px; border-radius: 3px; white-space: nowrap; }
+.stats { display: grid; gap: 7px; }
+.stat { display: grid; grid-template-columns: 112px 1fr 64px; gap: 10px; align-items: center; font-size: 13px; }
+.stat .lb { color: var(--muted); }
+.stat .vl { font-family: var(--font-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.meter { height: 7px; background: rgba(255,255,255,.1); position: relative; }
+.meter i { position: absolute; inset: 0 auto 0 0; background: var(--hazard); }
+.facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; margin: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; }
+.lockbox { border: 1px dashed var(--line); border-radius: 4px; padding: 8px 10px; font-size: 13px; color: var(--muted); }
+.lockbox b { color: var(--text); }
+
+/* ---------- Settings ---------- */
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--line); }
+.tab { cursor: pointer; background: transparent; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; font-weight: 700; color: var(--muted); }
+.tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--hazard); }
+.setlist { display: grid; gap: 12px; }
+.setrow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+.setrow label, .setrow .lb { font-weight: 600; }
+.setrow .hint { display: block; font-weight: 400; font-size: 12px; color: var(--muted); }
+input[type="range"] { width: 180px; accent-color: var(--hazard); }
+.keybtn { cursor: pointer; min-width: 92px; font-family: var(--font-mono); background: var(--panel-2); border: 1px solid var(--line); border-radius: 3px; padding: 5px 10px; }
+.keybtn.listening { border-color: var(--hazard); color: var(--hazard); }
+
+/* ---------- Results / career ---------- */
+.big { font-family: var(--font-display); font-size: clamp(48px, 11vw, 88px); line-height: .9; margin: 0; }
+.big.win { color: var(--hud); }
+.big.lose { color: var(--danger); }
+.table { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.cell { background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 8px 10px; }
+.cell .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.cell .v { font-family: var(--font-mono); font-size: 22px; font-variant-numeric: tabular-nums; }
+.unlock { border: 1px solid var(--hazard); color: var(--hazard); border-radius: 4px; padding: 8px 12px; font-weight: 700; }
+.chal { display: grid; gap: 6px; }
+.chal li { list-style: none; display: grid; grid-template-columns: 20px 1fr auto; gap: 8px; align-items: baseline; font-size: 14px; }
+.chal ul { margin: 0; padding: 0; display: grid; gap: 6px; }
+.chal .ok { color: var(--hud); font-family: var(--font-mono); }
+.chal .no { color: var(--muted); font-family: var(--font-mono); }
+.chal .rw { color: var(--muted); font-size: 12px; text-align: right; }
+
+/* ---------- Loading ---------- */
+#scr-loading { display: grid; place-items: center; background: var(--night); }
+.loadbox { width: min(420px, 100%); display: grid; gap: 12px; }
+.loadbar { height: 4px; background: rgba(255,255,255,.12); }
+.loadbar i { display: block; height: 100%; width: 0; background: var(--hazard); transition: width .2s; }
+
+/* ---------- In-flight chrome ---------- */
+#game-ui { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+.topbar {
+  position: absolute; top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: max(14px, env(safe-area-inset-left, 0px)); right: max(14px, env(safe-area-inset-right, 0px));
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 10px;
+}
+.status { font-family: var(--font-mono); color: var(--hud); font-size: 16px; text-shadow: 0 0 2px rgba(0,0,0,.9), 0 1px 4px rgba(0,0,0,.8); display: grid; gap: 1px; font-variant-numeric: tabular-nums; }
+.status b { font-weight: 400; color: var(--text); font-size: 11px; letter-spacing: .14em; }
+.rightcol { display: grid; gap: 8px; justify-items: end; }
+.tools { display: flex; gap: 6px; pointer-events: auto; }
+.tool { cursor: pointer; background: rgba(10,15,21,.55); border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; font-family: var(--font-mono); font-size: 13px; }
+.feed { display: grid; gap: 3px; justify-items: end; font-family: var(--font-mono); font-size: 13px; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+.feed div { background: rgba(10,15,21,.5); padding: 2px 8px; border-radius: 2px; animation: feedin .25s ease-out; }
+.feed .b { color: var(--friend); } .feed .r { color: var(--danger); }
+@keyframes feedin { from { transform: translateX(10px); opacity: 0; } }
+.msg {
+  position: absolute; left: 50%; top: 24%; transform: translateX(-50%);
+  font-family: var(--font-display); font-size: clamp(24px, 5vw, 42px); color: var(--hud); text-shadow: 0 0 2px rgba(0,0,0,.9), 0 1px 3px rgba(0,0,0,.85), 0 2px 12px rgba(0,0,0,.6);
+  white-space: nowrap; text-align: center; transition: opacity .3s;
+}
+.msg small { display: block; font-family: var(--font-mono); font-size: 14px; color: var(--text); letter-spacing: .08em; text-shadow: 0 0 3px rgba(0,0,0,.95), 0 1px 4px rgba(0,0,0,.8); }
+.banner {
+  position: absolute; left: 50%; top: 14%; transform: translateX(-50%); font-family: var(--font-mono); font-size: 18px;
+  padding: 4px 14px; border: 2px solid var(--danger); color: var(--danger); background: rgba(40,0,0,.35); letter-spacing: .2em;
+  animation: blink .45s steps(2) infinite;
+}
+.banner.lock { border-color: var(--hazard); color: var(--hazard); background: rgba(40,30,0,.35); animation-duration: .9s; }
+@keyframes blink { 50% { opacity: .35; } }
+.objective { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); transform: translateX(-50%); font-size: 13px; background: rgba(10,15,21,.6); padding: 6px 12px; border-radius: 4px; max-width: calc(100% - 32px); text-align: center; transition: opacity .6s; }
+#vignette { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(0,0,0,0) 35%, rgba(0,0,0,.95) 100%); }
+#pip { position: fixed; z-index: 4; pointer-events: none; border: 1px solid rgba(255,255,255,.55); box-shadow: 0 6px 24px rgba(0,0,0,.45); border-radius: 3px; }
+#pip span { position: absolute; left: 8px; top: 6px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
+#dmgflash { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(255,40,20,0) 40%, rgba(255,40,20,.55) 100%); transition: opacity .25s; }
+/* landmark discovery card */
+.disc { position: fixed; z-index: 6; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 62px); transform: translateX(-50%); display: grid; grid-template-columns: 56px 1fr; gap: 4px 14px; align-items: center;
+  background: linear-gradient(180deg, rgba(20,26,34,.94), rgba(10,15,21,.94)); border: 1px solid var(--hazard); border-radius: 6px; padding: 12px 18px 12px 12px; min-width: min(380px, calc(100% - 32px));
+  box-shadow: 0 10px 34px rgba(0,0,0,.5); animation: discin .5s cubic-bezier(.2,.9,.3,1.2); pointer-events: none; }
+.disc .ic { grid-row: 1 / span 3; width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: rgba(255,184,28,.12); border: 1px solid rgba(255,184,28,.5); }
+.disc .ic svg { width: 32px; height: 32px; stroke: var(--hazard); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.disc .k { font-family: var(--font-mono); font-size: 11px; letter-spacing: .16em; color: var(--hazard); }
+.disc .n { font-family: var(--font-display); font-size: 26px; line-height: 1; }
+.disc .d { font-size: 13px; color: var(--muted); }
+.disc .r { grid-column: 2; font-family: var(--font-mono); font-size: 12px; color: var(--hud); }
+.disc.out { opacity: 0; transition: opacity .6s; }
+@keyframes discin { from { transform: translate(-50%, -14px) scale(.96); opacity: 0; } }
+/* wide screens: the card sits top-right, clear of the centre flash title and the gunsight */
+@media (min-width: 760px) {
+  .disc { left: auto; right: max(16px, env(safe-area-inset-right, 0px)); top: calc(env(safe-area-inset-top, 0px) + 64px); transform: none; animation-name: discin2; }
+  @keyframes discin2 { from { transform: translateX(24px); opacity: 0; } }
+}
+.toast { position: fixed; z-index: 30; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 16px); transform: translateX(-50%); background: var(--panel-solid); border: 1px solid var(--hazard); color: var(--text); padding: 10px 16px; border-radius: 4px; font-weight: 600; max-width: calc(100% - 32px); }
+
+/* ---------- Touch ---------- */
+.touch { display: none; }
+body.is-touch .touch { display: block; }
+.stick { position: absolute; pointer-events: auto; width: 150px; height: 150px; border-radius: 50%; left: calc(max(16px, env(safe-area-inset-left, 0px)) + 4px); bottom: calc(env(safe-area-inset-bottom, 0px) + 18px); background: rgba(10,15,21,.35); border: 2px solid rgba(255,255,255,.25); touch-action: none; }
+.knob { position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; margin: -29px 0 0 -29px; border-radius: 50%; background: rgba(255,255,255,.3); border: 2px solid rgba(255,255,255,.6); }
+.stick-zone { position: absolute; left: 0; bottom: 0; width: 44%; height: 62%; pointer-events: auto; touch-action: none; }
+.stick.floating { transition: none; }
+.touch { --pad: 66px; }
+.pads2 { position: absolute; right: calc(max(14px, env(safe-area-inset-right, 0px)) + 4px + var(--pad) * 3 + 32px); bottom: calc(env(safe-area-inset-bottom, 0px) + 18px); display: flex; flex-direction: column; gap: 10px; pointer-events: auto; }
+.wingpads { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 64px); display: flex; gap: 8px; align-items: center; pointer-events: auto; font-family: var(--font-mono); font-size: 11px; color: var(--friend); }
+.pad.sm { width: 50px; height: 50px; font-size: 11px; }
+.thr { position: absolute; pointer-events: auto; left: calc(max(16px, env(safe-area-inset-left, 0px)) + 172px); bottom: calc(env(safe-area-inset-bottom, 0px) + 18px); width: 44px; height: 150px; border-radius: 6px; background: rgba(10,15,21,.35); border: 2px solid rgba(255,255,255,.25); touch-action: none; }
+.thr i { position: absolute; left: 4px; right: 4px; height: 22px; border-radius: 4px; background: var(--hazard); }
+.pads { position: absolute; right: calc(max(14px, env(safe-area-inset-right, 0px)) + 4px); bottom: calc(env(safe-area-inset-bottom, 0px) + 18px); display: grid; grid-template-columns: repeat(3, auto); gap: 10px; pointer-events: auto; }
+.pad { width: 66px; height: 66px; border-radius: 50%; border: 2px solid rgba(255,255,255,.5); background: rgba(10,15,21,.45); font-family: var(--font-display); font-size: 13px; touch-action: none; }
+.pad.red { border-color: var(--danger); color: var(--danger); }
+.pad.yel { border-color: var(--hazard); color: var(--hazard); }
+.pad.on { background: rgba(255,255,255,.2); }
+
+@media (max-width: 1100px) {
+  #scr-hangar { grid-template-columns: 250px 1fr; grid-template-rows: 1fr auto; }
+  #scr-hangar .hg-info { grid-column: 1 / -1; max-height: 42vh; }
+}
+@media (max-width: 760px) {
+  #scr-main { grid-template-columns: 1fr; align-items: start; }
+  .scrim-left { background: rgba(10,15,21,.55); }
+  .opts.cols-2 { grid-template-columns: 1fr; }
+  #scr-hangar { grid-template-columns: 1fr; grid-template-rows: 28vh 30vh auto; overflow-y: auto; }
+  #scr-hangar .hg-info { max-height: none; }
+  .stat { grid-template-columns: 96px 1fr 56px; }
+  .setrow { grid-template-columns: 1fr; }
+  .pad { width: 58px; height: 58px; }
+  .touch { --pad: 58px; }
+  .wingpads > span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .banner { animation: none; } .mode { transition: none; } }
+</style>
+
+<canvas id="gl" aria-label="3D flight view"></canvas>
+<canvas id="hud" aria-hidden="true"></canvas>
+<div id="vignette"></div>
+<div id="pip" hidden><span>SONIC BOOM · REPLAY</span></div>
+<div id="dmgflash"></div>
+
+<!-- ============ IN-FLIGHT UI ============ -->
+<div id="game-ui" hidden>
+  <div class="topbar">
+    <div class="status" id="status"></div>
+    <div class="rightcol">
+      <div class="tools">
+        <button class="tool" id="btn-cam" title="Camera (V)">CAM</button>
+        <button class="tool" id="btn-pause" title="Pause (P / Esc)">II</button>
+      </div>
+      <div class="feed" id="feed"></div>
+    </div>
+  </div>
+  <div class="msg" id="msg"></div>
+  <div class="banner" id="banner" hidden></div>
+  <div class="objective" id="objective"></div>
+  <div class="mp-board" id="mp-board" hidden></div>
+  <div class="touch" id="touch">
+    <div class="stick-zone" id="stick-zone"></div>
+    <div class="stick" id="stick"><div class="knob" id="knob"></div></div>
+    <div class="thr" id="thr"><i id="thr-knob"></i></div>
+    <div class="pads">
+      <button class="pad" id="t-tgt">TGT</button>
+      <button class="pad yel" id="t-flr">FLR</button>
+      <button class="pad red" id="t-msl">MSL</button>
+      <button class="pad" id="t-cam">CAM</button>
+      <button class="pad yel" id="t-ab">AB</button>
+      <button class="pad red" id="t-gun">GUN</button>
+    </div>
+    <div class="pads2">
+      <button class="pad sm" id="t-gear">GEAR</button>
+      <button class="pad sm" id="t-brk">BRK</button>
+    </div>
+    <div class="wingpads" id="t-wing" hidden>
+      <span>WING</span>
+      <button class="pad sm" data-wing="attack">ATK</button>
+      <button class="pad sm" data-wing="cover">COV</button>
+      <button class="pad sm" data-wing="form">FORM</button>
+      <button class="pad sm" data-wing="defend">DEF</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ LOADING ============ -->
+<div class="screen" id="scr-loading">
+  <div class="loadbox">
+    <p class="eyebrow">Ridgeline Air Range</p>
+    <h1 class="logo">RIDGELINE<br>JETS</h1>
+    <div class="loadbar"><i id="load-bar"></i></div>
+    <p class="sub" id="load-text">Starting up…</p>
+  </div>
+</div>
+
+<!-- ============ MAIN MENU ============ -->
+<div class="screen scrim-left" id="scr-main" hidden>
+  <div class="mainwrap">
+    <div>
+      <p class="eyebrow">Ridgeline Air Range · Flight operations</p>
+      <h1 class="logo">RIDGELINE<br>JETS</h1>
+    </div>
+    <div class="modes three">
+      <button class="mode" id="btn-free">
+        <span class="k">MODE 01</span>
+        <span class="nm">FREE FLIGHT</span>
+        <span class="ds">Explore mountains, canyons, deserts and islands. Run ring courses, time trials and low-level challenges. Any aircraft can be test-flown here.</span>
+      </button>
+      <button class="mode" id="btn-fight">
+        <span class="k">MODE 02</span>
+        <span class="nm">DOGFIGHT</span>
+        <span class="ds">Guns, missiles and flares against AI pilots. Duels, 2v2, team battles and endless survival.</span>
+      </button>
+      <button class="mode mp" id="btn-mp">
+        <span class="k">MODE 04 · UP TO 4 PILOTS</span>
+        <span class="nm">MULTIPLAYER</span>
+        <span class="ds">Fly with friends: free flight together, free-for-all or 2v2 dogfights. Host a lobby and share the code.</span>
+      </button>
+      <button class="mode" id="btn-chal">
+        <span class="k">MODE 03 · <span id="main-medals">0 / 30 MEDALS</span></span>
+        <span class="nm">CHALLENGES</span>
+        <span class="ds">Ten medal events on the range's landmarks: castle gates, the canyon bridge, carrier traps, supersonic low passes.</span>
+      </button>
+    </div>
+    <div class="minor">
+      <button class="ghost" id="btn-hangar">Hangar</button>
+      <button class="ghost" id="btn-atlas">Atlas <span id="main-atlas" class="cnt">0/10</span></button>
+      <button class="ghost" id="btn-career">Pilot record</button>
+      <button class="ghost" id="btn-settings">Settings</button>
+    </div>
+    <div class="pilot">
+      <div class="top"><span id="main-rank">AIRMAN</span><span id="main-ac">F-16</span></div>
+      <div class="xpbar"><i id="main-xpbar"></i></div>
+      <span class="sub" id="main-xptext">0 XP</span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ FREE FLIGHT SETUP ============ -->
+<div class="screen scrim-left" id="scr-free" hidden>
+  <div class="panel setup">
+    <div>
+      <p class="eyebrow">Mode 01</p>
+      <h2 class="title">FREE FLIGHT</h2>
+    </div>
+    <section class="group">
+      <h3>Aircraft</h3>
+      <div class="acrow"><div><div class="nm" id="free-ac-name">F-16</div><div class="ds" id="free-ac-role"></div></div><span class="spacer"></span><button class="ghost small" id="free-ac-change">Change</button></div>
+    </section>
+    <section class="group">
+      <h3>Activity</h3>
+      <div class="opts cols-2" id="free-activity"></div>
+    </section>
+    <section class="group" id="free-region-group">
+      <h3>Start region</h3>
+      <div class="chips" id="free-region"></div>
+    </section>
+    <section class="group" id="free-start-group">
+      <h3>Start</h3>
+      <div class="chips" id="free-startmode"></div>
+    </section>
+    <section class="group">
+      <h3>Time of day</h3>
+      <div class="chips" id="free-time"></div>
+    </section>
+    <section class="group">
+      <h3>Weather</h3>
+      <div class="chips" id="free-weather"></div>
+    </section>
+    <div class="row"><button class="btn" id="free-start">TAKE OFF</button><button class="ghost" id="free-back">Back</button></div>
+  </div>
+</div>
+
+<!-- ============ DOGFIGHT SETUP ============ -->
+<div class="screen scrim-left" id="scr-fight" hidden>
+  <div class="panel setup">
+    <div>
+      <p class="eyebrow">Mode 02</p>
+      <h2 class="title">DOGFIGHT</h2>
+    </div>
+    <section class="group">
+      <h3>Aircraft</h3>
+      <div class="acrow"><div><div class="nm" id="fight-ac-name">F-16</div><div class="ds" id="fight-ac-role"></div></div><span class="spacer"></span><button class="ghost small" id="fight-ac-change">Change</button></div>
+      <p class="warn" id="fight-ac-warn" hidden></p>
+    </section>
+    <section class="group">
+      <h3>Match</h3>
+      <div class="opts cols-2" id="fight-match"></div>
+    </section>
+    <section class="group">
+      <h3>Missions</h3>
+      <div class="opts cols-2" id="fight-missions"></div>
+    </section>
+    <section class="group">
+      <h3>Enemy pilots</h3>
+      <div class="chips" id="fight-diff"></div>
+    </section>
+    <section class="group" id="fight-arena-group">
+      <h3>Arena</h3>
+      <div class="chips" id="fight-arena"></div>
+    </section>
+    <p class="sub" id="fight-wing-help"></p>
+    <section class="group">
+      <h3>Time of day</h3>
+      <div class="chips" id="fight-time"></div>
+    </section>
+    <div class="row"><button class="btn" id="fight-start">LAUNCH</button><button class="ghost" id="fight-back">Back</button></div>
+  </div>
+</div>
+
+<!-- ============ HANGAR ============ -->
+<div class="screen" id="scr-hangar" hidden>
+  <div class="panel hg-list-panel">
+    <div class="row"><div><p class="eyebrow">Hangar</p><h2 class="title" style="font-size:30px">AIRCRAFT</h2></div><span class="spacer"></span><button class="ghost small" id="hg-back">Back</button></div>
+    <div class="hg-list" id="hg-list"></div>
+  </div>
+  <div class="hg-view" id="hg-view"><span class="tip">Drag to rotate · scroll or pinch to zoom</span></div>
+  <div class="panel hg-info">
+    <div>
+      <p class="eyebrow" id="hg-cat">Modern fighter</p>
+      <h2 class="title" id="hg-name">F-16 Fighting Falcon</h2>
+      <p class="sub" id="hg-role"></p>
+    </div>
+    <p class="lede" id="hg-desc" style="font-size:14px"></p>
+    <div class="stats" id="hg-stats"></div>
+    <dl class="facts" id="hg-facts"></dl>
+    <div class="lockbox" id="hg-lock" hidden></div>
+    <div class="row">
+      <button class="btn" id="hg-select" style="font-size:18px">SELECT</button>
+      <button class="ghost" id="hg-test">Test flight</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ SETTINGS ============ -->
+<div class="screen scrim-full" id="scr-settings" hidden>
+  <div class="panel" style="max-width:680px;margin-inline:auto">
+    <div class="row"><div><p class="eyebrow">Configuration</p><h2 class="title">SETTINGS</h2></div><span class="spacer"></span><button class="ghost" id="set-back">Done</button></div>
+    <div class="tabs" role="tablist" id="set-tabs"></div>
+    <div class="setlist" id="set-body"></div>
+  </div>
+</div>
+
+<!-- ============ CAREER ============ -->
+<div class="screen scrim-full" id="scr-career" hidden>
+  <div class="panel" style="max-width:720px;margin-inline:auto">
+    <div class="row"><div><p class="eyebrow">Pilot record</p><h2 class="title" id="car-rank">AIRMAN</h2></div><span class="spacer"></span><button class="ghost" id="car-back">Back</button></div>
+    <div class="pilot"><div class="xpbar"><i id="car-xpbar"></i></div><span class="sub" id="car-xp"></span></div>
+    <div class="table" id="car-stats"></div>
+    <section class="group chal"><h3>Challenges and unlocks</h3><ul id="car-chal"></ul></section>
+  </div>
+</div>
+
+<!-- ============ CHALLENGES ============ -->
+<div class="screen scrim-full" id="scr-chal" hidden>
+  <div class="panel wide">
+    <div class="row"><div><p class="eyebrow">Mode 03 · Medal events</p><h2 class="title">CHALLENGES</h2></div><span class="spacer"></span><span class="medal-sum" id="chal-sum"></span><button class="ghost" id="chal-back">Back</button></div>
+    <div class="chal-grid">
+      <div class="chal-list" id="chal-list"></div>
+      <div class="chal-detail">
+        <div class="chal-head"><div class="ic" id="chal-ic"></div><div><p class="eyebrow" id="chal-where"></p><h3 class="chal-name" id="chal-name"></h3></div></div>
+        <p class="lede" id="chal-desc"></p>
+        <section class="group">
+          <h3>Aircraft</h3>
+          <div class="acrow"><div><div class="nm" id="chal-ac-name">F-22</div><div class="ds" id="chal-ac-role"></div></div><span class="spacer"></span><button class="ghost small" id="chal-ac-change">Change</button></div>
+          <p class="warn" id="chal-warn" hidden></p>
+        </section>
+        <section class="group">
+          <h3>Medal targets in this aircraft</h3>
+          <div class="targets" id="chal-targets"></div>
+        </section>
+        <section class="group">
+          <h3>Your record</h3>
+          <p class="sub" id="chal-best"></p>
+        </section>
+        <div class="row"><button class="btn" id="chal-start">FLY</button><span class="sub" id="chal-keys"></span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MULTIPLAYER ============ -->
+<div class="screen scrim-full" id="scr-mp" hidden>
+  <div class="panel wide">
+    <div class="row"><div><p class="eyebrow">Mode 04 · Up to 4 pilots</p><h2 class="title">MULTIPLAYER</h2></div><span class="spacer"></span><button class="ghost" id="mp-back">Back</button></div>
+    <p class="warn" id="mp-warn" hidden></p>
+    <div class="mp-grid">
+      <div class="mp-col">
+        <section class="group">
+          <h3>Callsign</h3>
+          <input class="txt" id="mp-name" maxlength="14" autocomplete="off" spellcheck="false" placeholder="Maverick">
+        </section>
+        <section class="group">
+          <h3>Aircraft</h3>
+          <div class="acrow"><div><div class="nm" id="mp-ac-name">F-22</div><div class="ds" id="mp-ac-role"></div></div><span class="spacer"></span><button class="ghost small" id="mp-ac-change">Change</button></div>
+        </section>
+        <div id="mp-entry" class="group">
+          <h3>Start or join</h3>
+          <div class="row"><button class="btn" id="mp-host">HOST GAME</button></div>
+          <div class="row"><input class="txt code" id="mp-code" maxlength="12" autocomplete="off" spellcheck="false" placeholder="SQUAD-7"><button class="ghost" id="mp-join">Join</button></div>
+          <p class="sub" id="mp-entry-note">Everyone needs to be signed in to claude.ai and let in by it (invite them from the Share menu). Solo modes work for anyone.</p>
+          <div id="md-wrap">
+          <h3 class="md-h">Direct connect</h3>
+          <p class="sub">Works for anyone with the game link. You swap one code each way by text.</p>
+          <div class="row" id="md-pick"><button class="btn" id="md-host">HOST DIRECT</button><button class="ghost" id="md-join">JOIN DIRECT</button></div>
+          <div id="md-guest" hidden>
+            <p class="sub"><b>1.</b> Send this join code to the host (text it):</p>
+            <textarea class="txt mdcode" id="md-mycode" readonly rows="3" placeholder="Making your code… (a few seconds)"></textarea>
+            <div class="row"><button class="ghost small" id="md-copy">Copy join code</button></div>
+            <p class="sub"><b>2.</b> Paste the reply code the host sends back:</p>
+            <textarea class="txt mdcode" id="md-reply" rows="3" spellcheck="false" autocomplete="off" placeholder="Paste the host's reply code here"></textarea>
+            <div class="row"><button class="btn" id="md-connect">CONNECT</button><button class="ghost small" id="md-cancel">Cancel</button></div>
+            <p class="sub" id="md-gstat"></p>
+          </div>
+          </div>
+        </div>
+        <div id="mp-lobby" class="group" hidden>
+          <h3>Lobby code</h3>
+          <div class="row"><span class="codebig" id="mp-codev">SQUAD-7</span><button class="ghost small" id="mp-copy">Copy</button></div>
+          <div id="md-hostbox" hidden>
+            <h3>Add a pilot</h3>
+            <p class="sub">Your friend clicks JOIN DIRECT and texts you their join code. Paste it here, then text back the reply code.</p>
+            <textarea class="txt mdcode" id="md-in" rows="3" spellcheck="false" autocomplete="off" placeholder="Paste your friend's join code here"></textarea>
+            <div class="row"><button class="btn" id="md-add">MAKE REPLY CODE</button></div>
+            <div id="md-outwrap" hidden>
+              <textarea class="txt mdcode" id="md-out" readonly rows="3"></textarea>
+              <div class="row"><button class="ghost small" id="md-copy2">Copy reply code</button></div>
+            </div>
+            <p class="sub" id="md-hstat"></p>
+          </div>
+          <h3>Pilots</h3>
+          <ul class="mp-players" id="mp-players"></ul>
+          <div class="row">
+            <button class="btn" id="mp-start">START</button>
+            <button class="ghost" id="mp-ready">Ready</button>
+            <button class="ghost" id="mp-team">Switch team</button>
+            <button class="ghost" id="mp-rejoin" hidden>Rejoin match</button>
+            <button class="ghost" id="mp-leave">Leave lobby</button>
+          </div>
+          <p class="sub" id="mp-status"></p>
+        </div>
+      </div>
+      <div class="mp-col" id="mp-settings-col" hidden>
+        <section class="group"><h3>Game mode</h3><div class="opts" id="mp-mode"></div></section>
+        <section class="group"><h3>Start location</h3><div class="chips" id="mp-loc"></div></section>
+        <section class="group"><h3>Time of day</h3><div class="chips" id="mp-tod"></div></section>
+        <section class="group"><h3>Weather</h3><div class="chips" id="mp-wx"></div></section>
+        <section class="group mp-fight"><h3>Kill limit</h3><div class="chips" id="mp-kl"></div></section>
+        <section class="group mp-fight"><h3>Match time</h3><div class="chips" id="mp-tl"></div></section>
+        <section class="group mp-fight"><h3>Respawn delay</h3><div class="chips" id="mp-rd"></div></section>
+        <section class="group mp-fight"><h3>Options</h3><div class="chips" id="mp-opts"></div></section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ ATLAS ============ -->
+<div class="screen scrim-full" id="scr-atlas" hidden>
+  <div class="panel wide">
+    <div class="row"><div><p class="eyebrow">Discovery log</p><h2 class="title">THE ATLAS</h2></div><span class="spacer"></span><span class="medal-sum" id="atlas-sum"></span><button class="ghost" id="atlas-back">Back</button></div>
+    <p class="lede">Ten landmarks are hidden across the range. Fly within sight of one to log it. Logged landmarks show on your radar and can be flown to directly.</p>
+    <div class="atlas-grid" id="atlas-grid"></div>
+  </div>
+</div>
+
+<!-- ============ PAUSE ============ -->
+<div class="screen scrim-full" id="scr-pause" hidden>
+  <div class="panel" style="max-width:460px;margin:12vh auto 0">
+    <p class="eyebrow">Paused</p>
+    <h2 class="title">HOLDING PATTERN</h2>
+    <p class="sub" id="pz-info"></p>
+    <div class="row">
+      <button class="btn" id="pz-resume">RESUME</button>
+      <button class="ghost" id="pz-restart">Restart</button>
+      <button class="ghost" id="pz-replay">Replay</button>
+      <button class="ghost" id="pz-photo">Photo mode</button>
+      <button class="ghost" id="pz-settings">Settings</button>
+      <button class="ghost" id="pz-quit">Main menu</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ RESULTS ============ -->
+<div class="screen scrim-full" id="scr-results" hidden>
+  <div class="panel" style="max-width:720px;margin-inline:auto">
+    <p class="eyebrow" id="res-eyebrow">Debrief</p>
+    <div class="row"><p class="big" id="res-title">VICTORY</p><span class="medal-chip" id="res-medal" hidden></span></div>
+    <p class="sub" id="res-sub"></p>
+    <div class="table" id="res-stats"></div>
+    <div class="row" id="res-unlocks"></div>
+    <div class="row">
+      <button class="btn" id="res-again">FLY AGAIN</button>
+      <button class="ghost" id="res-replay">Watch replay</button>
+      <button class="ghost" id="res-chal" hidden>Challenges</button>
+      <button class="ghost" id="res-menu">Main menu</button>
+      <span class="sub" id="res-keys" hidden></span>
+    </div>
+  </div>
+</div>
+
+<!-- ============ REPLAY ============ -->
+<div class="rpl" id="replay-ui" hidden>
+  <div class="rpl-top"><span class="rec">REPLAY</span><span class="shot" id="rpl-shot">Director</span><span class="spacer"></span><span class="time" id="rpl-time">0:00.0</span></div>
+  <input type="range" id="rpl-seek" min="0" max="1000" value="0" aria-label="Replay position">
+  <div class="rpl-row">
+    <button class="ghost small" id="rpl-play">Pause</button>
+    <div class="chips" id="rpl-speed" aria-label="Playback speed"></div>
+    <div class="chips" id="rpl-shots" aria-label="Camera"></div>
+    <span class="spacer"></span>
+    <button class="ghost small" id="rpl-target">Next aircraft</button>
+    <button class="ghost small" id="rpl-photo">Photo</button>
+    <button class="btn small" id="rpl-exit">BACK TO FLIGHT</button>
+  </div>
+  <p class="rpl-keys">Space pause · ← → skip 5 s · 1–6 cameras · Tab next aircraft · Esc exit</p>
+</div>
+
+<!-- ============ PHOTO MODE ============ -->
+<div class="photo" id="photo-ui" hidden>
+  <p class="eyebrow">Photo mode</p>
+  <div class="ph-row"><span class="lb">Camera</span><div class="chips" id="ph-cam"></div></div>
+  <label class="ph-row"><span class="lb">Zoom</span><input type="range" id="ph-fov" min="8" max="95" step="1"></label>
+  <label class="ph-row"><span class="lb">Sun height</span><input type="range" id="ph-sun" min="-14" max="70" step="1"></label>
+  <label class="ph-row"><span class="lb">Sun direction</span><input type="range" id="ph-az" min="0" max="359" step="1"></label>
+  <label class="ph-row"><span class="lb">Exposure</span><input type="range" id="ph-exp" min="0.4" max="2.2" step="0.05"></label>
+  <div class="ph-row"><span class="lb">Depth of field</span><div class="chips" id="ph-dof"></div></div>
+  <label class="ph-row" id="ph-blur-row"><span class="lb">Blur</span><input type="range" id="ph-blur" min="0" max="1" step="0.05"></label>
+  <div class="row"><button class="btn small" id="ph-save">SAVE PHOTO</button><button class="ghost small" id="ph-hide">Hide panel</button><button class="ghost small" id="ph-back">Back</button></div>
+  <p class="sub" id="ph-keys"></p>
+</div>
+<button class="ph-hint" id="photo-hint" hidden>Show photo controls</button>
+
+<div class="toast" id="toast" hidden></div>
+<div class="disc" id="discover" hidden><div class="ic" id="disc-ic"></div><span class="k">LANDMARK DISCOVERED</span><span class="n" id="disc-n"></span><span class="d" id="disc-d"></span><span class="r" id="disc-r"></span></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="js/core.js"></script>
+<script src="js/noise.js"></script>
+<script src="js/terrain-gen.js"></script>
+<script src="js/world.js"></script>
+<script src="js/castle.js"></script>
+<script src="js/atlas-plan.js"></script>
+<script src="js/carrier.js"></script>
+<script src="js/atlas.js"></script>
+<script src="js/realms.js"></script>
+<script src="js/post.js"></script>
+<script src="js/clouds.js"></script>
+<script src="js/aircraft.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/sonic.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/flight.js"></script>
+<script src="js/combat.js"></script>
+<script src="js/hud.js"></script>
+<script src="js/modes.js"></script>
+<script src="js/missions.js"></script>
+<script src="js/challenges.js"></script>
+<script src="js/replay.js"></script>
+<script src="vendor/peerjs.min.js"></script>
+<script src="js/net.js"></script>
+<script src="js/multiplayer.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/main.js"></script>
+
+</html>
