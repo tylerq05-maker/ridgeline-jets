@@ -258,6 +258,39 @@
       }
     },
     {
+      id: "breakturn", name: "High-G Break Turn", icon: "ship", where: "Over the sea", metric: "score", better: "lower", difficulty: "Hard",
+      medals: [6.5, 8, 10], fmt: (v) => `${v.toFixed(2)} s`, fmtTarget: (v) => `under ${v.toFixed(1)} s`,
+      desc: "Hard. Reverse your heading 180° as fast as you can in a maximum-G break turn. Humid sea air makes condensation pour off the wings. Pull at least 6 G and hold your altitude within 300 m.",
+      env: { time: "morning", weather: "scattered" },
+      req: (ac) => (ac.flight.gmax >= 7 ? null : "Needs a fighter that can pull 7 G"),
+      build(ac) {
+        const P = RJ.atlas.plan, c = P.carrier || P.lighthouse; if (!c) return null;
+        const pos = V3(c.x + 6000, 1200, c.z - 6000);
+        return { pos, yaw: 0, speed: Math.min(ac.flight.corner * 1.3, ac.flight.vmax * 0.7), throttle: 1, cps: [], limit: 60, limitWhy: "Didn't complete the turn within a minute",
+          brief: "Break turn: 180° at max G", objective: "Roll hard into a 90° bank and pull as hard as the jet allows until you've turned all the way around. Watch the vapor stream off the wings." };
+      },
+      guide(m, pl) {
+        const b = m.brk || {};
+        return `G ${pl.g.toFixed(1)} · peak ${(b.peak || 0).toFixed(1)} G · turned ${Math.round(Math.abs(b.turned || 0) * 180 / Math.PI)}° of 180° · ${b.t0 != null ? (m.t - b.t0).toFixed(1) + " s" : "pull to start the clock"}`;
+      },
+      tick(m, pl) {
+        const b = m.brk || (m.brk = { turned: 0, peak: 0, alt0: pl.pos.y, prev: null, t0: null });
+        const hx = pl.fwd.x, hz = pl.fwd.z, hl = Math.hypot(hx, hz);
+        if (hl > 0.2) {
+          const h = Math.atan2(hx, -hz);
+          if (b.prev != null && b.t0 != null) { let d = h - b.prev; d = Math.atan2(Math.sin(d), Math.cos(d)); b.turned += d; }
+          b.prev = h;
+        }
+        if (b.t0 == null && Math.abs(pl.g) > 3) b.t0 = m.t;
+        b.peak = Math.max(b.peak, Math.abs(pl.g));
+        if (Math.abs(pl.pos.y - b.alt0) > 300) return m.fail(`Altitude changed by ${Math.round(Math.abs(pl.pos.y - b.alt0))} m. Keep the turn level (±300 m).`);
+        if (Math.abs(b.turned) >= Math.PI) {
+          if (b.peak < 6) return m.fail(`Peak load was only ${b.peak.toFixed(1)} G. A break turn needs 6 G or more.`);
+          m.finish(m.t - b.t0, [["Peak load", `${b.peak.toFixed(1)} G`], ["Altitude change", `${Math.round(pl.pos.y - b.alt0)} m`], ["Exit speed", `${Math.round(pl.speed * RJ.speedUnit()[1])} ${RJ.speedUnit()[0]}`]]);
+        }
+      }
+    },
+    {
       id: "summit", name: "Summit Sprint", icon: "peak", where: "The Mountain Summit", metric: "time",
       desc: "Race 8 km over ridges and valleys to the highest peak in the range. The rings hug the terrain.",
       env: { time: "dawn", weather: "scattered" }, sunBehind: true,

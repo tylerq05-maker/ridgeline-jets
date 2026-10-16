@@ -176,6 +176,8 @@ h2.title { font-family: var(--font-display); font-weight: 400; font-size: clamp(
 .txt { font: inherit; color: var(--text); background: var(--panel-2); border: 1px solid var(--line); border-radius: 4px; padding: 9px 12px; min-width: 0; width: 100%; box-sizing: border-box; user-select: text; -webkit-user-select: text; }
 .txt.code { width: 170px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
 .txt:focus { outline: 2px solid var(--hazard); outline-offset: 1px; }
+#rj-caption { position: fixed; left: 50%; bottom: 17%; transform: translate(-50%, 8px); z-index: 30; max-width: min(640px, calc(100vw - 32px)); padding: 9px 18px; border-radius: 4px; background: rgba(10,15,21,.62); border: 1px solid rgba(141,255,176,.25); color: #dff8e7; font-family: var(--font-mono); font-size: 15px; letter-spacing: .04em; text-align: center; opacity: 0; pointer-events: none; transition: opacity .6s, transform .6s; }
+#rj-caption.on { opacity: 1; transform: translate(-50%, 0); }
 .mdcode { font-family: var(--font-mono); font-size: 11px; line-height: 1.35; resize: vertical; word-break: break-all; margin: 4px 0 6px; }
 .md-h { margin-top: 18px; }
 .codebig { font-family: var(--font-mono); font-size: 28px; letter-spacing: .1em; color: var(--hazard); }
