@@ -382,6 +382,7 @@
     RJ.combat.reset();
     RJ.sonic.reset();
     RJ.audio.stopEngines();
+    if (RJ.companion) RJ.companion.stop();
     cam.hidden = null; cam.temp = null; PIP.t = 0; PIP.target = null; CP.owner = null;
   }
   RJ.startGame = async function (kind, opts) {
@@ -408,6 +409,7 @@
     RJ.input.keys.clear();
     clock.getDelta();
     RJ.audio.welcome(kind);
+    if (RJ.companion) RJ.companion.start(kind);
   };
   RJ.restartGame = function () { const c = RJ.game.config; if (c) RJ.startGame(c.kind, c.opts); };
   RJ.quitToMenu = async function () {
@@ -519,6 +521,7 @@
     const lockedOn = player.alive && player.lockedByT > 0;
     RJ.audio.warn(missileIn ? "missile" : lockedOn ? "lock" : null);
     RJ.ui.banner(missileIn ? "missile" : lockedOn ? "lock" : null);
+    if (RJ.companion) RJ.companion.update(dt, player, turb);
     // G-effects
     const fighter = player.spec.flight.gmax > 5;
     if (player.alive && fighter && player.g > 6.5) gStress += (player.g - 6.5) * 0.22 * dt;

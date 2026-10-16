@@ -370,6 +370,13 @@
       h += row("Voice speed", null, range("voiceRate", 0.7, 1.2, 0.05));
       h += row("Voice pitch", null, range("voicePitch", 0.7, 1.3, 0.02));
       h += row("Try it", "Plays the full greeting with your current choices", `<button class="ghost small" id="voice-test">Test voice</button>`);
+      h += row("Flight companion (Nova)", "Talks about what's happening and answers your questions. Hold " + RJ.keyLabel(RJ.settings.keys.talk) + " or press 🎙 to talk.", toggle("compOn"));
+      h += row("How much she talks", null, chipCtl("compChat", [["quiet", "Quiet"], ["normal", "Normal"], ["chatty", "Chatty"]]));
+      h += row("Companion volume", null, range("compVol", 0, 1, 0.05));
+      const cl = RJ.companion.voiceList();
+      h += row("Companion voice", "Natural voices (Edge) sound the most human", `<select class="txt" id="comp-voice" style="max-width:320px"><option value="">Auto (best natural female voice)</option>${cl.map((v) => `<option value="${esc(v.name)}" ${RJ.settings.compVoice === v.name ? "selected" : ""}>${v.female ? "♀ " : ""}${esc(v.name)} (${esc(v.lang)})</option>`).join("")}</select>`);
+      h += row("Microphone", "Off: holding the talk key opens a text box instead", toggle("compMic"));
+      h += row("Hear her", null, `<button class="ghost small" id="comp-test">Test companion</button>`);
       h += row("Mute", null, toggle("muted"));
     } else if (t === "controls") {
       h += row("Flight assist", "Holds altitude in banked turns and levels the wings when you let go", toggle("assist"));
@@ -577,6 +584,7 @@
       }
       if (e.target.id === "keys-reset") { RJ.resetKeys(); UI.renderSettings(); }
       if (e.target.id === "voice-test") { RJ.audio.testVoice(); }
+      if (e.target.id === "comp-test") { RJ.audio.init(); RJ.companion.say("Hey. I'm Nova. Altitude, speed, scenery, bad jokes, I've got you covered.", 1, { reply: true }); }
       if (e.target.id === "prog-reset") {
         if (UI._confirmReset) { RJ.resetProgress(); UI._confirmReset = false; UI.toast("Progress reset."); }
         else UI._confirmReset = true;
@@ -585,6 +593,7 @@
     });
     $("set-body").addEventListener("change", (e) => {
       if (e.target.id === "set-voice") { RJ.settings.voiceName = e.target.value; RJ.saveSettings(); RJ.audio.testVoice(); }
+      if (e.target.id === "comp-voice") { RJ.settings.compVoice = e.target.value; RJ.saveSettings(); RJ.companion.say("How do I sound? Better?", 1, { reply: true }); }
     });
     // voices load asynchronously in some browsers: refresh the list when they arrive
     if (window.speechSynthesis && speechSynthesis.addEventListener) speechSynthesis.addEventListener("voiceschanged", () => { if (UI.current === "scr-settings" && UI.setTab === "audio") UI.renderSettings(); });
