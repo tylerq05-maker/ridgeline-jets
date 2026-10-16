@@ -43,6 +43,7 @@
     C.missiles.forEach((m) => RJ.scene.remove(m.mesh)); C.missiles = [];
     if (RJ.missileFx) RJ.missileFx.clear();
     C.bombs.forEach((b) => RJ.scene.remove(b.mesh)); C.bombs = [];
+    if (RJ.missileFx) C.flares.forEach((f) => RJ.missileFx.flareEnd(f));
     C.flares = [];
     for (const b of C.bullets) b.life = 0;
     C.tracers.count = 0;
@@ -203,7 +204,8 @@
     const m = ac.spec.msl;
     if (!m || ac.missiles <= 0 || ac.mslCd > 0 || !ac.alive) return false;
     if (!ac.locked || !ac.target || !ac.target.alive) return false;
-    ac.missiles--; ac.mslCd = 1.1; ac.stats.msl++;
+    if (!(ac.isPlayer && RJ.game.mode && RJ.game.mode.infMsl)) ac.missiles--;
+    ac.mslCd = 1.1; ac.stats.msl++;
     return C.launchMissile(ac, ac.target);
   };
   /** Put a missile in the air from ac toward target (no lock or ammo checks: also used for network copies). */
@@ -213,7 +215,7 @@
     const MF = RJ.missileFx, type = MF ? MF.typeFor(ac) : null;
     const mesh = MF ? MF.mesh(type) : C.missileTpl.clone();
     RJ.scene.add(mesh);
-    const side = ac.missiles % 2 ? 1 : -1;
+    const side = (ac.missiles + (ac.stats ? ac.stats.msl : 0)) % 2 ? 1 : -1;
     const p = ac.pos.clone().addScaledVector(ac.right, side * Math.min(3, ac.vis.dims.span * 0.25)).addScaledVector(ac.up, -1.2);
     const msl = {
       owner: ac, target, pos: p, vel: ac.vel.clone().addScaledVector(ac.up, -12), mesh, type,
@@ -317,7 +319,9 @@
       ac.flares--; ac.stats.flares++;
       const side = k ? 1 : -1;
       const v = ac.vel.clone().multiplyScalar(0.55).addScaledVector(ac.right, side * 25).addScaledVector(ac.up, -18);
-      C.flares.push({ p: ac.pos.clone(), v, life: 3.2, owner: ac, tested: new Set() });
+      const f = { p: ac.pos.clone(), v, life: 3.2, owner: ac, tested: new Set() };
+      if (RJ.missileFx) RJ.missileFx.flareStart(f);
+      C.flares.push(f);
     }
     RJ.emit("flares", ac);
     return true;
@@ -326,10 +330,10 @@
     for (let i = C.flares.length - 1; i >= 0; i--) {
       const f = C.flares[i];
       f.life -= dt;
-      if (f.life <= 0) { C.flares.splice(i, 1); continue; }
+      if (f.life <= 0) { if (RJ.missileFx) RJ.missileFx.flareEnd(f); C.flares.splice(i, 1); continue; }
       f.v.y -= RJ.G0 * dt; f.v.multiplyScalar(Math.pow(0.4, dt));
       f.p.addScaledVector(f.v, dt);
-      RJ.fx.flareGlow(f.p, f.v);
+      if (RJ.missileFx) RJ.missileFx.flareUpdate(f, dt); else RJ.fx.flareGlow(f.p, f.v);
     }
   }
 

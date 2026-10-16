@@ -75,7 +75,7 @@
         x.fillStyle = "rgba(141,255,176,0.55)";
         if (i === -1) { text("ENG", cx + 8, y0 + 16, "left", 11); x.fillRect(cx + 8, y0 + mh - 14, (mw - 16) * pl.throttle, 6); x.fillStyle = "rgba(255,160,60,0.7)"; x.fillRect(cx + 8, y0 + mh - 24, (mw - 16) * pl.abLevel, 6); }
         if (i === 0) { text("SA", cx + 8, y0 + 16, "left", 11); x.beginPath(); x.arc(cx + mw / 2, y0 + mh / 2 + 6, mh * 0.32, 0, Math.PI * 2); x.stroke(); x.fillRect(cx + mw / 2 - 2, y0 + mh / 2 + 4, 4, 4); }
-        if (i === 1) { text("STORES", cx + 8, y0 + 16, "left", 11); text(`MSL ${pl.missiles}  FLR ${pl.flares}`, cx + 8, y0 + 36, "left", 11); text(`HP ${Math.round(pl.hp / pl.maxHp * 100)}%`, cx + 8, y0 + 54, "left", 11); }
+        if (i === 1) { text("STORES", cx + 8, y0 + 16, "left", 11); text(`MSL ${RJ.game.mode && RJ.game.mode.infMsl ? "∞" : pl.missiles}  FLR ${pl.flares}`, cx + 8, y0 + 36, "left", 11); text(`HP ${Math.round(pl.hp / pl.maxHp * 100)}%`, cx + 8, y0 + 54, "left", 11); }
       });
     }
     // canopy bow / frame
@@ -269,7 +269,7 @@
     if (s.bombMode) parts.push(`BOMBS ${pl.bombs}`);
     if (pl.gearT > 0.02 && !pl.spec.flight.model) parts.push(pl.gearT > 0.98 ? "GEAR DOWN" : "GEAR TRANSIT");
     if (pl.input && pl.input.brake) parts.push(pl.onGround ? "WHEEL BRAKES" : "SPEED BRAKE");
-    if (pl.spec.msl.n) parts.push(`MSL ${pl.missiles}`);
+    if (pl.spec.msl.n) parts.push(`MSL ${RJ.game.mode && RJ.game.mode.infMsl ? "∞" : pl.missiles}`);
     if (pl.spec.flares) parts.push(`FLR ${pl.flares}`);
     text(parts.join("   "), W / 2, y, "center", small ? 12 : 14);
     if (pl.vstatus) text(pl.vstatus, W / 2, y - (pl.overheated ? 40 : 20), "center", small ? 12 : 13);

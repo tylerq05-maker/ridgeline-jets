@@ -324,6 +324,64 @@
       if (d.m.position.y < g + 0.3 || d.t > d.life) { if (d.m.position.y < g + 2) RJ.fx.dust(d.m.position, 0.25); RJ.scene.remove(d.m); DEB.splice(i, 1); }
     }
   };
+  /* ---------------- flares: burning magnesium decoys ----------------
+   * Each flare is a blinding white-hot core inside a saturated orange fireball sprite (readable against white
+   * cloud), shedding sparks and a thick white smoke ribbon as it arcs away and falls. It cools over its life:
+   * white → yellow → orange → dull red, shrinking and fading, and lights the nearby airframe and cloud. */
+  const FLARE_T = { trail: { life: 4.5, s0: 1.6, s1: 12, step: 2.2, gray: 0.95, alpha: 0.6 } };
+  const _fc = new THREE.Color();
+  MF.flareStart = function (f) {
+    f.life0 = f.life; f.spacing = 0; f.prev = null;
+    const ball = new THREE.Sprite(new THREE.SpriteMaterial({ map: halo(), color: 0xffa040, transparent: true, depthWrite: false }));
+    ball.renderOrder = 11; ball.layers.set(RJ.LATE);
+    const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: halo(), color: 0xffffff, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+    core.renderOrder = 12; core.layers.set(RJ.LATE); core.scale.setScalar(0.45); ball.add(core);
+    ball.position.copy(f.p); RJ.scene.add(ball);
+    f.ball = ball; f.core = core;
+    // ejection: a sharp pop of white flash and sparks from the dispenser
+    const fx = RJ.fx, p = f.p, v = f.v;
+    fx.fireP.spawn(p.x, p.y, p.z, v.x, v.y, v.z, 0.08, 6, 14, 1, 0.97, 0.9, 1, 0, 0);
+    for (let i = 0; i < 10; i++) fx.fireP.spawn(p.x, p.y, p.z, v.x + R(35), v.y + R(35), v.z + R(35), 0.25 + Math.random() * 0.3, 0.9, 0.3, 1, 0.85, 0.5, 1, -15, 1);
+  };
+  MF.flareUpdate = function (f, dt) {
+    const fx = RJ.fx, p = f.p, heat = RJ.clamp(f.life / (f.life0 || 3.2), 0, 1); // 1 = just lit, 0 = burnt out
+    const cam = RJ.camera, d = cam ? cam.position.distanceTo(p) : 500;
+    const fade = Math.min(1, f.life / 0.6), flick = 0.8 + Math.random() * 0.4;
+    // colour cools from white-yellow to deep red
+    _fc.setRGB(1, 0.22 + 0.38 * heat, 0.04 + 0.12 * heat); // the halo stays saturated; the additive core carries the white heat
+    if (f.ball) {
+      f.ball.position.copy(p);
+      f.ball.material.color.copy(_fc); f.ball.material.opacity = 0.95 * fade;
+      f.ball.scale.setScalar(Math.max(2.2 + 3 * heat, d * 0.02) * (0.6 + 0.4 * heat) * flick);
+      f.core.material.opacity = fade * (0.5 + 0.5 * heat); f.core.scale.setScalar(0.32 + 0.18 * heat);
+    }
+    // smoke ribbon through the path flown, plus a few billows for volume
+    const wx = RJ.world.WEATHER[RJ.world.env.weather] || {}, wind = tv3.copy(WIND).multiplyScalar((wx.wind || 6) * 0.6);
+    if (heat > 0.12) {
+      if (!f.rib) { f.rib = newRibbon(FLARE_T); ribbonPush(f.rib, p, wind, 1); }
+      const prev = f.prev || p.clone(), seg = prev.distanceTo(p), step = FLARE_T.trail.step;
+      f.spacing += seg;
+      let n = 0;
+      while (f.spacing >= step && n < 30) {
+        f.spacing -= step; n++;
+        const q = tv2.copy(prev).lerp(p, RJ.clamp(seg > 0 ? 1 - f.spacing / seg : 1, 0, 1));
+        ribbonPush(f.rib, q, wind, 0.5 + heat * 0.6);
+        if (n % 4 === 0) fx.smokeP.spawn(q.x, q.y, q.z, wind.x + R(1.5), wind.y + 0.8, wind.z + R(1.5), 3, 1.5, 9, 0.95, 0.95, 0.97, 0.3 * heat, 0.4, 0.3);
+      }
+      const h = f.rib.pts[0]; if (h) { h.x = p.x; h.y = p.y; h.z = p.z; h.t = fx.time || 0; }
+      f.prev = f.prev ? f.prev.copy(p) : p.clone();
+    } else if (f.rib) { f.rib.dead = true; f.rib = null; }
+    // burning core particle and a shower of sparks streaming off it
+    if (Math.random() < dt * 40) fx.fireP.spawn(p.x, p.y, p.z, f.v.x * 0.9, f.v.y * 0.9, f.v.z * 0.9, 0.08 + Math.random() * 0.05, 1.4 + 1.4 * heat, 2.4 + 1.6 * heat, 1, 0.45 + 0.35 * heat, 0.15 + 0.3 * heat, 0.55 * fade, 0, 0);
+    if (d < 2500) for (let i = 0, ns = heat > 0.3 ? 2 : 1; i < ns; i++) if (Math.random() < dt * 150)
+      fx.fireP.spawn(p.x, p.y, p.z, f.v.x * 0.6 + R(14), f.v.y * 0.6 + R(14) + 4, f.v.z * 0.6 + R(14), 0.4 + Math.random() * 0.6, 1.0, 0.25, 1, 0.7 + 0.25 * heat, 0.3, fade, -14, 0.7);
+    // light: the hottest nearby flare lights the jet, cloud and terrain (shares the explosion light; explosions win)
+    if (heat > 0.25 && fx.lightLevel <= 0.9 * heat + 0.01) { fx.light.position.copy(p); fx.light.color.copy(_fc); fx.lightLevel = 0.9 * heat; }
+  };
+  MF.flareEnd = function (f) {
+    if (f.ball) { RJ.scene.remove(f.ball); f.ball.material.dispose(); f.core.material.dispose(); f.ball = null; }
+    if (f.rib) { f.rib.dead = true; f.rib = null; }
+  };
   MF.clear = function () {
     for (const d of DEB) RJ.scene.remove(d.m); DEB.length = 0;
     for (const r of RIBBONS) { RJ.scene.remove(r.mesh); r.g.dispose(); } RIBBONS.length = 0;

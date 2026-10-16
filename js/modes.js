@@ -413,6 +413,7 @@
       await RJ.world.prepare(this.center, progress);
       this.player = makePlayer(o.aircraft, pPos, yawFromDir(this.axis), cruiseSpeed(RJ.AIRCRAFT[o.aircraft]) * 1.2);
       this.player.throttle = 0.85;
+      this.infMsl = true; // Dogfight only (Mission overrides setup): the player never runs out of missiles
       RJ.game.allowBombs = false;
       this.score = 0; this.kills = 0; this.deaths = 0; this.t = 0; this.wave = 0; this.ended = false; this.spectate = null;
       this.endT = null;
