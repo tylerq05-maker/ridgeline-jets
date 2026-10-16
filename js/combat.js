@@ -45,6 +45,7 @@
     C.bombs.forEach((b) => RJ.scene.remove(b.mesh)); C.bombs = [];
     if (RJ.missileFx) C.flares.forEach((f) => RJ.missileFx.flareEnd(f));
     C.flares = [];
+    if (C.crowdMesh) C.crowdMesh.visible = false;
     for (const b of C.bullets) b.life = 0;
     C.tracers.count = 0;
   };
@@ -109,8 +110,12 @@
   }
 
   const mtx = new THREE.Matrix4(), qq = new THREE.Quaternion(), sc = V3(1, 1, 1), Z = V3(0, 0, 1);
+  const LIVE = [];
   function updateBullets(dt) {
     let n = 0;
+    LIVE.length = 0;
+    for (const ac of C.aircraft) if (ac.alive) LIVE.push(ac);
+    const ff = RJ.game.friendlyFire;
     for (const b of C.bullets) {
       if (b.life <= 0) continue;
       b.life -= dt;
@@ -118,11 +123,12 @@
       b.p.addScaledVector(b.v, dt);
       b.v.y -= RJ.G0 * dt;
       // hit test: segment vs aircraft spheres
-      for (const ac of C.aircraft) {
-        if (!ac.alive || ac === b.owner || (b.owner && ac.team === b.owner.team && !RJ.game.friendlyFire)) continue;
+      const sx = b.p.x - p0x, sy = b.p.y - p0y, sz = b.p.z - p0z, reach = Math.abs(sx) + Math.abs(sy) + Math.abs(sz);
+      for (const ac of LIVE) {
         const r = ac.radius;
         const dx = ac.pos.x - p0x, dy = ac.pos.y - p0y, dz = ac.pos.z - p0z;
-        const sx = b.p.x - p0x, sy = b.p.y - p0y, sz = b.p.z - p0z;
+        if (Math.abs(dx) > reach + r || Math.abs(dz) > reach + r || Math.abs(dy) > reach + r) continue;
+        if (!ac.alive || ac === b.owner || (b.owner && ac.team === b.owner.team && !ff)) continue;
         const sl = sx * sx + sy * sy + sz * sz;
         let t = sl > 0 ? (dx * sx + dy * sy + dz * sz) / sl : 0;
         t = RJ.clamp(t, 0, 1);
@@ -193,7 +199,7 @@
     for (const e of C.enemiesOf(ac)) {
       const d = tv.copy(e.pos).sub(ac.pos); const dist = d.length();
       const ang = Math.acos(RJ.clamp(d.dot(ac.fwd) / dist, -1, 1));
-      const s = ang * 3000 + dist;
+      const s = ang * 3000 + dist + (C.crowd ? (e._tby || 0) * 1500 : 0); // big battles: spread attackers over the bandits
       if (s < bs) { bs = s; best = e; }
     }
     ac.target = best; ac.lockT = 0; ac.locked = false;
@@ -262,7 +268,7 @@
             f.tested.add(m);
             const fang = Math.acos(RJ.clamp(fr.dot(dir) / fd, -1, 1));
             const jam = m.target.spec.jammer ? 0.15 : 0;
-            if (fang < 30 * DEG && Math.random() < 0.38 + jam) { m.decoyed = f; break; }
+            if (fang < 30 * DEG && Math.random() < (C.crowd ? 0.24 : 0.38) + jam) { m.decoyed = f; break; }
           }
         }
         // proportional navigation toward a lead point
@@ -478,7 +484,27 @@
         this.desired.set(ac.fwd.x, Math.min(ac.fwd.y, -0.25), ac.fwd.z).normalize();
         this.thr = 1; this.ab = true; this.fireWish = false;
       }
+      if (C.crowd) {
+        this.separate();
+        // defensive barrel roll / missile-defeat roll now and then, so the sky isn't full of identical flat turns
+        if ((this.mode === "defend" || this.mode === "evade") && !(this.rollT > 0) && Math.random() < 0.18 * sk.evade) { this.rollT = RJ.rand(1.1, 2.0); this.rollDir = Math.random() < 0.5 ? -1 : 1; }
+      }
       this.avoidTerrain();
+    }
+    /** Big battles: steer clear of the nearest friendly on a collision course (formation slots excepted). */
+    separate() {
+      const ac = this.ac, R = this.mode === "form" ? 32 : 150;
+      let best = null, bd = R * R * 4;
+      for (const o of C.aircraft) {
+        if (o === ac || !o.alive || o.team !== ac.team) continue;
+        const dx = o.pos.x - ac.pos.x, dy = o.pos.y - ac.pos.y, dz = o.pos.z - ac.pos.z, d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 < bd) { bd = d2; best = o; }
+      }
+      if (!best) return;
+      const d = Math.sqrt(bd), rel = tv.copy(best.pos).sub(ac.pos);
+      if (rel.dot(ac.fwd) < -0.3 * d) return; // it's behind us: its problem
+      const closing = -tv2.copy(best.vel).sub(ac.vel).dot(rel) / Math.max(d, 1);
+      if (d < R || (closing > 5 && d / closing < 3)) this.desired.addScaledVector(rel.normalize(), -(0.4 + 0.8 * (1 - Math.min(d / (2 * R), 1)))).addScaledVector(UPV, best.pos.y > ac.pos.y ? -0.2 : 0.2).normalize();
     }
     /** Wingman target choice from the player's order. */
     pickWingTarget() {
@@ -587,7 +613,7 @@
     formUp(spread) {
       const ac = this.ac, L = this.leader;
       this.mode = "form";
-      const d = L.vis.dims, back = 30 + d.len * 1.4 + spread, out = (22 + d.span * 1.2 + spread * 0.6) * this.side;
+      const d = L.vis.dims, k = this.formK || 1, back = (30 + d.len * 1.4) * k + spread, out = ((22 + d.span * 1.2) * k + spread * 0.6) * this.side;
       const flatF = tv3.copy(L.fwd).setY(0).normalize(), flatR = V3(-flatF.z, 0, flatF.x);
       const slot = tv.copy(L.pos).addScaledVector(flatF, -back).addScaledVector(flatR, out).addScaledVector(UPV, 6 + spread * 0.2);
       const lead = tv2.copy(slot).addScaledVector(L.vel, 1.6).sub(ac.pos);
@@ -617,11 +643,11 @@
       const v = Math.max(ac.speed, 80), vdir = tv.copy(ac.vel).normalize();
       const dists = [v * 1.2, v * 2.5, v * 4.5];
       const clear = Math.min(ac.agl, pathClear(ac.pos, vdir, dists));
-      const need = sk.minAgl * (this.role === "runner" || this.role === "strike" ? 0.55 : 1);
+      const need = sk.minAgl * (this.role === "runner" || this.role === "strike" ? 0.55 : 1) * (C.crowd ? 1.3 : 1);
       // diving at a target near the ground: never commit below the floor
       if (ac.agl < need * 2.2 && this.desired.y < -0.1) this.desired.y = -0.1;
       if (clear >= need && ac.agl >= need * 0.7) return;
-      this.mode = "climb";
+      this.mode = "climb"; this.rollT = 0;
       const flat = tv2.copy(ac.fwd).setY(0).normalize();
       let best = null;
       for (const a of [0, -0.6, 0.6, -1.1, 1.1]) {
@@ -655,6 +681,7 @@
       ac.input.thrAbs = this.thr;
       ac.input.ab = this.ab;
       ac.input.brake = this.mode === "form" && this.thr < 0.2;
+      if (this.rollT > 0 && ac.agl > 400 && this.mode !== "climb" && this.mode !== "recover") { this.rollT -= dt; ac.input.roll = this.rollDir; ac.input.pitch = 0.5 * gUse; ac.input.yaw = 0; }
       // fire in bursts
       if (this.fireWish && !ac.overheated) { this.burstT += dt; ac.input.guns = this.burstT < 0.7; if (this.burstT > 1.1) this.burstT = 0; }
       else { ac.input.guns = false; this.burstT = 0; }
@@ -662,9 +689,54 @@
   }
   C.Pilot = Pilot;
 
+  /* ======================= CROWD LOD ======================= */
+  /* In big battles, aircraft beyond ~2.5 km from the camera are drawn as one instanced low-poly silhouette each
+   * (a single draw call for all of them) instead of their full model, and beyond 6 km they simulate at half rate. */
+  function impostorGeo() {
+    const P = [], tri = (a, b, c) => P.push(...a, ...b, ...c);
+    const n = [0, 0, -0.5], t = [0, 0, 0.5], r = [[0.05, 0, -0.15], [0, 0.045, -0.15], [-0.05, 0, -0.15], [0, -0.035, -0.15]];
+    const r2 = r.map((v) => [v[0] * 0.8, v[1] * 0.8, 0.45]);
+    for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; tri(n, r[j], r[i]); tri(r[i], r[j], r2[j]); tri(r[i], r2[j], r2[i]); tri(r2[i], r2[j], t); }
+    tri([0, 0, -0.12], [-0.46, 0, 0.22], [0, 0, 0.3]); tri([0, 0, -0.12], [0, 0, 0.3], [0.46, 0, 0.22]); // wings
+    tri([0, 0, 0.3], [-0.17, 0, 0.5], [0, 0, 0.5]); tri([0, 0, 0.3], [0, 0, 0.5], [0.17, 0, 0.5]); // tailplanes
+    tri([0, 0.03, 0.28], [0, 0.03, 0.5], [0, 0.19, 0.52]); // fin
+    const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3)); g.computeVertexNormals();
+    return g;
+  }
+  const _m4 = new THREE.Matrix4(), _sc = V3(), _ic = new THREE.Color();
+  C.drawCrowd = function (camera) {
+    if (!C.crowdMesh) {
+      C.crowdMesh = new THREE.InstancedMesh(impostorGeo(), new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide }), 160);
+      C.crowdMesh.frustumCulled = false; C.crowdMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      RJ.scene.add(C.crowdMesh);
+    }
+    const cm = C.crowdMesh, cp = camera.position, mode = RJ.game.mode, focus = mode && (mode.player && mode.player.alive ? mode.player : mode.spectate);
+    const myTeam = mode && mode.player ? mode.player.team : "blue";
+    let n = 0;
+    for (const a of C.aircraft) {
+      if (a.state === "dead") { a.lodFar = false; a.simFar = false; continue; }
+      const d = a.pos.distanceTo(cp);
+      const far = a !== focus && !a.isPlayer && (a.lodFar ? d > 2200 : d > 2600);
+      a.simFar = far && d > 6000 && a.state === "flying" && a.agl > 1500;
+      if (far !== !!a.lodFar) { a.lodFar = far; a.mesh.visible = !far; if (!far) a.syncMesh(); }
+      if (!far || n >= 160) continue;
+      // grow slowly with range so distant jets stay readable as specks instead of vanishing
+      const s = a.vis.dims.len * Math.max(1, d / 2000);
+      _m4.compose(a.pos, a.q, _sc.set(s, s, s));
+      cm.setMatrixAt(n, _m4);
+      cm.setColorAt(n, _ic.setHex(a.team === myTeam ? 0x5a6676 : 0x6a5a52));
+      n++;
+    }
+    cm.count = n; cm.visible = n > 0;
+    cm.instanceMatrix.needsUpdate = true; if (cm.instanceColor) cm.instanceColor.needsUpdate = true;
+  };
+
   /* ======================= PER-FRAME ======================= */
-  C.update = function (dt) {
+  C.update = function (dt0) {
+    C.crowd = C.aircraft.length > 16; // big battles switch on the crowd optimisations (LOD, staggered updates)
     for (const ac of C.aircraft) {
+      let dt = dt0;
+      if (ac.simFar) { ac._simAcc = (ac._simAcc || 0) + dt0; if (ac._simAcc < dt0 * 1.99) continue; dt = ac._simAcc; ac._simAcc = 0; } // far away: half-rate physics + AI
       if (ac.pilot) ac.pilot.update(dt);
       ac.update(dt);
       if (ac.alive) {
@@ -677,11 +749,14 @@
       } else ac.firing = false;
       ac.updateVisual(dt);
     }
+    const dt = dt0;
     updateBullets(dt);
     updateMissiles(dt);
     updateFlares(dt);
     updateBombs(dt);
-    // mid-air collisions
+    // mid-air collisions (big battles: every other step, which is still every 17 ms)
+    C._cs = !C._cs;
+    if (C.crowd && C._cs) return;
     const A = C.aircraft;
     for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
       const a = A[i], b = A[j];

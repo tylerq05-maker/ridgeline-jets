@@ -144,9 +144,10 @@
     for (const o of s.others || []) {
       if (o === pl || !o.alive) continue;
       const enemy = o.team !== pl.team;
+      const d = o.pos.distanceTo(pl.pos);
+      if (RJ.combat.crowd && d > (enemy ? 6000 : 2500)) continue; // big battles: bracket the nearby fight, not all 100 jets
       const p = proj(o.pos, cam);
       if (!p.on) continue;
-      const d = o.pos.distanceTo(pl.pos);
       if (o === pl.target) continue;
       x.strokeStyle = enemy ? RED : BLUE; x.fillStyle = x.strokeStyle;
       const r = RJ.clamp(4000 / d, 6, 16);

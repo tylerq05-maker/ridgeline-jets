@@ -117,6 +117,7 @@
     // freeze the live world: hide the live aircraft and missiles, clear transient effects
     P.hidden = [];
     for (const ac of RJ.combat.aircraft) { P.hidden.push([ac.mesh, ac.mesh.visible]); ac.mesh.visible = false; }
+    if (RJ.combat.crowdMesh) RJ.combat.crowdMesh.visible = false;
     for (const m of RJ.combat.missiles) { P.hidden.push([m.mesh, m.mesh.visible]); m.mesh.visible = false; }
     RJ.fx.clear(); RJ.sonic.reset();
     for (const [uid, meta] of R.meta) P.pups.set(uid, makePuppet(meta));

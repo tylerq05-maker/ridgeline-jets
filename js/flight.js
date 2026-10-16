@@ -369,6 +369,7 @@
     }
 
     syncMesh() {
+      if (this.lodFar) return; // drawn as an instanced silhouette (combat.drawCrowd)
       this.mesh.position.copy(this.pos);
       this.mesh.quaternion.copy(this.q);
       if (this.state === "flying" && !this.spec.flight.model) this.mesh.quaternion.multiply(tq2.setFromAxisAngle(AX, this.aoa));
@@ -378,7 +379,18 @@
 
     /** Animate surfaces, exhaust, gear and emit trails. */
     updateVisual(dt) {
+      if (this._crib && this.state !== "flying") RJ.missileFx.contrail(this, null); // shot down: the trail stops here
       if (this.state === "dead") return;
+      if (RJ.combat.crowd && !this.isPlayer) {
+        // big battles: animate AI aircraft once per rendered frame (not every 120 Hz physics step), and distant
+        // ones (drawn as silhouettes) only every 4th frame for their trails
+        this._vdt = (this._vdt || 0) + dt;
+        const fr = RJ.fx.frame || 0;
+        if (this._vfr === fr) return;
+        this._vfr = fr;
+        if (this.lodFar && (fr + this.uid) % 4) return;
+        dt = this._vdt; this._vdt = 0;
+      }
       this.syncMesh();
       if (this.state === "falling") return;
       const vis = this.vis, F = this.spec.flight;
@@ -457,11 +469,17 @@
       const m = this.mesh;
       const ndl = vis.nozzles.length || 1;
       const alt = this.pos.y;
-      if (alt > 7800 && alt < 22000 && F.eng !== "rocket" && F.eng !== "prop") {
-        const a = 0.55 * RJ.smooth(7800, 9500, alt) * (1 - RJ.smooth(18000, 22000, alt));
-        const every = Math.max(1, Math.round(ndl / 4));
-        vis.nozzles.forEach((n, i) => { if (i % every === 0) RJ.fx.contrail(m.localToWorld(tv.copy(n)), this.vel, 1.8 + this.radius * 0.06, a); });
-      }
+      const c0 = (RJ.game && RJ.game.contrailAlt) || 7800; // the Air War sets a lower contrail level (a cold, humid day)
+      if (alt > c0 && alt < 22000 && F.eng !== "rocket" && F.eng !== "prop") {
+        const a = 0.55 * RJ.smooth(c0, c0 + 1700, alt) * (1 - RJ.smooth(18000, 22000, alt));
+        if (RJ.combat.crowd && !this.isPlayer && RJ.missileFx) {
+          // big battles: one continuous ribbon contrail per jet (cheap, and readable from 10 km away)
+          RJ.missileFx.contrail(this, m.localToWorld(tv.copy(vis.nozzles[0] || tv.set(0, 0, 4))));
+        } else {
+          const every = Math.max(1, Math.round(ndl / 4));
+          vis.nozzles.forEach((n, i) => { if (i % every === 0) RJ.fx.contrail(m.localToWorld(tv.copy(n)), this.vel, 1.8 + this.radius * 0.06, a); });
+        }
+      } else if (this._crib) RJ.missileFx.contrail(this, null);
       const g = Math.abs(this.g);
       const gThresh = F.gmax > 5 ? 4.5 : 1.8;
       const hum = RJ.sonic ? RJ.sonic.humidity(this) : 0.5;
@@ -490,6 +508,7 @@
     }
 
     dispose() {
+      if (this._crib) RJ.missileFx.contrail(this, null);
       RJ.scene.remove(this.mesh);
       this.mesh.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
     }

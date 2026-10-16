@@ -116,7 +116,7 @@
     FX.scene = scene;
     const tex = puffTexture();
     const big = RJ.settings.quality === "low" ? 0.6 : 1;
-    FX.smokeP = new Particles(scene, Math.round(16000 * big), false, tex);
+    FX.smokeP = new Particles(scene, Math.round(26000 * big), false, tex);
     FX.fireP = new Particles(scene, Math.round(8000 * big), true, tex);
     FX.light = new THREE.PointLight(0xffaa55, 0, 700, 2);
     scene.add(FX.light);
@@ -127,7 +127,7 @@
   };
 
   FX.update = function (dt, camera, renderer) {
-    FX.time += dt;
+    FX.time += dt; FX.frame = (FX.frame || 0) + 1;
     const ps = renderer.domElement.height / (2 * Math.tan((camera.fov * RJ.DEG) / 2));
     const W = RJ.world;
     for (const P of [FX.smokeP, FX.fireP]) {
@@ -174,7 +174,7 @@
   FX.smoke = (p, v, size, dark, life = 3, alpha = 0.55) =>
     FX.smokeP.spawn(p.x + R(0.5), p.y + R(0.5), p.z + R(0.5), v.x + R(2), v.y + R(2) + 2, v.z + R(2), life, size, size * 4, dark, dark, dark * 1.04, alpha, 1.5, 0.6);
   FX.fire = (p, v, size) => FX.fireP.spawn(p.x, p.y, p.z, v.x + R(3), v.y + R(3), v.z + R(3), 0.35 + Math.random() * 0.3, size, size * 2.2, 1, 0.6, 0.25, 0.9, 4, 1.5);
-  FX.contrail = (p, v, size, alpha = 0.5) => FX.smokeP.spawn(p.x, p.y, p.z, v.x * 0.02, v.y * 0.02, v.z * 0.02, 22, size, size * 9, 0.97, 0.98, 1.0, alpha, 0, 0);
+  FX.contrail = (p, v, size, alpha = 0.5, life = 22) => FX.smokeP.spawn(p.x, p.y, p.z, v.x * 0.02, v.y * 0.02, v.z * 0.02, life, size, size * 9, 0.97, 0.98, 1.0, alpha, 0, 0);
   FX.vapor = (p, v, size, alpha = 0.35) => FX.smokeP.spawn(p.x, p.y, p.z, v.x * 0.1 + R(1), v.y * 0.1 + R(1), v.z * 0.1 + R(1), 0.45 + Math.random() * 0.4, size, size * 2.5, 1, 1, 1, alpha, 0, 1);
   FX.spark = (p, v) => FX.fireP.spawn(p.x, p.y, p.z, v.x + R(30), v.y + R(30), v.z + R(30), 0.25 + Math.random() * 0.25, 0.8, 0.3, 1, 0.85, 0.5, 1, -10, 1);
   FX.muzzle = (p, v, size) => FX.fireP.spawn(p.x, p.y, p.z, v.x, v.y, v.z, 0.05, size, size * 1.6, 1, 0.85, 0.5, 0.9, 0, 0);

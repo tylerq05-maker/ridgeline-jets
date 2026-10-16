@@ -133,7 +133,7 @@
   };
 
   /* ---------------- dogfight setup ---------------- */
-  UI.fightSel = { aircraft: RJ.settings.aircraft, match: "duel", diff: "veteran", arena: "mountains", time: "golden" };
+  UI.fightSel = { aircraft: RJ.settings.aircraft, match: "duel", diff: "veteran", arena: "mountains", time: "golden", side: "coalition" };
   UI.renderFight = function () {
     const s = UI.fightSel;
     let a = RJ.AIRCRAFT[s.aircraft];
@@ -152,6 +152,7 @@
     $("fight-wing-help").textContent = wingy && !RJ.isTouch ? `Wingman calls: ${RJ.keyLabel(k.wingAttack)} attack my target · ${RJ.keyLabel(k.wingCover)} cover me · ${RJ.keyLabel(k.wingForm)} form up · ${RJ.keyLabel(k.wingDefend)} defend objective` : wingy ? "Wingman calls are on the WING buttons in flight." : "";
     chips($("fight-diff"), RJ.modes.DIFFS, s.diff, (v) => { s.diff = v; UI.renderFight(); });
     chips($("fight-arena"), RJ.modes.ARENAS, s.arena, (v) => { s.arena = v; UI.renderFight(); });
+    if ($("fight-side-group")) { $("fight-side-group").hidden = s.match !== "war"; if (RJ.modes.SIDES) chips($("fight-side"), RJ.modes.SIDES, s.side, (v) => { s.side = v; UI.renderFight(); }); }
     chips($("fight-time"), TIMES().filter((t) => t.id !== "dynamic"), s.time, (v) => { s.time = v; UI.renderFight(); });
   };
 

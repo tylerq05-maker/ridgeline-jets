@@ -146,8 +146,12 @@
         // grey, shaded smoke (lit billows, darker cores and edges) so the trail reads against white cloud too
         "  vec3 col = (amb * (0.55 + 0.25 * n) + lit * (0.25 + 0.4 * n)) * (0.62 + 0.38 * edge) + lit * fwd * 0.9;",
         "  col = min(col, vec3(0.86));",
+        "#ifdef CONTRAIL",
+        "  col = min(col * 1.12 + 0.1, vec3(0.97));",                           // ice-crystal contrail: brighter, no exhaust glow
+        "#else",
         "  float heat = exp(-vAge * 9.0);",                                      // white-hot exhaust right behind the motor
         "  col = mix(col, hot * 3.2, heat * 0.85); alpha = max(alpha, heat * edge * 0.95 * vA0 * 1.6);",
+        "#endif",
         "  float f = smoothstep(fogNear, fogFar, vDepth); col = mix(col, fogCol, f * 0.85);",
         "  gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));",
         "}"
@@ -155,7 +159,12 @@
     });
     return ribMat;
   }
-  function newRibbon(T) {
+  let conMat = null;
+  function contrailMaterial() {
+    if (!conMat) { const b = ribbonMaterial(); conMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false, uniforms: b.uniforms, vertexShader: b.vertexShader, fragmentShader: b.fragmentShader, defines: { CONTRAIL: 1 } }); }
+    return conMat;
+  }
+  function newRibbon(T, contrail) {
     const g = new THREE.BufferGeometry(), N = RIB_N * 2;
     g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(N * 3), 3));
     g.setAttribute("born", new THREE.BufferAttribute(new Float32Array(N), 1));
@@ -166,10 +175,11 @@
     for (let i = 0; i < RIB_N - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
     g.setIndex(idx);
     for (let i = 0; i < N; i++) g.attributes.side.array[i] = i % 2 ? 1 : -1;
-    const mesh = new THREE.Mesh(g, ribbonMaterial());
+    const mesh = new THREE.Mesh(g, contrail ? contrailMaterial() : ribbonMaterial());
     mesh.frustumCulled = false; mesh.renderOrder = 6; mesh.layers.set(RJ.LATE);
     RJ.scene.add(mesh);
-    const r = { mesh, g, pts: [], T, dead: false };
+    const r = { mesh, g, pts: [], T, dead: false, contrail: !!contrail };
+    if (contrail) MF.nCon = (MF.nCon || 0) + 1;
     RIBBONS.push(r);
     return r;
   }
@@ -177,7 +187,9 @@
   function drawRibbon(r, now, cam) {
     const P = r.g.attributes.position.array, B = r.g.attributes.born.array, L = r.g.attributes.life.array, A = r.g.attributes.alpha0.array;
     const pts = r.pts, n = pts.length, tr = r.T.trail;
-    for (let i = 0; i < RIB_N; i++) {
+    const N = Math.min(RIB_N, n + 1);
+    r.g.setDrawRange(0, Math.max(0, N - 1) * 6);
+    for (let i = 0; i < N; i++) {
       const k = Math.min(i, n - 1), p = pts[k];
       const j = i * 2;
       if (!p) { B[j] = B[j + 1] = -1e6; L[j] = L[j + 1] = 1; continue; }
@@ -193,7 +205,7 @@
       P[j * 3 + 3] = wx + _s.x * w; P[j * 3 + 4] = wy + _s.y * w; P[j * 3 + 5] = wz + _s.z * w;
       B[j] = B[j + 1] = p.t; L[j] = L[j + 1] = tr.life * p.l; A[j] = A[j + 1] = Math.min(0.95, tr.alpha * 1.7);
     }
-    for (const k of ["position", "born", "life", "alpha0"]) r.g.attributes[k].needsUpdate = true;
+    for (const k of ["position", "born", "life", "alpha0"]) { const at = r.g.attributes[k]; at.updateRange.offset = 0; at.updateRange.count = N * 2 * at.itemSize; at.needsUpdate = true; }
   }
   MF.tickRibbons = function (dt) {
     if (!RIBBONS.length || !RJ.camera) return;
@@ -209,7 +221,9 @@
       const r = RIBBONS[i];
       // drop points that have fully faded; free the ribbon once its missile is gone and the smoke has cleared
       while (r.pts.length && now - r.pts[r.pts.length - 1].t > r.T.trail.life * r.pts[r.pts.length - 1].l) r.pts.pop();
-      if (r.dead && !r.pts.length) { RJ.scene.remove(r.mesh); r.g.dispose(); RIBBONS.splice(i, 1); continue; }
+      if (r.dead && !r.pts.length) { RJ.scene.remove(r.mesh); r.g.dispose(); RIBBONS.splice(i, 1); if (r.contrail) MF.nCon--; continue; }
+      const h = r.pts[0];
+      if (h && (r._f = (r._f || 0) + 1) % 3 && RJ.camera.position.distanceToSquared(tv.set(h.x, h.y, h.z)) > 9e6) continue; // far: refresh every 3rd frame
       drawRibbon(r, now, RJ.camera.position);
     }
   };
@@ -245,7 +259,8 @@
     if (on) {
       // continuous ribbon trail through the path actually flown (curves with every turn), plus a few soft puffs
       // along it for volume; the newest point rides on the nozzle so the trail always starts right at the flame
-      if (!msl.rib) { msl.rib = newRibbon(T); ribbonPush(msl.rib, tail, wind, 1); }
+      // big battles: cap the number of ribbon meshes; distant extra missiles fall back to smoke puffs
+      if (!msl.rib && !msl.noRib) { if ((RIBBONS.length - (MF.nCon || 0) > 40 && d > 2500) || (RJ.combat.crowd && d > 7000)) msl.noRib = true; else { msl.rib = newRibbon(T); ribbonPush(msl.rib, tail, wind, 1); } }
       const r = msl.rib, prev = msl.prevTail || tail.clone(), seg = prev.distanceTo(tail);
       const step = T.trail.step * 1.6;
       msl.spacing += seg;
@@ -253,11 +268,11 @@
       while (msl.spacing >= step && n < 40) {
         msl.spacing -= step; n++;
         const k = seg > 0 ? 1 - msl.spacing / seg : 1, p = tv2.copy(prev).lerp(tail, RJ.clamp(k, 0, 1));
-        ribbonPush(r, p, wind, 1);
-        if (n % 3 === 0) { const tr = T.trail, gr = tr.gray; fx.smokeP.spawn(p.x + R(0.5), p.y + R(0.5), p.z + R(0.5), wind.x + R(1.5), wind.y + 0.8, wind.z + R(1.5), tr.life * 0.7, tr.s0 * 1.4, tr.s1 * 1.1, gr, gr, gr * 1.03, tr.alpha * 0.5, 0.4, 0.25); }
+        if (r) ribbonPush(r, p, wind, 1);
+        if (n % 3 === 0 || !r) { const tr = T.trail, gr = tr.gray; fx.smokeP.spawn(p.x + R(0.5), p.y + R(0.5), p.z + R(0.5), wind.x + R(1.5), wind.y + 0.8, wind.z + R(1.5), tr.life * 0.7, tr.s0 * 1.4, tr.s1 * 1.1, gr, gr, gr * 1.03, tr.alpha * 0.5, 0.4, 0.25); }
         if (T.ion && Math.random() < 0.9) { const a = msl.t * 30 + n; fx.fireP.spawn(p.x + Math.cos(a) * 0.9, p.y + Math.sin(a) * 0.9, p.z, R(2), R(2), R(2), 0.6 + Math.random() * 0.4, 1.4, 0.3, T.ion[0], T.ion[1], T.ion[2], 1, 0, 0.5); }
       }
-      if (r.pts.length) { const h = r.pts[0]; h.x = tail.x; h.y = tail.y; h.z = tail.z; h.t = RJ.fx.time || 0; }
+      if (r && r.pts.length) { const h = r.pts[0]; h.x = tail.x; h.y = tail.y; h.z = tail.z; h.t = RJ.fx.time || 0; }
       msl.prevTail = tail.clone();
       // glowing exhaust right behind the nozzle
       const hot = T.ion || [1, 0.62, 0.28];
@@ -265,6 +280,20 @@
     } else msl.prevTail = null;
     // hard turns: vapour peels off the fins (a visible cue the missile is pulling hard)
     if (turn > 0.5 && Math.random() < turn * 0.5 && d < 1500) fx.vapor(msl.pos, msl.vel, 1.4, 0.35 * Math.min(1, turn));
+  };
+
+  /* ---------------- contrails (big battles): one continuous ribbon per jet ----------------
+   * Long, widening ice trails are what make a distant air battle readable: a few-pixel jet is invisible at
+   * 8 km, its 3 km contrail is not. p = nozzle position, or null to end the trail (left the contrail band, hit). */
+  const CON_T = { trail: { life: 14, s0: 5, s1: 40, step: 35, gray: 0.97, alpha: 0.4 } };
+  const CWIND = new THREE.Vector3(1.2, 0, 0.8);
+  MF.contrail = function (ac, p) {
+    let r = ac._crib;
+    if (!p) { if (r) { r.dead = true; ac._crib = null; } return; }
+    if (!r) { r = ac._crib = newRibbon(CON_T, true); ribbonPush(r, p, CWIND, 1); ribbonPush(r, p, CWIND, 1); }
+    const h = r.pts[0], q = r.pts[1];
+    if (q && (p.x - q.x) ** 2 + (p.y - q.y) ** 2 + (p.z - q.z) ** 2 > CON_T.trail.step ** 2) ribbonPush(r, p, CWIND, 1); // fix the old head, start a new one
+    else if (h) { h.x = p.x; h.y = p.y; h.z = p.z; h.t = RJ.fx.time || 0; }
   };
 
   /* ---------------- impact ---------------- */
@@ -357,7 +386,9 @@
     }
     // smoke ribbon through the path flown, plus a few billows for volume
     const wx = RJ.world.WEATHER[RJ.world.env.weather] || {}, wind = tv3.copy(WIND).multiplyScalar((wx.wind || 6) * 0.6);
-    if (heat > 0.12) {
+    if (f.noRib === undefined) f.noRib = RJ.combat.crowd && (d > 3000 || RIBBONS.length - (MF.nCon || 0) > 40); // big battles: distant flares skip the ribbon
+    if (heat > 0.12 && f.noRib) { if (Math.random() < dt * 12) fx.smokeP.spawn(p.x, p.y, p.z, wind.x, wind.y + 0.8, wind.z, 3, 2, 9, 0.95, 0.95, 0.97, 0.4 * heat, 0.4, 0.3); }
+    else if (heat > 0.12) {
       if (!f.rib) { f.rib = newRibbon(FLARE_T); ribbonPush(f.rib, p, wind, 1); }
       const prev = f.prev || p.clone(), seg = prev.distanceTo(p), step = FLARE_T.trail.step;
       f.spacing += seg;
@@ -384,6 +415,6 @@
   };
   MF.clear = function () {
     for (const d of DEB) RJ.scene.remove(d.m); DEB.length = 0;
-    for (const r of RIBBONS) { RJ.scene.remove(r.mesh); r.g.dispose(); } RIBBONS.length = 0;
+    for (const r of RIBBONS) { RJ.scene.remove(r.mesh); r.g.dispose(); } RIBBONS.length = 0; MF.nCon = 0;
   };
 })(window.RJ);

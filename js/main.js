@@ -476,7 +476,7 @@
     RJ.ui.show("scr-loading");
     setLoad(0, kind === "mp" ? "Joining your squad…" : kind === "fight" ? "Briefing pilots and generating the arena…" : kind === "challenge" ? "Laying out the course…" : "Generating terrain…");
     RJ.fx.clear();
-    const mode = kind === "mp" ? new RJ.mp.Multi(opts) : kind === "free" ? new RJ.modes.FreeFlight(opts) : kind === "challenge" ? new RJ.challenges.Challenge(opts) : RJ.modes.isMission(opts.match) ? new RJ.modes.Mission(opts) : new RJ.modes.Dogfight(opts);
+    const mode = kind === "mp" ? new RJ.mp.Multi(opts) : kind === "free" ? new RJ.modes.FreeFlight(opts) : kind === "challenge" ? new RJ.challenges.Challenge(opts) : RJ.modes.isMission(opts.match) ? new RJ.modes.Mission(opts) : opts.match === "war" && RJ.modes.AirWar ? new RJ.modes.AirWar(opts) : new RJ.modes.Dogfight(opts);
     RJ.game.mode = mode;
     try { await mode.setup((p) => setLoad(p)); }
     catch (e) { console.error(e); RJ.ui.toast("Couldn't start the flight: " + e.message); RJ.quitToMenu(); return; }
@@ -606,6 +606,7 @@
     }
     if (steps === SIM_MAX) simAcc = Math.min(simAcc, SIM_DT); // too slow to keep up: drop time rather than spiral
     applyInterp(simAcc / SIM_DT);
+    if (RJ.combat.crowd) RJ.combat.drawCrowd(camera);
     const player = RJ.game.mode.player;
     const focus = !player.alive && mode.spectate && mode.spectate.alive ? mode.spectate : player;
     // continuous shake sources: transonic buffet and low, fast turbulence
