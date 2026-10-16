@@ -41,6 +41,7 @@
     C.aircraft.forEach((a) => a.dispose());
     C.aircraft = [];
     C.missiles.forEach((m) => RJ.scene.remove(m.mesh)); C.missiles = [];
+    if (RJ.missileFx) RJ.missileFx.clear();
     C.bombs.forEach((b) => RJ.scene.remove(b.mesh)); C.bombs = [];
     C.flares = [];
     for (const b of C.bullets) b.life = 0;
@@ -209,15 +210,17 @@
   C.launchMissile = function (ac, target) {
     const m = ac.spec.msl || {};
     if (!target) return false;
-    const mesh = C.missileTpl.clone();
+    const MF = RJ.missileFx, type = MF ? MF.typeFor(ac) : null;
+    const mesh = MF ? MF.mesh(type) : C.missileTpl.clone();
     RJ.scene.add(mesh);
     const side = ac.missiles % 2 ? 1 : -1;
     const p = ac.pos.clone().addScaledVector(ac.right, side * Math.min(3, ac.vis.dims.span * 0.25)).addScaledVector(ac.up, -1.2);
     const msl = {
-      owner: ac, target, pos: p, vel: ac.vel.clone().addScaledVector(ac.up, -12), mesh,
-      speed: ac.speed, top: (m.speed || 950), t: 0, burn: 3.2, life: 16, decoyed: null, lost: false, trailT: 0,
+      owner: ac, target, pos: p, vel: ac.vel.clone().addScaledVector(ac.up, -12), mesh, type,
+      speed: ac.speed, top: (m.speed || 950), t: 0, burn: 3.2, life: 16, decoyed: null, lost: false, trailT: 0, ign: 0,
       gLimit: m.speed ? 25 : 32, dmg: m.speed ? 95 : 80
     };
+    if (MF) MF.launch(msl); // per-type turn limit, ignition delay, release puff
     if (m.cone >= 180) {
       // all-aspect defensive launch: eject the missile toward the target so its seeker starts on it
       msl.vel.copy(target.pos).sub(p).normalize().multiplyScalar(Math.max(ac.speed * 0.6, 180));
@@ -230,6 +233,7 @@
   };
 
   function updateMissiles(dt) {
+    if (RJ.missileFx) RJ.missileFx.tick(dt);
     for (let i = C.missiles.length - 1; i >= 0; i--) {
       const m = C.missiles[i];
       m.t += dt; m.life -= dt;
@@ -267,6 +271,7 @@
         if (m.target && m.target.spec.jammer && !m.decoyed) maxTurn *= 0.6;
         const ang = Math.acos(RJ.clamp(aim.dot(dir), -1, 1));
         if (ang > 1e-4) dir.lerp(aim, Math.min(1, maxTurn / ang)).normalize();
+        m.turn = RJ.damp(m.turn || 0, maxTurn > 0 ? Math.min(ang, maxTurn) / maxTurn : 0, 8, dt); // 1 = pulling at the limit
         // proximity fuse
         if (dist < (m.decoyed ? 10 : 14 + (m.target ? m.target.radius * 0.4 : 0))) { detonate(m, i, m.decoyed ? null : m.target); continue; }
       }
@@ -274,19 +279,20 @@
       m.pos.addScaledVector(m.vel, dt);
       m.mesh.position.copy(m.pos);
       m.mesh.quaternion.setFromUnitVectors(Z, tv2.copy(dir).negate());
-      const fl = m.mesh.getObjectByName("flame"); if (fl) fl.visible = m.t < m.burn;
-      m.trailT += dt;
-      if (m.trailT > 0.02) {
-        m.trailT = 0;
-        if (m.t < m.burn) { RJ.fx.smoke(m.pos, tv2.copy(m.vel).multiplyScalar(0.02), 1.3, 0.9, 3.5, 0.6); RJ.fx.fire(m.pos, tv2.copy(m.vel).multiplyScalar(0.5), 1.2); }
+      if (RJ.missileFx && m.type) RJ.missileFx.update(m, dt, m.turn || 0);
+      else {
+        const fl = m.mesh.getObjectByName("flame"); if (fl) fl.visible = m.t < m.burn;
+        m.trailT += dt;
+        if (m.trailT > 0.02) { m.trailT = 0; if (m.t < m.burn) { RJ.fx.smoke(m.pos, tv2.copy(m.vel).multiplyScalar(0.02), 1.3, 0.9, 3.5, 0.6); RJ.fx.fire(m.pos, tv2.copy(m.vel).multiplyScalar(0.5), 1.2); } }
       }
       const gnd = RJ.world.ground(m.pos.x, m.pos.z);
       if (m.pos.y < gnd || m.life <= 0) { detonate(m, i, null); continue; }
     }
   }
   function detonate(m, i, hit) {
-    RJ.fx.explosion(m.pos, 0.6, null);
-    RJ.emit("explosion", { pos: m.pos.clone(), big: 0.6 });
+    if (RJ.missileFx && m.type) RJ.missileFx.impact(m, hit && hit.alive ? hit : null);
+    else RJ.fx.explosion(m.pos, 0.6, null);
+    RJ.emit("explosion", { pos: m.pos.clone(), big: 0.6 * (m.boom || 1) });
     if (m.owner && m.owner.remote) { /* cosmetic copy of another player's missile: their game scores it */ }
     else if (hit && hit.alive) {
       hit.damage(m.dmg * RJ.rand(0.85, 1.15), m.owner, "missile");
@@ -297,7 +303,7 @@
       const d = m.pos.distanceTo(m.target.pos);
       if (d < 35) m.target.damage(m.dmg * 0.4 * (1 - d / 35), m.owner, "missile");
     }
-    RJ.scene.remove(m.mesh);
+    if (RJ.missileFx && m.type) RJ.missileFx.release(m); else RJ.scene.remove(m.mesh); // the smoke trail lingers and fades
     C.missiles.splice(i, 1);
     if (m.target) { const k = m.target.incoming.indexOf(m); if (k >= 0) m.target.incoming.splice(k, 1); }
   }

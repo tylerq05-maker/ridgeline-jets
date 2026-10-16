@@ -334,7 +334,9 @@
       this.state = "falling";
       this.fallT = 0;
       this.spin.set(RJ.rand(-1.5, 1.5), RJ.rand(-0.6, 0.6), RJ.rand(-3, 3));
-      RJ.fx.explosion(this.pos, 1 + this.radius / 12, this.vel);
+      const MF = RJ.missileFx;
+      if (MF) { MF.explosion(this.pos, 1.3 + this.radius / 10, this.vel); MF.debris(this.pos, this.vel, 8 + Math.round(this.radius / 2)); }
+      else RJ.fx.explosion(this.pos, 1 + this.radius / 12, this.vel);
       RJ.fx.debris(this.pos, this.vel, 1);
       RJ.emit("explosion", { pos: this.pos.clone(), big: 1 });
     }

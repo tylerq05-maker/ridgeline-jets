@@ -163,7 +163,7 @@
       const sp = 70 * s;
       FX.fireP.spawn(p.x, p.y, p.z, vx + R(sp), vy + R(sp) + 10, vz + R(sp), 0.6 + Math.random() * 1.0, 1.2, 0.6, 1, 0.8, 0.5, 1, -25, 0.6);
     }
-    FX.light.position.copy(p); FX.lightLevel = Math.max(FX.lightLevel, Math.min(2, s));
+    FX.light.position.copy(p); FX.light.color.setHex(0xffaa55); FX.lightLevel = Math.max(FX.lightLevel, Math.min(2, s));
   };
   FX.debris = function (p, vel, s = 1) {
     for (let i = 0; i < 18 * s; i++) {

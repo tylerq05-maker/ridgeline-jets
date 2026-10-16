@@ -1,0 +1,331 @@
+/* Jet City — missile visuals: four missile types with their own model, motor, trail and warhead; launch
+ * ignition, continuous curving smoke trails, turn cues, and layered impact explosions with a shockwave, light,
+ * camera shake and real falling debris. Gameplay (guidance, hits, damage) stays in combat.js. */
+(function (RJ) {
+  "use strict";
+  const MF = (RJ.missileFx = {});
+  const V3 = RJ.V3;
+  const tv = V3(), tv2 = V3(), tv3 = V3();
+  const R = (a) => (Math.random() - 0.5) * 2 * a;
+
+  /* ---------------- types ----------------
+   * len/r: body (m) · fins: tail fin span · can: canards (heat seekers steer with forward fins) · body/band colours
+   * core/flame: exhaust colours · trail: smoke life (s), size, spacing (m), brightness · boom: warhead size · g: turn limit */
+  const TYPES = {
+    ir: { name: "heat", len: 2.9, r: 0.064, fins: 0.42, can: true, body: 0xe9e9e4, band: 0xd6a51c, nose: 0x2b3440, core: 0xfff4d8, flame: 0xff8a30,
+      trail: { life: 5.5, s0: 1.0, s1: 7, step: 3, gray: 0.92, alpha: 0.5 }, boom: 0.85, g: 38, glow: 0xffb35a, ball: 0xff6a12 },
+    radar: { name: "radar", len: 3.65, r: 0.09, fins: 0.5, mid: true, body: 0xc9ccce, band: 0xd6a51c, nose: 0xb9bcbf, core: 0xfff8e8, flame: 0xffa040,
+      trail: { life: 8, s0: 1.3, s1: 10, step: 3.5, gray: 0.95, alpha: 0.55 }, boom: 1.0, g: 30, glow: 0xffc070, ball: 0xff8a1e },
+    heavy: { name: "heavy", len: 4.0, r: 0.19, fins: 0.9, mid: true, body: 0xdedfdb, band: 0x8a5a2b, nose: 0xc9cbc6, core: 0xffe9c0, flame: 0xff7020,
+      trail: { life: 9, s0: 2.2, s1: 16, step: 4, gray: 0.88, alpha: 0.6 }, boom: 1.6, g: 22, glow: 0xff9a40, ball: 0xff5200 },
+    exp: { name: "experimental", len: 3.2, r: 0.11, fins: 0.5, body: 0x30343a, band: 0x3ad7ff, nose: 0x1a1d22, core: 0xe8fbff, flame: 0x39c8ff,
+      trail: { life: 3.5, s0: 0.8, s1: 5, step: 3, gray: 0.6, alpha: 0.28 }, boom: 1.25, g: 34, glow: 0x5ad8ff, ball: 0x1f9dff, ion: [0.35, 0.8, 1.0] }
+  };
+  MF.TYPES = TYPES;
+  /** Which missile this aircraft fires (mixed loadouts alternate, e.g. "AIM-120 + AIM-9X"). */
+  MF.typeFor = function (ac) {
+    const n = ((ac.spec.msl && ac.spec.msl.name) || "").toLowerCase(), k = ac.missiles || 0;
+    if (/proton|concussion|hypersonic/.test(n)) return "exp";
+    if (/aim-54|aim-47|phoenix/.test(n)) return /aim-9/.test(n) && k % 2 ? "ir" : "heavy";
+    const ir = /aim-9|sidewinder/.test(n), rad = /aim-120|aim-7|amraam|defensive|fictional/.test(n);
+    if (ir && rad) return k % 2 ? "ir" : "radar";
+    return ir ? "ir" : "radar";
+  };
+
+  /* ---------------- models ---------------- */
+  let haloTex = null;
+  function halo() {
+    if (!haloTex) {
+      const c = document.createElement("canvas"); c.width = c.height = 64;
+      const x = c.getContext("2d"), g = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+      g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.15, "rgba(255,240,210,0.85)"); g.addColorStop(0.45, "rgba(255,160,80,0.25)"); g.addColorStop(1, "rgba(255,120,40,0)");
+      x.fillStyle = g; x.fillRect(0, 0, 64, 64); haloTex = new THREE.CanvasTexture(c);
+    }
+    return haloTex;
+  }
+  const tpl = {};
+  function build(type) {
+    const T = TYPES[type], g = new THREE.Group(), L = T.len, r = T.r;
+    g.userData = { flames: [], nozzles: [] };
+    const std = (c, ro, me, ex) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: ro, metalness: me }, ex || {}));
+    const body = std(T.body, 0.42, 0.35), band = std(T.band, 0.5, 0.2), dark = std(0x24272b, 0.6, 0.6);
+    const nose = type === "ir" ? std(T.nose, 0.05, 0.9, { envMapIntensity: 1.8 }) : std(T.nose, 0.35, 0.3);
+    const cyl = (rad, len, z, mat, rt) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(rt != null ? rt : rad, rad, len, 14), mat); m.geometry.rotateX(Math.PI / 2); m.position.z = z; g.add(m); return m; };
+    cyl(r, L * 0.78, 0.04 * L, body);
+    // ogive radome / seeker dome
+    const pts = []; for (let i = 0; i <= 8; i++) { const t = i / 8; pts.push(new THREE.Vector2(r * Math.sqrt(1 - Math.pow(1 - t, 2)) + 0.0001, -L * 0.5 + t * L * 0.16)); }
+    const ng = new THREE.LatheGeometry(pts, 14); ng.rotateX(Math.PI / 2); // lathe axis y → missile axis z: tip at the front (−z)
+    g.add(new THREE.Mesh(ng, nose));
+    cyl(r * 1.01, L * 0.05, -L * 0.28, band);                 // warhead band
+    cyl(r * 1.01, L * 0.04, L * 0.08, std(0x6b4a2a, 0.6, 0.2)); // rocket-motor band
+    cyl(r * 0.82, L * 0.06, L * 0.47, dark, r * 0.7);          // nozzle
+    // cruciform fins with a swept planform; heat seekers get forward canards, radar missiles mid-body strakes
+    const finShape = (span, root, tip, sweep) => { const s = new THREE.Shape(); s.moveTo(0, 0); s.lineTo(span, sweep); s.lineTo(span, sweep + tip); s.lineTo(0, root); s.closePath(); return s; };
+    const addFins = (span, root, tip, sweep, z) => {
+      const geo = new THREE.ExtrudeGeometry(finShape(span, root, tip, sweep), { depth: 0.012, bevelEnabled: false });
+      geo.translate(r * 0.9, 0, -0.006); geo.rotateX(Math.PI / 2); // span along x, chord along z
+      for (let k = 0; k < 4; k++) { const f = new THREE.Mesh(geo, body); f.position.z = z; const wrap = new THREE.Group(); wrap.rotation.z = k * Math.PI / 2 + Math.PI / 4; wrap.add(f); g.add(wrap); }
+    };
+    addFins(T.fins * 0.55, L * 0.11, L * 0.05, L * 0.05, L * 0.34);
+    if (T.can) addFins(T.fins * 0.32, L * 0.06, L * 0.025, L * 0.025, -L * 0.33);
+    if (T.mid) addFins(T.fins * 0.22, L * 0.2, L * 0.12, L * 0.06, -L * 0.08);
+    // motor plume (the same layered flame shader as the jets: core, envelope, shock diamonds)
+    RJ.acParts.engine(g, { metal: dark }, r * 0.75, 0, 0, L * 0.5, { noNozzle: true, rocket: true, color: T.flame, core: T.core });
+    const F = g.userData.flames[0];
+    F.flame.name = "mflame"; F.flame.userData = { r: F.r }; F.glow.name = "mglow";
+    // motor fireball: normal-blended (not additive) so it stays a vivid orange ball even against white cloud,
+    // with an additive white-hot centre on top for bloom
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: halo(), color: T.ball, transparent: true, opacity: 1, depthWrite: false, fog: false }));
+    sp.position.z = L * 0.55; sp.layers.set(RJ.LATE); sp.name = "mspr"; sp.renderOrder = 11; g.add(sp);
+    const hc = new THREE.Sprite(new THREE.SpriteMaterial({ map: halo(), color: 0xffffff, transparent: true, opacity: 1, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    hc.scale.setScalar(0.4); hc.layers.set(RJ.LATE); hc.renderOrder = 12; sp.add(hc);
+    g.traverse((o) => { if (o.isMesh && o.material && o.material.isMeshStandardMaterial) o.castShadow = true; });
+    g.userData = {}; // clone() deep-copies userData as JSON: keep it plain and find the parts by name instead
+    return g;
+  }
+  MF.mesh = function (type) {
+    if (!tpl[type]) tpl[type] = build(type);
+    const m = tpl[type].clone();
+    const fl = m.getObjectByName("mflame"), gl = m.getObjectByName("mglow");
+    m.userData = { flames: [{ flame: fl, glow: gl, mat: fl.material, core: fl.children[0] || null, halo: gl.children[0] || null, r: fl.userData.r }], halo: m.getObjectByName("mspr") };
+    return m;
+  };
+
+  /* ---------------- launch ---------------- */
+  MF.launch = function (msl) {
+    const T = TYPES[msl.type];
+    // visuals only: the motor's light-up flash plays a moment after release; guidance and thrust are untouched
+    msl.ign = 0.12; msl.lit = false; msl.prevTail = null; msl.spacing = 0; msl.boom = T.boom;
+    // rail release puff
+    for (let i = 0; i < 6; i++) RJ.fx.smoke(msl.pos, tv.copy(msl.vel).multiplyScalar(0.85).add(tv2.set(R(6), R(6), R(6))), 1.2, 0.9, 1.4, 0.35);
+  };
+  function ignite(msl) {
+    const T = TYPES[msl.type], p = msl.pos, fx = RJ.fx;
+    msl.lit = true;
+    // ignition: a hot white flash, a burst of flame and a ring of exhaust smoke thrown out behind the motor
+    for (let i = 0; i < 10; i++) fx.fireP.spawn(p.x, p.y, p.z, msl.vel.x * 0.6 + R(25), msl.vel.y * 0.6 + R(25), msl.vel.z * 0.6 + R(25), 0.12 + Math.random() * 0.12, 2.5 * T.boom, 9 * T.boom, 1, 0.95, 0.85, 1, 0, 2);
+    for (let i = 0; i < 14; i++) { const v = tv.set(R(1), R(1), R(1)).normalize().multiplyScalar(14 + Math.random() * 10).addScaledVector(msl.vel, 0.7); fx.smokeP.spawn(p.x, p.y, p.z, v.x, v.y, v.z, 2.2 + Math.random() * 1.5, 1.5 * T.boom, 9 * T.boom, 0.86, 0.86, 0.88, 0.55, 1, 1.4); }
+    fx.light.position.copy(p); fx.light.color.setHex(T.glow); fx.lightLevel = Math.max(fx.lightLevel, 0.6);
+    if (msl.owner && msl.owner.isPlayer && RJ.camKick) RJ.camKick(0.25);
+  }
+
+  /* ---------------- ribbon trail ----------------
+   * A continuous camera-facing smoke ribbon through the points the missile actually flew: it widens and drifts
+   * with age, breaks up with noise at the edges, is lit by the sun and sky, and has a white-hot glowing head right
+   * behind the motor. It outlives the missile and fades out on its own. */
+  const RIB_N = 220, RIBBONS = [];
+  let ribMat = null;
+  function ribbonMaterial() {
+    if (ribMat) return ribMat;
+    ribMat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false,
+      uniforms: { now: { value: 0 }, lit: { value: new THREE.Color(1, 1, 1) }, amb: { value: new THREE.Color(0.6, 0.65, 0.7) }, hot: { value: new THREE.Color(1, 0.6, 0.25) },
+        fogCol: { value: new THREE.Color() }, fogNear: { value: 1e5 }, fogFar: { value: 2e5 }, sunDir: { value: new THREE.Vector3(0, 1, 0) } },
+      vertexShader: [
+        "attribute float born; attribute float side; attribute float life; attribute float alpha0;",
+        "uniform float now; varying float vAge; varying float vSide; varying float vLife; varying float vA0; varying vec3 vW; varying float vDepth;",
+        "void main(){ vAge = now - born; vSide = side; vLife = life; vA0 = alpha0; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz;",
+        "  vec4 mv = viewMatrix * w; vDepth = -mv.z; gl_Position = projectionMatrix * mv; }"
+      ].join("\n"),
+      fragmentShader: [
+        "uniform float now; uniform vec3 lit; uniform vec3 amb; uniform vec3 hot; uniform vec3 fogCol; uniform float fogNear; uniform float fogFar; uniform vec3 sunDir;",
+        "varying float vAge; varying float vSide; varying float vLife; varying float vA0; varying vec3 vW; varying float vDepth;",
+        "float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }",
+        "float n3(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
+        "  return mix(mix(mix(h(i), h(i + vec3(1,0,0)), f.x), mix(h(i + vec3(0,1,0)), h(i + vec3(1,1,0)), f.x), f.y),",
+        "             mix(mix(h(i + vec3(0,0,1)), h(i + vec3(1,0,1)), f.x), mix(h(i + vec3(0,1,1)), h(i + vec3(1,1,1)), f.x), f.y), f.z); }",
+        "void main(){",
+        "  float a = vAge / vLife; if (a >= 1.0) discard;",
+        "  float edge = 1.0 - abs(vSide);",                                   // 0 at the ribbon edge, 1 on its centre line
+        "  vec3 q = vW * 0.12 + vec3(0.0, now * 0.35, 0.0);",
+        "  float n = n3(q) * 0.6 + n3(q * 2.7) * 0.4;",                         // billowing breakup so it never reads as a tube
+        "  float body = smoothstep(0.0, 0.55 + 0.35 * n, edge);",
+        "  float alpha = body * vA0 * (1.0 - a) * (1.0 - a) * mix(1.0, 0.55 + 0.6 * n, smoothstep(0.02, 0.3, a));",
+        "  vec3 V = normalize(vW - cameraPosition);",
+        "  float fwd = pow(max(dot(V, sunDir), 0.0), 6.0);",                    // forward scattering: the trail glows when backlit
+        // grey, shaded smoke (lit billows, darker cores and edges) so the trail reads against white cloud too
+        "  vec3 col = (amb * (0.55 + 0.25 * n) + lit * (0.25 + 0.4 * n)) * (0.62 + 0.38 * edge) + lit * fwd * 0.9;",
+        "  col = min(col, vec3(0.86));",
+        "  float heat = exp(-vAge * 9.0);",                                      // white-hot exhaust right behind the motor
+        "  col = mix(col, hot * 3.2, heat * 0.85); alpha = max(alpha, heat * edge * 0.95 * vA0 * 1.6);",
+        "  float f = smoothstep(fogNear, fogFar, vDepth); col = mix(col, fogCol, f * 0.85);",
+        "  gl_FragColor = vec4(col, clamp(alpha, 0.0, 1.0));",
+        "}"
+      ].join("\n")
+    });
+    return ribMat;
+  }
+  function newRibbon(T) {
+    const g = new THREE.BufferGeometry(), N = RIB_N * 2;
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+    g.setAttribute("born", new THREE.BufferAttribute(new Float32Array(N), 1));
+    g.setAttribute("side", new THREE.BufferAttribute(new Float32Array(N), 1));
+    g.setAttribute("life", new THREE.BufferAttribute(new Float32Array(N), 1));
+    g.setAttribute("alpha0", new THREE.BufferAttribute(new Float32Array(N), 1));
+    const idx = [];
+    for (let i = 0; i < RIB_N - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    g.setIndex(idx);
+    for (let i = 0; i < N; i++) g.attributes.side.array[i] = i % 2 ? 1 : -1;
+    const mesh = new THREE.Mesh(g, ribbonMaterial());
+    mesh.frustumCulled = false; mesh.renderOrder = 6; mesh.layers.set(RJ.LATE);
+    RJ.scene.add(mesh);
+    const r = { mesh, g, pts: [], T, dead: false };
+    RIBBONS.push(r);
+    return r;
+  }
+  const _d = V3(), _s = V3(), _c = V3();
+  function drawRibbon(r, now, cam) {
+    const P = r.g.attributes.position.array, B = r.g.attributes.born.array, L = r.g.attributes.life.array, A = r.g.attributes.alpha0.array;
+    const pts = r.pts, n = pts.length, tr = r.T.trail;
+    for (let i = 0; i < RIB_N; i++) {
+      const k = Math.min(i, n - 1), p = pts[k];
+      const j = i * 2;
+      if (!p) { B[j] = B[j + 1] = -1e6; L[j] = L[j + 1] = 1; continue; }
+      const age = now - p.t;
+      // drift with the wind and spread out as the smoke ages
+      const wx = p.x + p.wx * age, wy = p.y + p.wy * age + age * 0.5, wz = p.z + p.wz * age;
+      const q = pts[Math.min(k + 1, n - 1)], o = pts[Math.max(k - 1, 0)];
+      _d.set(q.x - o.x, q.y - o.y, q.z - o.z); if (_d.lengthSq() < 1e-6) _d.set(0, 0, 1);
+      _c.set(wx - cam.x, wy - cam.y, wz - cam.z);
+      _s.crossVectors(_d, _c).normalize();
+      const w = (tr.s0 + (tr.s1 - tr.s0) * Math.sqrt(Math.min(age / tr.life, 1))) * 0.5 * p.w;
+      P[j * 3] = wx - _s.x * w; P[j * 3 + 1] = wy - _s.y * w; P[j * 3 + 2] = wz - _s.z * w;
+      P[j * 3 + 3] = wx + _s.x * w; P[j * 3 + 4] = wy + _s.y * w; P[j * 3 + 5] = wz + _s.z * w;
+      B[j] = B[j + 1] = p.t; L[j] = L[j + 1] = tr.life * p.l; A[j] = A[j + 1] = Math.min(0.95, tr.alpha * 1.7);
+    }
+    for (const k of ["position", "born", "life", "alpha0"]) r.g.attributes[k].needsUpdate = true;
+  }
+  MF.tickRibbons = function (dt) {
+    if (!RIBBONS.length || !RJ.camera) return;
+    const now = RJ.fx.time || 0, W = RJ.world, U = ribbonMaterial().uniforms;
+    if (now === MF._ribNow) return; // geometry once per rendered frame, not per physics step
+    MF._ribNow = now;
+    U.now.value = now;
+    U.lit.value.copy(W.sun.color).multiplyScalar((W.sunIntensity || 1) * (W.night ? 0.25 : 0.95));
+    U.amb.value.copy(W.hemi.color).multiplyScalar((W.hemiIntensity || 0.6) * 1.2);
+    U.sunDir.value.copy(W.sunDir);
+    const fog = W.scene.fog; U.fogCol.value.copy(fog.color); U.fogNear.value = Math.min(fog.near, 6000); U.fogFar.value = Math.min(fog.far, 30000);
+    for (let i = RIBBONS.length - 1; i >= 0; i--) {
+      const r = RIBBONS[i];
+      // drop points that have fully faded; free the ribbon once its missile is gone and the smoke has cleared
+      while (r.pts.length && now - r.pts[r.pts.length - 1].t > r.T.trail.life * r.pts[r.pts.length - 1].l) r.pts.pop();
+      if (r.dead && !r.pts.length) { RJ.scene.remove(r.mesh); r.g.dispose(); RIBBONS.splice(i, 1); continue; }
+      drawRibbon(r, now, RJ.camera.position);
+    }
+  };
+  function ribbonPush(r, p, wind, w) {
+    const now = RJ.fx.time || 0;
+    r.pts.unshift({ x: p.x, y: p.y, z: p.z, t: now, wx: wind.x + R(0.8), wy: wind.y + R(0.4), wz: wind.z + R(0.8), w: w * (0.85 + Math.random() * 0.3), l: 0.85 + Math.random() * 0.3 });
+    if (r.pts.length > RIB_N) r.pts.length = RIB_N;
+  }
+  MF.release = function (msl) { if (msl.rib) { msl.rib.dead = true; msl.rib = null; } if (msl.mesh) RJ.scene.remove(msl.mesh); };
+
+  /* ---------------- flight ---------------- */
+  const WIND = new THREE.Vector3(0.8, 0, 0.6);
+  MF.update = function (msl, dt, turn) {
+    const T = TYPES[msl.type], M = msl.mesh, U = M.userData, burning = msl.t < msl.burn;
+    if (!msl.lit && msl.t >= msl.ign) ignite(msl);
+    const on = msl.lit && burning, boost = msl.t < msl.ign + 0.6 ? 1.4 : 1; // brighter while boosting off the rail
+    const cam = RJ.camera, d = cam ? cam.position.distanceTo(msl.pos) : 500;
+    for (const f of U.flames) {
+      const u = f.mat.uniforms; u.time.value += dt; u.power.value = on ? 1 : 0; u.ab.value = on ? 1 : 0; u.kick.value = on && boost > 1 ? 0.6 : 0;
+      f.flame.visible = on; f.glow.visible = on;
+      // a long, fat, flickering rocket plume (rocket motors run far hotter than a jet's afterburner)
+      const fw = Math.max(f.r * 2.1, 0.2) * (1 + Math.random() * 0.2);
+      f.flame.scale.set(fw, fw, on ? (2.6 + Math.random() * 0.9 + turn * 1.2) * boost * (T.boom > 1.4 ? 1.4 : 1) : 0.01);
+      f.glow.scale.setScalar(on ? 2.4 : 1);
+      if (f.core) f.core.visible = on && d < 1500;
+      if (f.halo) f.halo.material.opacity = on ? 0.9 : 0;
+    }
+    // the glow stays a readable dot at any range: grow it with distance, fade it when the motor burns out
+    if (U.halo) { U.halo.visible = on; U.halo.scale.setScalar(Math.max(T.r * 60 + 3, d * 0.03) * boost * (0.85 + Math.random() * 0.3)); }
+    if (!msl.lit) return;
+    const fx = RJ.fx, tail = tv.copy(msl.vel).normalize().multiplyScalar(-T.len * 0.55).add(msl.pos);
+    const wx = RJ.world.WEATHER[RJ.world.env.weather] || {}, wind = tv3.copy(WIND).multiplyScalar((wx.wind || 6) * 0.6);
+    if (on) {
+      // continuous ribbon trail through the path actually flown (curves with every turn), plus a few soft puffs
+      // along it for volume; the newest point rides on the nozzle so the trail always starts right at the flame
+      if (!msl.rib) { msl.rib = newRibbon(T); ribbonPush(msl.rib, tail, wind, 1); }
+      const r = msl.rib, prev = msl.prevTail || tail.clone(), seg = prev.distanceTo(tail);
+      const step = T.trail.step * 1.6;
+      msl.spacing += seg;
+      let n = 0;
+      while (msl.spacing >= step && n < 40) {
+        msl.spacing -= step; n++;
+        const k = seg > 0 ? 1 - msl.spacing / seg : 1, p = tv2.copy(prev).lerp(tail, RJ.clamp(k, 0, 1));
+        ribbonPush(r, p, wind, 1);
+        if (n % 3 === 0) { const tr = T.trail, gr = tr.gray; fx.smokeP.spawn(p.x + R(0.5), p.y + R(0.5), p.z + R(0.5), wind.x + R(1.5), wind.y + 0.8, wind.z + R(1.5), tr.life * 0.7, tr.s0 * 1.4, tr.s1 * 1.1, gr, gr, gr * 1.03, tr.alpha * 0.5, 0.4, 0.25); }
+        if (T.ion && Math.random() < 0.9) { const a = msl.t * 30 + n; fx.fireP.spawn(p.x + Math.cos(a) * 0.9, p.y + Math.sin(a) * 0.9, p.z, R(2), R(2), R(2), 0.6 + Math.random() * 0.4, 1.4, 0.3, T.ion[0], T.ion[1], T.ion[2], 1, 0, 0.5); }
+      }
+      if (r.pts.length) { const h = r.pts[0]; h.x = tail.x; h.y = tail.y; h.z = tail.z; h.t = RJ.fx.time || 0; }
+      msl.prevTail = tail.clone();
+      // glowing exhaust right behind the nozzle
+      const hot = T.ion || [1, 0.62, 0.28];
+      fx.fireP.spawn(tail.x, tail.y, tail.z, msl.vel.x * 0.7 + R(4), msl.vel.y * 0.7 + R(4), msl.vel.z * 0.7 + R(4), 0.07 + Math.random() * 0.06, 1.6 * T.boom, 3.5 * T.boom, hot[0], hot[1], hot[2], 0.9, 0, 0.8);
+    } else msl.prevTail = null;
+    // hard turns: vapour peels off the fins (a visible cue the missile is pulling hard)
+    if (turn > 0.5 && Math.random() < turn * 0.5 && d < 1500) fx.vapor(msl.pos, msl.vel, 1.4, 0.35 * Math.min(1, turn));
+  };
+
+  /* ---------------- impact ---------------- */
+  MF.impact = function (msl, hit) {
+    const T = TYPES[msl.type] || TYPES.radar, s = T.boom * (hit ? 1.25 : 0.9);
+    MF.explosion(msl.pos, s, hit ? hit.vel : msl.vel.clone().multiplyScalar(0.2), T);
+  };
+  /** Layered blast: white flash → expanding fireball → sparks and flaming debris → dark rolling smoke, plus a
+   * shockwave (refraction ring + bright shell), a light that lights nearby aircraft and terrain, and camera shake. */
+  MF.explosion = function (p, s, vel, T) {
+    const fx = RJ.fx, vx = vel ? vel.x * 0.3 : 0, vy = vel ? vel.y * 0.3 : 0, vz = vel ? vel.z * 0.3 : 0;
+    const tint = T && T.ion ? T.ion : null;
+    // 1 flash: a few huge, very short-lived white-hot particles
+    for (let i = 0; i < 4; i++) fx.fireP.spawn(p.x, p.y, p.z, vx, vy, vz, 0.09 + i * 0.03, 14 * s, 46 * s, 1, 0.97, tint ? 1 : 0.9, 1, 0, 0);
+    // 2 fireball: hot core, then orange billows that rise
+    for (let i = 0; i < 22 * Math.sqrt(s); i++) { const v = tv.set(R(1), R(1), R(1)).normalize().multiplyScalar(6 + Math.random() * 18 * s); fx.fireP.spawn(p.x + R(2 * s), p.y + R(2 * s), p.z + R(2 * s), vx + v.x, vy + v.y + 3, vz + v.z, 0.35 + Math.random() * 0.5, 5 * s, 22 * s, 1, tint ? tint[1] : 0.9, tint ? tint[2] : 0.6, 1, 4, 2.5); }
+    for (let i = 0; i < 26 * Math.sqrt(s); i++) { const v = tv.set(R(1), R(1), R(1)).normalize().multiplyScalar(4 + Math.random() * 12 * s); fx.fireP.spawn(p.x + R(4 * s), p.y + R(4 * s), p.z + R(4 * s), vx + v.x, vy + v.y + 5, vz + v.z, 0.7 + Math.random() * 1.0, 7 * s, 30 * s, 1, 0.55, 0.22, 0.9, 6, 2.0); }
+    // 3 sparks and burning fragments
+    for (let i = 0; i < 40 * s; i++) { const v = tv.set(R(1), R(1), R(1)).normalize().multiplyScalar(40 + Math.random() * 90 * s); fx.fireP.spawn(p.x, p.y, p.z, vx + v.x, vy + v.y + 8, vz + v.z, 0.5 + Math.random() * 0.9, 1.3, 0.4, 1, 0.82, 0.45, 1, -20, 0.5); }
+    // 4 smoke: grey-black, rolling up and spreading, lingers long after the fire
+    for (let i = 0; i < 24 * Math.sqrt(s); i++) { const d = 0.1 + Math.random() * 0.16, v = tv.set(R(1), R(1), R(1)).normalize().multiplyScalar(3 + Math.random() * 9 * s); fx.smokeP.spawn(p.x + R(5 * s), p.y + R(5 * s), p.z + R(5 * s), vx + v.x, vy + v.y + 3, vz + v.z, 5 + Math.random() * 6, 12 * s, 60 * s, d, d, d * 1.05, 0.85, 2.5, 0.7); }
+    // 5 shockwave: screen-space refraction ring (shared with the sonic boom) and a light flash
+    if (RJ.sonic && RJ.sonic.shocks) { RJ.sonic.shocks.push({ pos: p.clone(), t: 0, R0: 6 * s, vis: 0.7 }); if (RJ.sonic.shocks.length > 3) RJ.sonic.shocks.shift(); }
+    fx.light.position.copy(p); fx.light.color.setHex(tint ? 0x8fdcff : 0xffb070); fx.lightLevel = Math.max(fx.lightLevel, Math.min(2.4, 1.1 * s));
+  };
+
+  /* ---------------- debris: real tumbling fragments with smoke and flame trails ---------------- */
+  const DEB = []; let debMat = null, debGeo = null;
+  MF.debris = function (p, vel, n = 10, burning = true) {
+    if (!debMat) {
+      debMat = new THREE.MeshStandardMaterial({ color: 0x3a3d41, roughness: 0.7, metalness: 0.6 });
+      debGeo = [new THREE.BoxGeometry(1, 0.08, 0.6), new THREE.BoxGeometry(0.5, 0.3, 0.9), new THREE.TetrahedronGeometry(0.6)];
+    }
+    for (let i = 0; i < n; i++) {
+      if (DEB.length > 60) { const o = DEB.shift(); RJ.scene.remove(o.m); }
+      const m = new THREE.Mesh(debGeo[i % 3], debMat); m.scale.setScalar(0.5 + Math.random() * 1.6); m.castShadow = true;
+      m.position.copy(p).add(tv.set(R(2), R(2), R(2)));
+      RJ.scene.add(m);
+      const v = tv.set(R(1), R(1) + 0.4, R(1)).normalize().multiplyScalar(25 + Math.random() * 55).addScaledVector(vel || tv2.set(0, 0, 0), 0.5);
+      DEB.push({ m, v: v.clone(), w: V3(R(9), R(9), R(9)), t: 0, life: 6 + Math.random() * 4, burn: burning && Math.random() < 0.6, fxT: 0 });
+    }
+  };
+  MF.tick = function (dt) {
+    MF.tickRibbons(dt);
+    for (let i = DEB.length - 1; i >= 0; i--) {
+      const d = DEB[i]; d.t += dt;
+      d.v.y -= RJ.G0 * dt; d.v.multiplyScalar(Math.pow(0.96, dt * 10 * 0.1));
+      d.m.position.addScaledVector(d.v, dt);
+      d.m.rotation.x += d.w.x * dt; d.m.rotation.y += d.w.y * dt; d.m.rotation.z += d.w.z * dt;
+      d.fxT -= dt;
+      if (d.fxT <= 0 && d.t < 4) {
+        d.fxT = 0.05;
+        RJ.fx.smoke(d.m.position, tv.set(0, 1, 0), 1.2 + d.t * 0.5, 0.15, 3, 0.55);
+        if (d.burn && d.t < 2.5) RJ.fx.fire(d.m.position, tv.copy(d.v).multiplyScalar(0.1), 1.5);
+      }
+      const g = RJ.world.ground(d.m.position.x, d.m.position.z);
+      if (d.m.position.y < g + 0.3 || d.t > d.life) { if (d.m.position.y < g + 2) RJ.fx.dust(d.m.position, 0.25); RJ.scene.remove(d.m); DEB.splice(i, 1); }
+    }
+  };
+  MF.clear = function () {
+    for (const d of DEB) RJ.scene.remove(d.m); DEB.length = 0;
+    for (const r of RIBBONS) { RJ.scene.remove(r.mesh); r.g.dispose(); } RIBBONS.length = 0;
+  };
+})(window.RJ);
