@@ -49,7 +49,7 @@ window.RJ = window.RJ || {};
   const DEFAULTS = {
     quality: "high", shadows: true, viewDist: 1, clouds: 1,
     bloom: true, motionBlur: true, heatHaze: true, dof: true, fxaa: true, waterReflect: true, cloudShadows: true, volClouds: true, exposure: 1,
-    master: 0.8, engineVol: 0.8, envVol: 0.7, sfxVol: 0.85, voiceVol: 0.9, muted: false,
+    master: 0.8, engineVol: 0.8, envVol: 0.7, sfxVol: 0.85, voiceVol: 0.9, voiceName: "", voiceRate: 0.95, voicePitch: 0.96, muted: false,
     invert: false, sens: 1, touchSens: 1, assist: true,
     cam: "chase", fov: 68, shake: true, boomCam: "inset",
     hud: true, hudColor: "green", units: "mph", ghosts: true,

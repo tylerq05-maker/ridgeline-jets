@@ -364,6 +364,12 @@
       h += row("Wind and ambience", "Airflow, runway rumble, cabin and cockpit ambience", range("envVol", 0, 1, 0.05));
       h += row("Weapons and effects", null, range("sfxVol", 0, 1, 0.05));
       h += row("Greeting voice", "Your assistant greets you each time you enter Free Flight. 0 turns it off.", range("voiceVol", 0, 1, 0.05));
+      const vl = RJ.audio.voiceList();
+      const opts = [`<option value="">Auto (best British male voice)</option>`].concat(vl.map((v) => `<option value="${esc(v.name)}" ${RJ.settings.voiceName === v.name ? "selected" : ""}>${v.britishMale ? "★ " : ""}${esc(v.name)} (${esc(v.lang)})</option>`));
+      h += row("Assistant voice", vl.length ? "★ = British male. The list comes from your browser; Edge has the most natural voices." : "Your browser hasn't listed any voices yet. Reopen this tab in a moment.", `<select class="txt" id="set-voice" style="max-width:320px">${opts.join("")}</select>`);
+      h += row("Voice speed", null, range("voiceRate", 0.7, 1.2, 0.05));
+      h += row("Voice pitch", null, range("voicePitch", 0.7, 1.3, 0.02));
+      h += row("Try it", "Plays the full greeting with your current choices", `<button class="ghost small" id="voice-test">Test voice</button>`);
       h += row("Mute", null, toggle("muted"));
     } else if (t === "controls") {
       h += row("Flight assist", "Holds altitude in banked turns and levels the wings when you let go", toggle("assist"));
@@ -570,12 +576,18 @@
         return;
       }
       if (e.target.id === "keys-reset") { RJ.resetKeys(); UI.renderSettings(); }
+      if (e.target.id === "voice-test") { RJ.audio.testVoice(); }
       if (e.target.id === "prog-reset") {
         if (UI._confirmReset) { RJ.resetProgress(); UI._confirmReset = false; UI.toast("Progress reset."); }
         else UI._confirmReset = true;
         UI.renderSettings();
       }
     });
+    $("set-body").addEventListener("change", (e) => {
+      if (e.target.id === "set-voice") { RJ.settings.voiceName = e.target.value; RJ.saveSettings(); RJ.audio.testVoice(); }
+    });
+    // voices load asynchronously in some browsers: refresh the list when they arrive
+    if (window.speechSynthesis && speechSynthesis.addEventListener) speechSynthesis.addEventListener("voiceschanged", () => { if (UI.current === "scr-settings" && UI.setTab === "audio") UI.renderSettings(); });
     $("set-body").addEventListener("input", (e) => {
       const k = e.target.dataset.range; if (!k) return;
       RJ.settings[k] = parseFloat(e.target.value);

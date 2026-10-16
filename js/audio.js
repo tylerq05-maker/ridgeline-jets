@@ -478,8 +478,17 @@
   const GB_MALE = /ryan|thomas|alfie|elliot|ethan|noah|oliver|george|daniel|arthur|harry|google uk english male/i;
   const EN_MALE = /guy|davis|christopher|eric|andrew|brian|roger|steffan|tony|jason|william|liam|alex|fred|aaron|tom|james|male/i;
   const FEMALE = /female|serena|kate|hazel|susan|libby|sonia|maisie|mia|abbi|bella|hollie|martha|olivia|karen|moira|samantha|victoria|zira|aria|jenny|tessa|fiona|veena|ava|allison|emma|amy|joanna|salli|kimberly|ivy|kendra|nicole|catherine|natasha|clara|sara|michelle|ana|google us english/i;
-  /** Best British male voice; falls back to any male English voice, then any non-female English voice. */
+  /** English voices for the settings picker, British male first. */
+  AU.voiceList = function () {
+    if (!window.speechSynthesis) return [];
+    const all = speechSynthesis.getVoices().filter((v) => /^en([-_]|$)/i.test(v.lang));
+    const rank = (v) => (/en[-_]gb/i.test(v.lang) && GB_MALE.test(v.name) ? 0 : FEMALE.test(v.name) ? 2 : 1);
+    return all.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)).map((v) => ({ name: v.name, lang: v.lang, britishMale: rank(v) === 0 }));
+  };
+  /** The player's chosen voice, or the best British male voice; falls back to any male, then any non-female English voice. */
   function pickVoice() {
+    const want = RJ.settings.voiceName;
+    if (want && window.speechSynthesis) { const v = speechSynthesis.getVoices().find((x) => x.name === want); if (v) return { v, british: true, chosen: true }; }
     const vs = speechSynthesis.getVoices().filter((v) => /^en([-_]|$)/i.test(v.lang) && !FEMALE.test(v.name));
     const gb = (v) => /en[-_]gb/i.test(v.lang);
     const score = (v) => (gb(v) && GB_MALE.test(v.name) ? 100 : 0) + (gb(v) ? 30 : 0) + (GB_MALE.test(v.name) || EN_MALE.test(v.name) ? 20 : 0)
@@ -563,12 +572,14 @@
     const el = document.getElementById("rj-caption"); if (el) el.classList.remove("on");
     AU.unduck(0.3);
   };
+  /** Settings "Test voice": the full greeting, startup sound included. */
+  AU.testVoice = function () { AU.init(); AU.cancelGreeting(); return AU.welcome("free", true); };
   /** Called on every flight start; greets on each Free Flight entry, once per entry. */
-  AU.welcome = async function (kind) {
+  AU.welcome = async function (kind, test) {
     if (!AU.ctx || kind !== "free") return;
     const id = (AU._greet = (AU._greet || 0) + 1), live = () => id === AU._greet;
     const s = RJ.settings;
-    if (s.muted || !(s.voiceVol > 0)) return;
+    if (s.muted || !(s.voiceVol > 0)) { if (test) RJ.ui.toast("Turn up the Greeting voice slider (and unmute) to hear it.", 2500); return; }
     if (AU.ctx.state === "suspended") await AU.ctx.resume();
     const t = AU.ctx.currentTime + 0.25;
     startupSound(t);
@@ -586,7 +597,8 @@
         const u = new SpeechSynthesisUtterance(WELCOME), pick = pickVoice();
         if (pick) { u.voice = pick.v; u.lang = pick.v.lang; } else u.lang = "en-GB";
         // calm and measured; a voice that isn't a British male one gets pulled a little lower
-        u.rate = 0.95; u.pitch = pick && pick.british ? 0.96 : 0.84;
+        const S = RJ.settings;
+        u.rate = S.voiceRate || 0.95; u.pitch = (S.voicePitch || 0.96) * (pick && pick.british ? 1 : 0.88);
         u.volume = RJ.clamp(RJ.settings.master * RJ.settings.voiceVol * 1.1, 0, 1);
         u.onend = u.onerror = done;
         speechSynthesis.cancel();
