@@ -649,8 +649,8 @@
     // G tolerance: sustained high G narrows the view to a tunnel, then G-LOC (the pilot blacks out for a few
     // seconds and the stick goes slack). Negative G reddens the view. Starfighters have inertial dampers.
     const fighter = player.spec.flight.gmax > 5 && player.spec.flight.model !== "space";
-    if (player.alive && fighter && player.g > 6.5) gStress += (player.g - 6.5) * 0.12 * dt;
-    else gStress = Math.max(0, gStress - dt * (gloc > 0 ? 0.2 : 0.45));
+    if (player.alive && fighter && player.g > 7) gStress += (player.g - 7) * 0.1 * dt;
+    else gStress = Math.max(0, gStress - dt * (gloc > 0 ? 0.2 : 0.6));
     gStress = Math.min(gStress, 1.3);
     if (gStress >= 1.25 && gloc <= 0 && player.alive) { gloc = 3; RJ.ui.flash("G-LOC", "Ease off the pull", 2.5, true); }
     gloc = Math.max(0, gloc - dt);
