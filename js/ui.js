@@ -363,7 +363,7 @@
       h += row("Aircraft engines", "Your jet and the aircraft around you", range("engineVol", 0, 1, 0.05));
       h += row("Wind and ambience", "Airflow, runway rumble, cabin and cockpit ambience", range("envVol", 0, 1, 0.05));
       h += row("Weapons and effects", null, range("sfxVol", 0, 1, 0.05));
-      h += row("Welcome voice", "Spoken once when you first take a flight each session. 0 turns it off.", range("voiceVol", 0, 1, 0.05));
+      h += row("Greeting voice", "Your assistant greets you each time you enter Free Flight. 0 turns it off.", range("voiceVol", 0, 1, 0.05));
       h += row("Mute", null, toggle("muted"));
     } else if (t === "controls") {
       h += row("Flight assist", "Holds altitude in banked turns and levels the wings when you let go", toggle("assist"));

@@ -407,7 +407,7 @@
     RJ.state.mode = "playing";
     RJ.input.keys.clear();
     clock.getDelta();
-    RJ.audio.welcome();
+    RJ.audio.welcome(kind);
   };
   RJ.restartGame = function () { const c = RJ.game.config; if (c) RJ.startGame(c.kind, c.opts); };
   RJ.quitToMenu = async function () {

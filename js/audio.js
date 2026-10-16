@@ -298,6 +298,7 @@
     if (g) { AU.gunOsc.frequency.value = g.rate; AU.gunSaw.frequency.value = g.brrt ? 65 : g.rate; AU.gunF.frequency.value = g.brrt ? 450 : spec.id === "p51" ? 700 : 1100; }
   };
   AU.stopEngines = function () {
+    if (AU.cancelGreeting) AU.cancelGreeting();
     if (AU.engine) { AU.engine.stop(); AU.engine = null; }
     if (AU.pool) for (const s of AU.pool) { s.ac = null; s.v.silence(); }
     AU.setGun(false); AU.tone(null); AU.warn(null);
@@ -467,18 +468,24 @@
     }
   };
 
-  /* ---------------- welcome voice ----------------
-   * Plays once per session when the player first enters a flight. Uses a recorded line if
-   * AU.welcomeFile points at one; otherwise the browser's best built-in voice
-   * (natural/neural voices preferred). A soft aviation-computer chime and an airfield ambience bed
-   * frame it, engines duck under it, and a caption shows the line. */
-  const WELCOME = "Welcome, pilot. Your aircraft is ready. Prepare for takeoff.";
+  /* ---------------- Free Flight greeting ----------------
+   * A JARVIS-style assistant greeting on every Free Flight entry: a futuristic "systems online" startup,
+   * then the line in the best British male voice the browser offers (calm, measured), with the engines
+   * ducked underneath and brought back up smoothly when it finishes. Browser voices can't imitate a
+   * specific actor; this picks the closest British male voice available. A recorded line in
+   * AU.welcomeFile takes priority if one is added. */
+  const WELCOME = "Welcome back, TQ. All systems are online. Your aircraft is ready, and flight controls are standing by. The skies are yours, sir. Where shall we fly today?";
+  const GB_MALE = /ryan|thomas|alfie|elliot|ethan|noah|oliver|george|daniel|arthur|harry|google uk english male/i;
+  const EN_MALE = /guy|davis|christopher|eric|andrew|brian|roger|steffan|tony|jason|william|liam|alex|fred|aaron|tom|james|male/i;
+  const FEMALE = /female|serena|kate|hazel|susan|libby|sonia|maisie|mia|abbi|bella|hollie|martha|olivia|karen|moira|samantha|victoria|zira|aria|jenny|tessa|fiona|veena|ava|allison|emma|amy|joanna|salli|kimberly|ivy|kendra|nicole|catherine|natasha|clara|sara|michelle|ana|google us english/i;
+  /** Best British male voice; falls back to any male English voice, then any non-female English voice. */
   function pickVoice() {
-    const vs = speechSynthesis.getVoices().filter((v) => /^en([-_]|$)/i.test(v.lang));
-    const score = (v) => (/natural|neural|online|premium|enhanced/i.test(v.name) ? 50 : 0)
-      + (/aria|jenny|guy|sonia|ryan|libby|google uk english|google us english|samantha|daniel|serena|alex/i.test(v.name) ? 20 : 0)
-      + (/en[-_](us|gb)/i.test(v.lang) ? 5 : 0);
-    return vs.sort((a, b) => score(b) - score(a))[0] || null;
+    const vs = speechSynthesis.getVoices().filter((v) => /^en([-_]|$)/i.test(v.lang) && !FEMALE.test(v.name));
+    const gb = (v) => /en[-_]gb/i.test(v.lang);
+    const score = (v) => (gb(v) && GB_MALE.test(v.name) ? 100 : 0) + (gb(v) ? 30 : 0) + (GB_MALE.test(v.name) || EN_MALE.test(v.name) ? 20 : 0)
+      + (/natural|neural|online|premium|enhanced/i.test(v.name) ? 15 : 0);
+    const best = vs.sort((x, y) => score(y) - score(x))[0] || null;
+    return best ? { v: best, british: gb(best) && GB_MALE.test(best.name) } : null;
   }
   function voicesReady() {
     if (!window.speechSynthesis || speechSynthesis.getVoices().length) return Promise.resolve();
@@ -490,22 +497,36 @@
     el.textContent = text; el.classList.add("on");
     clearTimeout(caption.t); caption.t = setTimeout(() => el.classList.remove("on"), ms);
   }
-  /** Duck the engines under the voice (0..1) for `sec` seconds, with smooth ramps. */
-  AU.duck = function (level, sec) {
+  /** Duck the engines under the voice (0..1) until release(), with smooth ramps. */
+  AU.duck = function (level) {
     if (!AU.ctx) return;
     const t = AU.ctx.currentTime, g = AU.duckG.gain;
-    g.cancelScheduledValues(t); g.setTargetAtTime(level, t, 0.4); g.setTargetAtTime(1, t + sec, 0.8);
+    g.cancelScheduledValues(t); g.setTargetAtTime(level, t, 0.4);
   };
-  function chime(t) {
-    const ctx = AU.ctx, dl = ctx.createDelay(1), fb = mkGain(ctx, 0.32), lp = mkFilt(ctx, "lowpass", 2600), wet = mkGain(ctx, 0.35);
+  AU.unduck = function (tc = 1.1) { if (AU.ctx) { const t = AU.ctx.currentTime; AU.duckG.gain.cancelScheduledValues(t); AU.duckG.gain.setTargetAtTime(1, t, tc); } };
+  /** "Systems online": a soft rising sweep, a few data blips, then a warm three-note chime with a short tail. */
+  function startupSound(t) {
+    const ctx = AU.ctx;
+    const sw = mkOsc(ctx, "sine", 160), swF = mkFilt(ctx, "lowpass", 1400), swG = mkGain(ctx, 0);
+    sw.connect(swF).connect(swG).connect(AU.voiceBus);
+    sw.frequency.setValueAtTime(160, t); sw.frequency.exponentialRampToValueAtTime(880, t + 0.85);
+    swG.gain.setValueAtTime(0.0001, t); swG.gain.exponentialRampToValueAtTime(0.07, t + 0.5); swG.gain.exponentialRampToValueAtTime(0.0001, t + 1.0);
+    sw.stop(t + 1.05);
+    [2400, 3200, 2800, 3600].forEach((f, i) => {
+      const o = mkOsc(ctx, "sine", f), g = mkGain(ctx, 0), s0 = t + 0.5 + i * 0.07;
+      o.connect(g).connect(AU.voiceBus);
+      g.gain.setValueAtTime(0.0001, s0); g.gain.exponentialRampToValueAtTime(0.025, s0 + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, s0 + 0.05);
+      o.stop(s0 + 0.06);
+    });
+    const dl = ctx.createDelay(1), fb = mkGain(ctx, 0.3), lp = mkFilt(ctx, "lowpass", 2600), wet = mkGain(ctx, 0.35);
     dl.delayTime.value = 0.23; dl.connect(lp).connect(fb).connect(dl); lp.connect(wet).connect(AU.voiceBus);
-    [[659.3, 0], [987.8, 0.16]].forEach(([f, o]) => {
+    [[440, 0], [659.3, 0.09], [987.8, 0.18]].forEach(([f, o]) => {
       const c = mkOsc(ctx, "sine", f), m = mkOsc(ctx, "sine", f * 2.01), mi = mkGain(ctx, 0), g = mkGain(ctx, 0);
       m.connect(mi).connect(c.frequency); c.connect(g); g.connect(AU.voiceBus); g.connect(dl);
-      const s = t + o;
-      mi.gain.setValueAtTime(f * 0.6, s); mi.gain.exponentialRampToValueAtTime(1, s + 0.9);
-      g.gain.setValueAtTime(0.0001, s); g.gain.exponentialRampToValueAtTime(0.11, s + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, s + 1.4);
-      c.stop(s + 1.5); m.stop(s + 1.5);
+      const s0 = t + 0.85 + o;
+      mi.gain.setValueAtTime(f * 0.5, s0); mi.gain.exponentialRampToValueAtTime(1, s0 + 0.9);
+      g.gain.setValueAtTime(0.0001, s0); g.gain.exponentialRampToValueAtTime(0.08, s0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, s0 + 1.5);
+      c.stop(s0 + 1.6); m.stop(s0 + 1.6);
     });
   }
   function ambienceBed(t, hold) {
@@ -514,9 +535,9 @@
     const a = loop(ctx, B.pink), af = mkFilt(ctx, "lowpass", 420); a.connect(af).connect(bed);
     const r = loop(ctx, B.brown), rf = mkFilt(ctx, "lowpass", 90), rg = mkGain(ctx, 0.7); r.connect(rf).connect(rg).connect(bed);
     const w = mkOsc(ctx, "sine", 3650), wg = mkGain(ctx, 0.012); w.connect(wg).connect(bed); // a distant turbine idling on the ramp
-    bed.gain.setValueAtTime(0.0001, t); bed.gain.exponentialRampToValueAtTime(0.16, t + 1.2);
-    bed.gain.setValueAtTime(0.16, t + hold); bed.gain.exponentialRampToValueAtTime(0.0001, t + hold + 2.5);
-    const end = t + hold + 2.7; [a, r].forEach((s) => s.stop(end)); w.stop(end);
+    bed.gain.setValueAtTime(0.0001, t); bed.gain.exponentialRampToValueAtTime(0.14, t + 1.2);
+    bed.gain.setValueAtTime(0.14, t + hold); bed.gain.exponentialRampToValueAtTime(0.0001, t + hold + 2.5);
+    const end = t + hold + 2.7; [a, r].forEach((x) => x.stop(end)); w.stop(end);
   }
   /** Optional recorded line: set to a project path such as "audio/welcome.mp3" after adding the file. */
   AU.welcomeFile = null;
@@ -535,32 +556,44 @@
       return true;
     } catch (e) { return false; }
   }
-  AU.welcome = async function () {
-    if (!AU.ctx || AU.welcomed) return;
-    AU.welcomed = true;
+  /** Stop a greeting in progress (leaving the flight). */
+  AU.cancelGreeting = function () {
+    AU._greet = (AU._greet || 0) + 1;
+    try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) { /* none */ }
+    const el = document.getElementById("rj-caption"); if (el) el.classList.remove("on");
+    AU.unduck(0.3);
+  };
+  /** Called on every flight start; greets on each Free Flight entry, once per entry. */
+  AU.welcome = async function (kind) {
+    if (!AU.ctx || kind !== "free") return;
+    const id = (AU._greet = (AU._greet || 0) + 1), live = () => id === AU._greet;
     const s = RJ.settings;
     if (s.muted || !(s.voiceVol > 0)) return;
     if (AU.ctx.state === "suspended") await AU.ctx.resume();
-    const t = AU.ctx.currentTime + 0.3;
-    ambienceBed(t, 5.2);
-    chime(t + 0.5);
-    AU.duck(0.5, 6);
-    setTimeout(() => caption(WELCOME, 5200), 1300);
-    if (await playSample(t + 1.3)) return;
-    if (!window.speechSynthesis || typeof SpeechSynthesisUtterance !== "function") return;
+    const t = AU.ctx.currentTime + 0.25;
+    startupSound(t);
+    ambienceBed(t, 9.5);
+    AU.duck(0.45);
+    const done = () => { if (live()) AU.unduck(1.1); };
+    setTimeout(done, 15000); // safety net if the browser never reports the end of speech
+    setTimeout(() => { if (live()) caption(WELCOME, 10000); }, 1700);
+    if (await playSample(t + 1.7)) { setTimeout(done, 11000); return; }
+    if (!window.speechSynthesis || typeof SpeechSynthesisUtterance !== "function") { setTimeout(done, 9000); return; }
     await voicesReady();
     setTimeout(() => {
+      if (!live() || RJ.settings.muted) return;
       try {
-        if (RJ.settings.muted) return;
-        const u = new SpeechSynthesisUtterance(WELCOME), v = pickVoice();
-        if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "en-US";
-        u.rate = 0.93; u.pitch = 0.9;
+        const u = new SpeechSynthesisUtterance(WELCOME), pick = pickVoice();
+        if (pick) { u.voice = pick.v; u.lang = pick.v.lang; } else u.lang = "en-GB";
+        // calm and measured; a voice that isn't a British male one gets pulled a little lower
+        u.rate = 0.95; u.pitch = pick && pick.british ? 0.96 : 0.84;
         u.volume = RJ.clamp(RJ.settings.master * RJ.settings.voiceVol * 1.1, 0, 1);
+        u.onend = u.onerror = done;
         speechSynthesis.cancel();
         speechSynthesis.speak(u);
-        AU.lastVoice = v ? v.name : "default";
-      } catch (e) { console.warn("Welcome voice unavailable", e); }
-    }, 900);
+        AU.lastVoice = pick ? pick.v.name : "default";
+      } catch (e) { console.warn("Greeting voice unavailable", e); done(); }
+    }, Math.max(0, (t + 1.7 - AU.ctx.currentTime) * 1000));
   };
 
   function burst(opts) {
