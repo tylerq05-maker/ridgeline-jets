@@ -716,7 +716,7 @@
         const a = j * N1g + i, b = a + 1, cc = a + N1g, d = cc + 1;
         index[p++] = a; index[p++] = cc; index[p++] = b; index[p++] = b; index[p++] = cc; index[p++] = d;
       }
-      return { far: true, cx: req.cx, cz: req.cz, pos, nor, col, index, reqId: req.reqId };
+      return { far: true, ring: req.ring || 1, cx: req.cx, cz: req.cz, pos, nor, col, index, reqId: req.reqId };
     }
 
     return { everest: { x: EVX, z: EVZ, h: 8848.86, r: EVR }, zones: ZONES, nyc: NY, fields, height, setAirbase, airbaseMask, setCastle, castleMask, setSites, siteMask, clearMask, buildChunk, buildFar, smooth, fbm, N1, N2, N3, mulberry32 };

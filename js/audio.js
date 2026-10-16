@@ -394,7 +394,8 @@
     const E = AU.engine, p = E.prof;
     if (E.fresh) { E.fresh = false; E.st.N = pl.state === "ground" && pl.speed < 2 ? 0 : null; }
     const thr = pl.alive ? RJ.clamp(pl.throttle, 0, 1) : 0;
-    const N = spool(E.st, p, thr, dt, pl.alive);
+    let N = spool(E.st, p, thr, dt, pl.alive);
+    if (pl.alive && pl.spool != null && p.kind !== "rocket" && E.st.N >= p.idle * 0.98) N = E.st.N = p.idle + (1 - p.idle) * pl.spool;
     if (E.st.lightoff) AU.lightOff(p, inCockpit);
     const ab = pl.alive && p.ab ? pl.abLevel : 0;
     if (ab > 0.25 && E.abLast <= 0.25) AU.abLight(inCockpit);

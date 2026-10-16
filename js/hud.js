@@ -207,7 +207,8 @@
 
   function tapes(pl, C, small) {
     const SU = RJ.speedUnit();
-    const kt = pl.speed * SU[1], ft = pl.pos.y * 3.281;
+    // the tape and box show indicated airspeed (what the wing feels); true airspeed is printed below
+    const ias = RJ.ias(pl.speed, pl.pos.y), kt = ias * SU[1], ft = pl.pos.y * 3.281;
     const lx = small ? 46 : Math.max(80, W / 2 - Math.min(330, W * 0.38)), rx = small ? W - 46 : Math.min(W - 80, W / 2 + Math.min(330, W * 0.38));
     const cy = Hh / 2;
     const tape = (px, val, step, labelEvery, side) => {
@@ -230,16 +231,18 @@
       if (lab) text(lab, px, cy + 32, "center", 11);
       void align;
     };
-    box(lx, String(Math.round(kt)), SU[0]);
+    box(lx, String(Math.round(kt)), "IAS " + SU[0]);
     box(rx, RJ.fmtInt(ft), "FT");
     const vs = pl.vel.y * 196.85; // ft/min
-    text(`M ${pl.mach.toFixed(2)}`, lx, cy + 50, "center", 13);
-    text(`G ${pl.g.toFixed(1)}`, lx, cy + 66, "center", 13);
+    text(`M ${pl.mach.toFixed(2)}   G ${pl.g.toFixed(1)}`, lx, cy + 50, "center", 13);
+    text(`α ${(pl.aoa / RJ.DEG).toFixed(1)}°  β ${((pl.beta || 0) / RJ.DEG).toFixed(1)}°`, lx, cy + 66, "center", 12);
     text(`R ${RJ.fmtInt(Math.max(0, pl.agl) * 3.281)}`, rx, cy + 50, "center", 13);
     text(`VS ${vs >= 0 ? "+" : ""}${RJ.fmtInt(vs / 100)}`, rx, cy + 66, "center", 13);
     // second speed unit, metres, and the ground elevation below (useful in the Himalaya)
     const alt2 = SU[0] === "KT" ? ["MPH", 2.23694] : ["KT", 1.94384];
-    text(`${Math.round(pl.speed * alt2[1])} ${alt2[0]}`, lx, cy + 82, "center", 12);
+    text(`TAS ${Math.round(pl.speed * SU[1])} ${SU[0]}`, lx, cy + 82, "center", 12);
+    text(`BANK ${Math.round(Math.abs(pl.bank) / RJ.DEG)}°`, lx, cy + 98, "center", 11);
+    void alt2;
     text(`${RJ.fmtInt(pl.pos.y)} M`, rx, cy + 82, "center", 12);
     text(`GND ${RJ.fmtInt(Math.max(0, pl.pos.y - pl.agl))} M`, rx, cy + 98, "center", 11);
   }
@@ -262,8 +265,13 @@
     // in the 3D cockpit the status line sits above the glare shield instead of over the displays
     const y = pit ? Hh * 0.6 : Hh - (RJ.isTouch ? 210 : 66);
     const parts = [];
-    parts.push(`THR ${Math.round(pl.throttle * 100)}%${pl.abLevel > 0.5 ? " AB" : ""}`);
+    // engine: throttle, core rpm (idle ≈ 62 %), afterburner zone (1–5 staging), fuel and flow from the simulation
+    const F0 = pl.spec.flight;
+    const zone = pl.abLevel > 0.03 ? ` AB${Math.min(5, 1 + Math.floor(pl.abLevel * 4.99))}` : "";
+    parts.push(`THR ${Math.round(pl.throttle * 100)}%${zone}`);
+    if (pl.spool != null && !F0.model) parts.push(`N ${Math.round(62 + 38 * pl.spool)}%`);
     if (pl.fuel != null) parts.push(`FUEL ${Math.round(pl.fuel / pl.spec.flight.fuel * 100)}%`);
+    else if (F0.mFuel) parts.push(`FUEL ${Math.round(pl.fuelKg / F0.mFuel * 100)}% ${RJ.fmtInt(pl.fuelKg)} KG · ${(pl.fuelFlow || 0).toFixed(1)} KG/S`);
     const g = pl.spec.gun;
     if (g && !g.turret && !s.bombMode) parts.push(pl.overheated ? "GUN HOT" : `GUN ${Math.round((1 - pl.gunHeat) * 100)}%`);
     if (g && g.turret) parts.push(pl.firing ? "TAIL GUN FIRING" : "TAIL GUN AUTO");
@@ -355,7 +363,9 @@
     const F = pl.spec.flight;
     if (s.pullUp && blink) { text("PULL UP", W / 2, line, "center", 22); line += 26; }
     const stallV = F.vstall * 1.08 / Math.sqrt(Math.max(RJ.rho(pl.pos.y), 0.02));
-    if (pl.speed < stallV && pl.state === "flying" && blink) { x.fillStyle = YEL; text("STALL", W / 2, line, "center", 20); line += 24; }
+    if ((pl.speed < stallV || (pl.buffet || 0) > 0.75) && pl.state === "flying" && blink) { x.fillStyle = YEL; text(pl.speed < stallV ? "STALL" : "ANGLE OF ATTACK", W / 2, line, "center", 20); line += 24; }
+    if (F.mFuel && pl.fuelKg < F.mFuel * 0.15 && blink) { x.fillStyle = YEL; text(pl.fuelKg <= 0 ? "FLAMEOUT · OUT OF FUEL" : "BINGO FUEL", W / 2, line, "center", 16); line += 22; }
+    if (RJ.ias(pl.speed, pl.pos.y) > (F.vmax > 700 ? 460 : 420) && !F.model && blink) { x.fillStyle = YEL; text("OVERSPEED", W / 2, line, "center", 16); line += 22; }
     if (pl.fuel != null && pl.fuel <= 0) { x.fillStyle = YEL; text("ROCKET FUEL OUT · IDLE THROTTLE TO REFUEL", W / 2, line, "center", 14); }
     x.fillStyle = x.strokeStyle;
   }

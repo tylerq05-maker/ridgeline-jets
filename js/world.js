@@ -24,6 +24,7 @@
   // Plain {x,y,z} objects (not THREE vectors) so material cloning keeps them shared by reference.
   const ATMO = { sunDir: { x: 0.3, y: 0.6, z: -0.7 }, sunCol: { x: 1, y: 0.9, z: 0.8 }, params: { x: 9e-5, y: 2200, z: 0.5, w: 0 } };
   W.atmo = ATMO;
+  W.GLSL_CURVE = "vec3 rjCurve(vec3 mv){ vec3 upV = (viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz; float h = dot(mv, upV); return mv - upV * (dot(mv, mv) - h * h) * 7.848e-8; }";
   W.atmoUniforms = () => ({ fogSunDir: { value: ATMO.sunDir }, fogSunCol: { value: ATMO.sunCol }, fogParams: { value: ATMO.params } });
   (function patchFog() {
     const SC = THREE.ShaderChunk;
@@ -52,6 +53,16 @@
       "#endif"
     ].join("\n");
     for (const k in THREE.ShaderLib) { const u = THREE.ShaderLib[k].uniforms; if (u && u.fogColor) Object.assign(u, W.atmoUniforms()); }
+    // Earth curvature (R = 6,371 km): every vertex drops by d²/2R below the camera's horizontal plane, applied in
+    // view space so close objects keep full precision. Shadow depth passes stay flat (their camera is the sun).
+    SC.project_vertex = [
+      "vec4 mvPosition = vec4( transformed, 1.0 );",
+      "#ifdef USE_INSTANCING", "mvPosition = instanceMatrix * mvPosition;", "#endif",
+      "mvPosition = modelViewMatrix * mvPosition;",
+      "#ifndef DEPTH_PACKING", "mvPosition.xyz = rjCurve(mvPosition.xyz);", "#endif",
+      "gl_Position = projectionMatrix * mvPosition;"
+    ].join("\n");
+    SC.common = SC.common + "\n" + W.GLSL_CURVE;
   })();
 
   // Cloud shadow + sky light uniforms shared by terrain and aircraft materials
@@ -663,7 +674,7 @@
         skyAmb: { value: new THREE.Color(0.4, 0.5, 0.6) }, gndAmb: { value: new THREE.Color(0.2, 0.2, 0.2) },
         fogCol: { value: new THREE.Color(0.7, 0.8, 0.9) }, hole: { value: 10000 }
       }, W.atmoUniforms()),
-      vertexShader: "varying vec3 vC; varying vec3 vN; varying vec3 vW; void main(){ vC = color; vN = normal; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }",
+      vertexShader: "varying vec3 vC; varying vec3 vN; varying vec3 vW; " + W.GLSL_CURVE + " void main(){ vC = color; vN = normal; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vec4 mv = viewMatrix * w; mv.xyz = rjCurve(mv.xyz); gl_Position = projectionMatrix * mv; }",
       fragmentShader: [
         "uniform vec3 sunDir; uniform vec3 sunCol; uniform vec3 skyAmb; uniform vec3 gndAmb; uniform vec3 fogCol; uniform float hole;",
         "uniform vec3 fogSunDir; uniform vec3 fogSunCol; uniform vec4 fogParams;",
@@ -685,10 +696,23 @@
       ].join("\n"),
       vertexColors: true
     });
-    W.farCam = new THREE.PerspectiveCamera(60, 1, 200, 160000);
+    W.farCam = new THREE.PerspectiveCamera(60, 1, 200, 900000);
+    // the ultra-far ring shares every uniform with the far ring except its own hole
+    W.far2Mat = W.farMat.clone(); W.far2Mat.uniforms = Object.assign({}, W.farMat.uniforms, { hole: { value: 40000 } });
     W.farCam.layers.set(W.BACK);
   }
+  W.far2 = { mesh: null, center: null, pending: false, reqId: 0 };
   function applyFar(d) {
+    if (d.ring === 2) {
+      if (d.reqId !== W.far2.reqId) return;
+      W.far2.pending = false;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(d.pos, 3)); geo.setAttribute("normal", new THREE.BufferAttribute(d.nor, 3)); geo.setAttribute("color", new THREE.BufferAttribute(d.col, 3));
+      geo.setIndex(new THREE.BufferAttribute(d.index, 1));
+      if (W.far2.mesh) { W.scene.remove(W.far2.mesh); W.far2.mesh.geometry.dispose(); }
+      const m = new THREE.Mesh(geo, W.far2Mat); m.position.set(d.cx, 0, d.cz); m.frustumCulled = false; m.renderOrder = -6; m.layers.set(W.BACK);
+      W.scene.add(m); W.far2.mesh = m; return;
+    }
     if (d.reqId !== W.far.reqId) return;
     W.far.pending = false;
     const geo = new THREE.BufferGeometry();
@@ -704,7 +728,16 @@
     W.far.mesh = m;
   }
   function updateFar(cam) {
-    if (!W.workers.length || W.far.pending) return;
+    if (!W.workers.length) return;
+    // ultra-far ring: 150 × 5.2 km cells (≈ 390 km radius), rebuilt every 60 km, for the view from altitude
+    const c2 = W.far2.center, p2 = cam.position;
+    if (!W.far2.pending && (!c2 || Math.hypot(p2.x - c2.x, p2.z - c2.z) > 60000) && (!W.far.pending)) {
+      const st = 5200, cx = Math.round(p2.x / st) * st, cz = Math.round(p2.z / st) * st;
+      W.far2.center = { x: cx, z: cz }; W.far2.pending = true;
+      let best = W.workers[0]; for (const s of W.workers) if (s.busy < best.busy) best = s;
+      best.busy++; best.w.postMessage({ type: "far", ring: 2, n: 150, spacing: st, cx, cz, ab: W.airbase || null, sites: W.sites, reqId: ++W.far2.reqId });
+    }
+    if (W.far.pending) return;
     const c = W.far.center, p = cam.position;
     if (c && Math.hypot(p.x - c.x, p.z - c.z) < 4500) return;
     const step = 2500, cx = Math.round(p.x / step) * step, cz = Math.round(p.z / step) * step;
@@ -725,6 +758,7 @@
     fc.updateProjectionMatrix(); fc.updateMatrixWorld();
     W.farMat.uniforms.hole.value = Math.min(W.viewRange * 0.78, W.loadedR != null ? W.loadedR : 1e9);
     W.farMat.uniforms.fogCol.value.copy(W.scene.fog.color);
+    W.far2Mat.uniforms.hole.value = W.far.mesh ? (W.Q.farN || 150) * (W.Q.farSpacing || 650) * 0.46 : 0;
     renderer.render(W.scene, fc);
     renderer.clearDepth();
   };
@@ -1075,11 +1109,11 @@
         reflTex: { value: null }, texMatrix: { value: new THREE.Matrix4() }, useRefl: { value: 0 }, reflY: { value: 0 }, rain: { value: 0 }
       }]), W.atmoUniforms()),
       vertexShader: [
-        "attribute vec2 winfo; varying vec3 vW; varying vec2 vInfo; varying vec4 vRefl;",
+        "attribute vec2 winfo; varying vec3 vW; varying vec2 vInfo; varying vec4 vRefl;", W.GLSL_CURVE,
         "uniform mat4 texMatrix;",
         "#include <fog_pars_vertex>",
         "void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vInfo = winfo; vRefl = texMatrix * w;",
-        "  vec4 mvPosition = viewMatrix * w; gl_Position = projectionMatrix * mvPosition;",
+        "  vec4 mvPosition = viewMatrix * w; mvPosition.xyz = rjCurve(mvPosition.xyz); gl_Position = projectionMatrix * mvPosition;",
         "#include <fog_vertex>",
         "}"
       ].join("\n"),

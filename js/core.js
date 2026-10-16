@@ -14,9 +14,22 @@ window.RJ = window.RJ || {};
   RJ.DEG = Math.PI / 180;
   RJ.G0 = 9.81;
   /** Air density ratio (exponential atmosphere, 9 km scale height). */
-  RJ.rho = (alt) => Math.exp(-Math.max(0, alt) / 9000);
+  /** International Standard Atmosphere (troposphere, tropopause, lower stratosphere), shifted by the world's
+   * temperature offset. Returns T (K), delta = p/p0 and sigma = rho/rho0. */
+  RJ.atmo = (alt) => {
+    const h = Math.max(0, alt), off = RJ.tempOffset || 0;
+    let Ts, d;
+    if (h < 11000) { Ts = 288.15 - 0.0065 * h; d = Math.pow(Ts / 288.15, 5.25588); }
+    else if (h < 20000) { Ts = 216.65; d = 0.223361 * Math.exp(-(h - 11000) / 6341.62); }
+    else { Ts = 216.65 + 0.001 * (h - 20000); d = 0.0540328 * Math.pow(Ts / 216.65, -34.1632); }
+    const T = Ts + off;
+    return { T, delta: d, sigma: d * 288.15 / T };
+  };
+  RJ.rho = (alt) => RJ.atmo(alt).sigma;
+  /** Equivalent (≈ indicated) airspeed from true airspeed at altitude. */
+  RJ.ias = (tas, alt) => tas * Math.sqrt(RJ.rho(alt));
   /** Air temperature (K): ISA lapse rate to the tropopause, shifted by the world's weather/time offset. */
-  RJ.airTemp = (alt) => { const h = Math.max(0, alt); return (h < 11000 ? 288.15 - 0.0065 * h : 216.65) + (RJ.tempOffset || 0); };
+  RJ.airTemp = (alt) => RJ.atmo(alt).T;
   /** Speed of sound (m/s) from local temperature: a = sqrt(γ·R·T). 340 m/s at sea level, 295 at 11 km. */
   RJ.soundSpeed = (alt) => Math.sqrt(401.874 * RJ.airTemp(alt));
   RJ.fmtTime = (t) => { const m = Math.floor(t / 60), s = t - m * 60; return `${m}:${s.toFixed(1).padStart(4, "0")}`; };

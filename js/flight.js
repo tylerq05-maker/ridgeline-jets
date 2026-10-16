@@ -44,6 +44,9 @@
       this.target = null; this.lockT = 0; this.locked = false;
       this.lockedByT = 0; this.incoming = [];
       this.fuel = this.spec.flight.fuel || null;
+      // engine core speed (0..1 of the thrust range) lags the throttle; fuel is real mass where the airframe has data
+      this.spool = this.throttle; this.beta = 0;
+      this.fuelKg = this.spec.flight.mFuel || 0;
       this.stats = { shots: 0, hits: 0, msl: 0, mslHits: 0, kills: 0, flares: 0, dmgTaken: 0, dmgDealt: 0 };
       this.lastHitBy = null; this.lastHitAt = -99;
       this.trailT = 0; this.fxT = 0; this.spin = V3();
@@ -60,6 +63,7 @@
         this.state = "ground"; this.speed = 0; this.throttle = 0; this.gearDown = true; this.gearT = 1;
         this.pos.y = RJ.world.ground(pos.x, pos.z) + this.gearH + 0.35;
       } else { this.state = "flying"; this.gearDown = false; this.gearT = 0; }
+      this.spool = opts.ground ? 0 : 0.8; this.beta = 0;
       RJ.setGear(this.mesh, this.gearT);
       this.updateBasis();
       this.vel.copy(this.fwd).multiplyScalar(this.speed);
@@ -86,21 +90,42 @@
       if (inp.thrAbs != null) this.throttle = RJ.clamp(inp.thrAbs, 0, 1);
       else this.throttle = RJ.clamp(this.throttle + inp.thr * 0.7 * dt, 0, 1);
       if (inp.ab) this.throttle = Math.max(this.throttle, 0.98);
-      const wantAB = inp.ab && F.ab > 0;
-      this.abLevel = RJ.damp(this.abLevel, wantAB ? 1 : 0, 3.2, dt);
+      // engine spool: a turbofan winds up slowly from idle (~4 s to military power) and quicker near the top;
+      // props and rockets answer almost at once, big high-bypass fans are the laziest
+      const e = F.eng, up = e === "rocket" ? 20 : e === "prop" ? 2.2 : e === "fan" ? 0.35 : 0.55, dn = e === "fan" ? 0.7 : 1.4;
+      const tgt = this.fuelKg <= 0 && F.mFuel ? 0 : this.throttle;
+      this.spool += (tgt - this.spool) * (1 - Math.exp(-dt * (tgt > this.spool ? up * (0.4 + 1.6 * this.spool) : dn)));
+      // afterburner: lights only at military power, after a short light-off delay, and stages in over ~1.5 s
+      const wantAB = inp.ab && F.ab > 0 && this.spool > 0.9 && !(F.mFuel && this.fuelKg <= 0);
+      this.abT = wantAB ? (this.abT || 0) + dt : 0;
+      this.abLevel = wantAB && this.abT > 0.35 ? Math.min(1, this.abLevel + dt * 0.75) : RJ.damp(this.abLevel, 0, 5, dt);
       if (this.fuel != null) {
         if (this.throttle > 0.03 && this.fuel > 0) this.fuel = Math.max(0, this.fuel - dt * this.throttle);
         else if (this.throttle <= 0.03) this.fuel = Math.min(F.fuel, this.fuel + dt * F.fuel / 30);
       }
     }
-    thrustAcc(rho, v) {
+    /** Current mass (kg) and the thrust/drag scale relative to the calibration mass (half fuel). */
+    massK() {
       const F = this.spec.flight;
-      const tf = RJ.thrustFactor(F.eng, rho, v, F);
-      let thr = this.throttle * F.mil;
-      if (F.ab > 0) thr += this.abLevel * (F.ab - F.mil);
-      else if (this.input.ab) thr *= 1.08;
-      if (this.fuel != null && this.fuel <= 0) thr = 0;
-      return thr * tf;
+      if (!F.mFuel) return 1;
+      return (F.mEmpty + F.mFuel * 0.5) / (F.mEmpty + this.fuelKg);
+    }
+    thrustAcc(rho, v, dt) {
+      const F = this.spec.flight, M = this.mach;
+      let dry = this.spool * F.mil * RJ.thrustFactor(F.eng, rho, v, F, false, M), wet = 0;
+      if (F.ab > 0) wet = this.abLevel * (F.ab - F.mil) * RJ.thrustFactor(F.eng, rho, v, F, true, M);
+      else if (this.input.ab) dry *= 1.08;
+      if (this.fuel != null && this.fuel <= 0) { dry = 0; wet = 0; }
+      // fuel flow from thrust: TSFC × thrust (kgf); afterburner fuel is ~2.5× as thirsty per kilogram of thrust
+      if (F.mFuel && dt) {
+        const mRef = F.mEmpty + F.mFuel * 0.5, kgf = (x) => x * mRef / RJ.G0;
+        this.fuelFlow = (kgf(dry) * F.tsfc + kgf(wet) * F.tsfcAB) / 3600; // kg/s
+        let use = this.fuelFlow * dt * (RJ.settings.fuelBurn != null ? RJ.settings.fuelBurn : 1);
+        // combat modes keep a reserve so a long dogfight never ends in a flameout
+        const floor = RJ.game && RJ.game.mode && RJ.game.mode.kind === "fight" ? F.mFuel * 0.25 : 0;
+        this.fuelKg = Math.max(Math.min(this.fuelKg, Math.max(floor, this.fuelKg - use)), 0);
+      }
+      return (dry + wet) * this.massK();
     }
 
     update(dt) {
@@ -123,7 +148,8 @@
 
       this.updateBasis();
       const v = Math.max(this.speed, 1), alt = this.pos.y, rho = RJ.rho(alt);
-      const liftG = (v / F.vstall) * (v / F.vstall) * rho;
+      // available lift in G: dynamic pressure over wing loading (a full-fuel jet stalls faster and pulls fewer G)
+      const liftG = (v / F.vstall) * (v / F.vstall) * rho * this.massK();
 
       // ---- load factor ----
       let neutral = 1;
@@ -160,9 +186,14 @@
       }
       const auth = RJ.clamp(v / (F.vstall * 1.6), F.tvc ? 0.6 : 0.25, 1) * (0.55 + 0.45 * Math.sqrt(rho));
       this.q.multiply(tq.setFromAxisAngle(AZ, -this.ctl.roll * F.roll * DEG * auth * dt));
-      this.q.multiply(tq.setFromAxisAngle(AY, -this.ctl.yaw * F.yaw * DEG * auth * dt));
-      // dihedral effect: rudder sideslip rolls the airplane gently the same way
-      this.q.multiply(tq.setFromAxisAngle(AZ, -this.ctl.yaw * F.roll * DEG * 0.06 * auth * dt));
+      // rudder: yaws the nose off the flight path (sideslip); the side force that builds then turns the path,
+      // weakly at low dynamic pressure and strongly when fast. Directional stability recentres the nose.
+      const betaMax = 0.15 * Math.min(1, auth * 1.15) * (F.tvc ? 1.15 : 1);
+      this.beta = RJ.damp(this.beta || 0, this.ctl.yaw * betaMax, 3.2 / inert, dt);
+      const sideA = (this.beta / 0.15) * Math.min(liftG * 0.4, 1.3) * RJ.G0;
+      this.q.multiply(tq.setFromAxisAngle(AY, -(sideA / v) * dt));
+      // dihedral effect: sideslip rolls the airplane gently the same way
+      this.q.multiply(tq.setFromAxisAngle(AZ, -(this.beta / 0.15) * F.roll * DEG * 0.06 * auth * dt));
       if (this.assist && Math.abs(inp.roll) < 0.05) {
         const b = this.bank;
         if (Math.abs(b) < 0.4 && this.up.y > 0) this.q.multiply(tq.setFromAxisAngle(AZ, b * 0.9 * dt));
@@ -182,19 +213,34 @@
       this.updateBasis();
 
       // ---- speed ----
-      const thrust = this.thrustAcc(rho, v);
-      const q = F.k * rho * v * v;
+      this.mach = v / RJ.soundSpeed(alt);
+      const thrust = this.thrustAcc(rho, v, dt);
+      const mk = this.massK();
+      const q = F.k * rho * v * v * mk * (1 + 9 * this.beta * this.beta); // sideslip adds drag
       const gearDrag = this.gearT * 0.45;
       const parasite = q * ((inp.brake ? 2.6 : 1) + gearDrag) + (inp.brake ? 5 * Math.sqrt(rho) : 0);
       // induced drag grows below corner speed: hard turns slow you down, more so when already slow
-      const induced = (1 - 0.45 * (this.ge || 0)) * F.ind * Math.pow(Math.max(0, Math.abs(gAct) - 1), 1.5) * RJ.clamp(Math.pow((F.corner || 200) / v, 0.8), 0.6, 2.2);
-      this.mach = v / RJ.soundSpeed(alt);
-      const subsonicDesign = F.vmax / RJ.soundSpeed(F.ref) < 1;
-      const wave = this.mach > 0.85 ? q * (subsonicDesign ? 2.4 : 0.32) * RJ.smooth(0.85, 1.05, this.mach) * (1 - 0.5 * RJ.smooth(1.2, 1.7, this.mach)) : 0;
+      const induced = (1 - 0.45 * (this.ge || 0)) / mk * F.ind * Math.pow(Math.max(0, Math.abs(gAct) - 1), 1.5) * RJ.clamp(Math.pow((F.corner || 200) / v, 0.8), 0.6, 2.2);
+      const wave = q * RJ.waveK(F, this.mach);
       this.speed += (thrust - parasite - induced - wave - RJ.G0 * this.fwd.y) * dt;
       this.speed = Math.max(this.speed, 12);
       this.vel.copy(this.fwd).multiplyScalar(this.speed);
+      // the air mass moves: wind drifts the ground track (airspeed is relative to the air)
+      const Wd = RJ.world, wx = (Wd.WEATHER && Wd.env && Wd.WEATHER[Wd.env.weather]) || {}, wind = (wx.wind || 4) * RJ.clamp(0.6 + alt / 6000, 0.6, 2.2);
+      this.vel.x += Math.cos(4.4) * wind; this.vel.z += Math.sin(4.4) * wind;
       this.pos.addScaledVector(this.vel, dt);
+      // turbulence: mechanical bumps low over terrain and buildings, convective in cloud and storms
+      const tk = ((1 - RJ.smooth(30, 900, this.agl)) * (0.45 + (wx.wind || 4) / 18) + (wx.dark || 0) * 0.6 + (this.isPlayer ? (Wd.inCloud || 0) * 0.8 : 0)) * RJ.clamp(v / 220, 0.35, 1.3);
+      if (tk > 0.02) {
+        const t = this.time + this.uid * 13.7;
+        const n1 = Math.sin(t * 1.9) * Math.sin(t * 3.7 + 1.3) + 0.5 * Math.sin(t * 7.3 + 0.4), n2 = Math.sin(t * 2.3 + 2.1) * Math.sin(t * 5.1) + 0.5 * Math.sin(t * 8.9 + 3);
+        this.q.multiply(tq.setFromAxisAngle(AX, n1 * tk * 0.05 * dt * 6));
+        this.q.multiply(tq.setFromAxisAngle(AZ, n2 * tk * 0.07 * dt * 6));
+        this.pos.y += (Math.sin(t * 2.7) + Math.sin(t * 6.1 + 1)) * tk * 1.2 * dt;
+      }
+      this.turb = tk;
+      // aerodynamic buffet as the wing nears its lift limit (and in the stall)
+      this.buffet = p > 0.25 ? RJ.clamp((gAct / Math.max(liftG, 0.05) - 0.82) / 0.2, 0, 1) : 0;
       if (this.pos.y > 40000) this.pos.y = 40000;
 
       // post-stall: TVC jets can hold the nose far above the flight path (up to ~65°) when slow and pulling hard
@@ -246,8 +292,8 @@
       this.throttleAndFuel(dt);
       this.gearT = 1; this.gearDown = true;
       const rho = RJ.rho(this.pos.y), v = this.speed;
-      const thrust = this.thrustAcc(rho, Math.max(v, 1));
-      const drag = F.k * rho * v * v * 1.45 * (inp.brake ? 2 : 1);
+      const thrust = this.thrustAcc(rho, Math.max(v, 1), dt);
+      const drag = F.k * rho * v * v * 1.45 * (inp.brake ? 2 : 1) * this.massK();
       const roll = 0.18 + (inp.brake ? 5.4 : 0) + (this.trap ? 30 : 0); // wheel brakes; a carrier wire stops a jet in ~100 m
       this.speed = Math.max(0, v + (thrust - drag - (v > 0.1 ? roll : 0)) * dt);
       // steering: nosewheel at low speed, rudder at high speed
@@ -374,7 +420,7 @@
       if (this.lodFar) return; // drawn as an instanced silhouette (combat.drawCrowd)
       this.mesh.position.copy(this.pos);
       this.mesh.quaternion.copy(this.q);
-      if (this.state === "flying" && !this.spec.flight.model) this.mesh.quaternion.multiply(tq2.setFromAxisAngle(AX, this.aoa));
+      if (this.state === "flying" && !this.spec.flight.model) { this.mesh.quaternion.multiply(tq2.setFromAxisAngle(AX, this.aoa)); if (this.beta) this.mesh.quaternion.multiply(tq2.setFromAxisAngle(AY, -this.beta)); }
       // keep world matrices current so cockpit camera and trail emitters don't lag a frame behind
       this.mesh.updateMatrixWorld(true);
     }
@@ -410,6 +456,11 @@
       const kick = (this.abKick = Math.max(0, (this.abKick || 0) - dt * 3.2));
       // distance LOD: far away the diamond core is invisible anyway, so skip drawing it
       const camD = RJ.camera ? this.pos.distanceTo(RJ.camera.position) : 0, near = camD < 2500;
+      // atmosphere: thin air lets the under-expanded jet balloon — a longer, wider plume with fewer, farther-spaced
+      // diamonds; dense low air mixes it out short with tight, crisp diamonds. Engine output follows the spool.
+      const amb = RJ.atmo(this.pos.y).delta, thin = 1 - amb, sp = this.spool == null ? this.throttle : this.spool;
+      const lenK = 1 + thin * 0.7 - RJ.smooth(0.8, 2.2, this.mach) * 0.15, widK = 1 + thin * 0.55 * this.abLevel;
+      const dsp = 1.25 - thin * 0.6, dvis = 0.45 + amb * 0.55;
       for (const f of vis.flames) {
         const U = f.mat.uniforms, CU = f.coreMat ? f.coreMat.uniforms : null;
         U.time.value += dt;
@@ -426,12 +477,15 @@
           if (f.rocket) { const on = this.throttle > 0.03 && burning; s = on ? (1.0 + this.throttle * 1.1) * flick : 0.01; ab = on ? 1 : 0; power = on ? 1 : 0; }
           else if (f.small) { s = (0.1 + this.throttle * 0.16) * flick; ab = 0; }
           // dry power: a short, faint plume that only shows near full throttle; afterburner: long and blazing
-          else { s = (0.05 + this.throttle * this.throttle * 0.26 + this.abLevel * (1.75 + machBoost) + kick * 0.6 * this.abLevel) * flick * Math.sqrt(f.r / 0.5); ab = this.abLevel; }
-          f.flame.scale.set(f.r * (1 + ab * 0.18 + kick * 0.15), f.r * (1 + ab * 0.18 + kick * 0.15), Math.max(0.01, s));
-          glow = f.small ? 0.15 : 0.12 + this.throttle * 0.3 + ab * 0.5 + kick * 0.4;
-          halo = f.small ? 0.05 : this.throttle * this.throttle * 0.12 + ab * 0.55 + kick * 0.7;
+          else { s = (0.05 + sp * sp * 0.26 + this.abLevel * (1.75 + machBoost) * lenK + kick * 0.6 * this.abLevel) * flick * Math.sqrt(f.r / 0.5); ab = this.abLevel; power = sp; }
+          const wr = f.r * (1 + ab * 0.18 * widK + kick * 0.15) * (f.rocket || f.small ? 1 : widK);
+          f.flame.scale.set(wr, wr, Math.max(0.01, s));
+          // variable nozzle: open at idle, closed down at military power, flared wide when the burner lights
+          if (f.lip) { const o = 0.94 + (1 - sp) * 0.08 + ab * 0.16; f.lip.scale.set(o, o, 1); if (f.nozzle) f.nozzle.scale.set(0.96 + o * 0.04, 0.96 + o * 0.04, 1); }
+          glow = f.small ? 0.15 : 0.12 + sp * 0.3 + ab * 0.5 + kick * 0.4;
+          halo = f.small ? 0.05 : sp * sp * 0.12 + ab * 0.55 + kick * 0.7;
         }
-        U.power.value = power; U.ab.value = ab; U.kick.value = kick;
+        U.power.value = power; U.ab.value = ab; U.kick.value = kick; U.dsp.value = dsp; U.dvis.value = dvis;
         f.glow.material.opacity = Math.min(1, glow);
         if (f.halo) {
           f.halo.material.opacity = Math.min(1, halo) * (0.85 + Math.random() * 0.15);
@@ -439,12 +493,12 @@
         }
         if (f.core) {
           f.core.visible = near && ab > 0.03 && !f.small;
-          if (f.core.visible) { CU.time.value = U.time.value; CU.ab.value = ab; CU.kick.value = kick; CU.power.value = power; }
+          if (f.core.visible) { CU.time.value = U.time.value; CU.ab.value = ab; CU.kick.value = kick; CU.power.value = power; CU.dsp.value = dsp; CU.dvis.value = dvis; }
         }
       }
       if (F.model && RJ.vehicles) RJ.vehicles.visual(this, dt);
       // hot nozzles glow dull orange at high power
-      this.heat = RJ.damp(this.heat, this.throttle * this.throttle * 0.3 + this.abLevel * 0.8 + (this.abKick || 0) * 0.3, 1.5, dt);
+      this.heat = RJ.damp(this.heat, sp * sp * 0.3 + this.abLevel * 0.8 + (this.abKick || 0) * 0.3, 1.5, dt);
       const metal = vis.materials && vis.materials.metal;
       if (metal) metal.emissive.setRGB(0.9 * this.heat, 0.3 * this.heat, 0.08 * this.heat);
       const pitch = this.ctl.pitch, roll = this.ctl.roll;

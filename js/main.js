@@ -259,7 +259,7 @@
         const s = tv2.copy(wp).project(camera);
         if (s.z > 1 || Math.abs(s.x) > 1.2 || Math.abs(s.y) > 1.2) continue;
         const rad = (f.r * 3 / dist) / (2 * tanH);
-        const k = (focus.throttle * 0.45 + focus.abLevel + (focus.hyperK || 0) * 1.5) * RJ.clamp(90 / dist, 0, 1);
+        const k = ((focus.spool == null ? focus.throttle : focus.spool) * 0.45 + focus.abLevel * (1.1 + (1 - RJ.atmo(focus.pos.y).delta) * 0.4) + (focus.hyperK || 0) * 1.5) * RJ.clamp(90 / dist, 0, 1);
         if (k > 0.02) P.heat.push([(s.x + 1) / 2, (s.y + 1) / 2, Math.max(rad, 0.01), k]);
       }
     }
@@ -613,8 +613,8 @@
     const m = focus.mach;
     const buffet = focus.state === "flying" ? RJ.smooth(0.86, 0.98, m) * (1 - RJ.smooth(1.0, 1.06, m)) : 0;
     const turb = focus.state === "flying" ? RJ.clamp((focus.speed - 120) / 400, 0, 1) * (1 - RJ.smooth(40, 600, focus.agl)) : focus.onGround ? RJ.clamp(focus.speed / 120, 0, 1) * 0.3 : 0;
-    cam.base = buffet * 0.4 + turb * 0.35 + (RJ.world.inCloud || 0) * 0.25;
-    RJ.audio.buffet(focus === player ? buffet * 0.8 + turb * 0.25 : 0);
+    cam.base = buffet * 0.4 + turb * 0.35 + (RJ.world.inCloud || 0) * 0.25 + (focus.buffet || 0) * 0.45 + (focus.turb || 0) * 0.12;
+    RJ.audio.buffet(focus === player ? buffet * 0.8 + turb * 0.25 + (focus.buffet || 0) * 0.6 : 0);
     RJ.lever.frame(player, camera, dt);
     const camMode = cam.update(dt, focus);
     RJ.nav.update(player, camera, dt);

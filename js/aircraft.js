@@ -96,7 +96,7 @@
     "  gl_Position = projectionMatrix * mv; }"
   ].join("\n");
   const FLAME_FRAG = [
-    "uniform float time; uniform float power; uniform float ab; uniform vec3 hot; uniform vec3 mid; uniform float seed; uniform float layer; uniform float kick;",
+    "uniform float time; uniform float power; uniform float ab; uniform vec3 hot; uniform vec3 mid; uniform float seed; uniform float layer; uniform float kick; uniform float dsp; uniform float dvis;",
     "varying vec2 vUv; varying float vFres;",
     "float fh(vec2 p){ p = mod(p, 289.0); return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }",
     "float fn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
@@ -111,7 +111,7 @@
     // core: blue-white at the nozzle, warming to yellow; Mach diamonds = bright standing bands that fade downstream
     "    vec3 blueW = vec3(0.72, 0.84, 1.0);",
     "    col = mix(blueW, hot, smoothstep(0.0, 0.75, t));",
-    "    float dia = pow(0.5 + 0.5 * cos(t * 31.4 - 0.9), 9.0) * exp(-t * 1.3) * (0.9 + 0.1 * n);",
+    "    float dia = pow(0.5 + 0.5 * cos(t * 31.4 * dsp - 0.9), 9.0) * exp(-t * 1.3 / dsp) * (0.9 + 0.1 * n) * dvis;",
     "    col = col * (0.55 + kick * 1.2) + vec3(1.0, 0.95, 0.82) * dia * (3.2 + kick * 2.0);",
     "    a = (1.0 - smoothstep(0.6, 1.0, t)) * (0.5 + 0.5 * ctr) * (0.12 + dia * 1.1) * ab;",
     "  } else {",
@@ -120,7 +120,7 @@
     "    vec3 body = mix(mid, hot, ctr * exp(-t * 2.2));",
     "    col = mix(body, tail, smoothstep(0.35, 1.0, t));",
     "    col += vec3(0.35, 0.5, 1.0) * exp(-t * 14.0) * (0.3 + ab * 0.9);", // flame-holder blue at the exit
-    "    float dia = ab * pow(0.5 + 0.5 * cos(t * 30.0 - 0.6), 10.0) * exp(-t * 2.4) * (0.7 + 0.3 * n);",
+    "    float dia = ab * pow(0.5 + 0.5 * cos(t * 30.0 * dsp - 0.6), 10.0) * exp(-t * 2.4 / dsp) * (0.7 + 0.3 * n) * dvis;",
     "    col += hot * dia * 0.8;",
     "    col *= 0.75 + ab * 0.55 + kick * 1.2;",
     "    a = pow(1.0 - t, 1.2) * (0.35 + 0.65 * n) * pow(vFres, 1.1) * 0.8;",
@@ -133,7 +133,7 @@
     return new THREE.ShaderMaterial({
       vertexShader: FLAME_VERT, fragmentShader: FLAME_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
       uniforms: {
-        time: { value: Math.random() * 10 }, power: { value: 0.5 }, ab: { value: 0 }, seed: { value: Math.random() * 50 }, layer: { value: layer }, kick: { value: 0 },
+        time: { value: Math.random() * 10 }, power: { value: 0.5 }, ab: { value: 0 }, seed: { value: Math.random() * 50 }, layer: { value: layer }, kick: { value: 0 }, dsp: { value: 1 }, dvis: { value: 1 },
         hot: { value: new THREE.Color(o.core || 0xfff1d0) }, mid: { value: new THREE.Color(o.color || 0xff7a26) }
       }
     });
@@ -149,10 +149,11 @@
   }
   /** Engine exhaust: hot nozzle (heat-glow emissive), shader plume and a glow disc the flight code animates. */
   function engine(g, M, r, x, y, z, o = {}) {
+    let nozzle = null, lip = null;
     if (!o.noNozzle) {
-      tube(g, r * 1.12, r * 0.98, r * 1.8, x, y, z - r * 0.9, M.metal);
+      nozzle = tube(g, r * 1.12, r * 0.98, r * 1.8, x, y, z - r * 0.9, M.metal);
       // petals ring at the nozzle lip
-      const lip = new THREE.Mesh(new THREE.TorusGeometry(r * 1.03, r * 0.07, 6, 18), M.metal);
+      lip = new THREE.Mesh(new THREE.TorusGeometry(r * 1.03, r * 0.07, 6, 18), M.metal);
       lip.position.set(x, y, z - 0.02); g.add(lip);
     }
     const mat = flameMaterial(o);
@@ -173,7 +174,7 @@
     glow.add(halo);
     for (const m of [flame, glow, core, halo]) m.layers.set(RJ.LATE);
     g.add(flame, glow);
-    g.userData.flames.push({ flame, glow, mat, core, coreMat, halo, r, small: !!o.small, rocket: !!o.rocket });
+    g.userData.flames.push({ flame, glow, mat, core, coreMat, halo, r, small: !!o.small, rocket: !!o.rocket, nozzle, lip });
     g.userData.nozzles.push(V3(x, y, z + r * 0.3));
   }
   function missile(g, M, x, y, z, len = 3, r = 0.09) {
@@ -719,33 +720,57 @@
   ];
 
   /* ======================= DERIVED FLIGHT CONSTANTS ======================= */
-  RJ.thrustFactor = (eng, rho, v, F) => {
+  /** Installed thrust as a fraction of sea-level static, by engine type: density lapse, ram recovery with Mach
+   * (much stronger in afterburner), and the inlet-temperature limit past each airframe's design Mach. */
+  RJ.thrustFactor = (eng, rho, v, F, ab, mach) => {
+    const M = mach != null ? mach : v / RJ.soundSpeed(F && F._alt != null ? F._alt : 0);
     switch (eng) {
       case "rocket": return 1;
       case "scram": return Math.pow(rho, 0.35);
-      case "ramjet": return Math.pow(rho, 0.45);
-      case "fan": return Math.pow(rho, 0.75);
+      case "ramjet": return Math.pow(rho, 0.45) * (0.6 + 0.4 * Math.min(M / 2, 1.5));
+      case "fan": return Math.pow(rho, 0.75) * (1 - 0.32 * Math.min(M, 0.9)); // high-bypass: thrust falls with speed
       case "prop": return Math.pow(rho, 0.8) * RJ.clamp(1 - Math.pow(v / (F.vmax * 1.18), 2), 0.05, 1);
-      default: return Math.pow(rho, 0.65);
+      default: {
+        const Md = F ? F.machD || 1.5 : 1.5;
+        const ram = ab ? Math.pow(rho, 0.6) * (1 + 0.55 * M) : Math.pow(rho, 0.7) * (1 + 0.2 * M);
+        return ram * (1 - 0.85 * RJ.smooth(Md * 1.03, Md * 1.35, M));
+      }
     }
   };
+  /** Transonic/supersonic wave drag as a fraction of parasite drag. */
+  RJ.waveK = (F, M) => M <= 0.85 ? 0 : (F.subsonic ? 2.4 : 0.32) * RJ.smooth(0.85, 1.05, M) * (1 - 0.5 * RJ.smooth(1.2, 1.7, M));
+  /** Mass and fuel: empty kg, internal fuel kg, TSFC dry and wet (kg per kgf per hour). */
+  const MASS = { f16: [8570, 3200, 0.76, 1.95], fa18e: [14550, 6780, 0.81, 1.86], f15c: [12700, 6100, 0.75, 2.05], a10: [11320, 4990, 0.37, 0], f35a: [13290, 8280, 0.79, 1.9],
+    f15ex: [14300, 6100, 0.75, 2.0], f22: [19700, 8200, 0.73, 1.85], f14: [19840, 7350, 0.70, 2.5], f4: [13760, 6000, 0.86, 1.97], p51: [3460, 690, 0.5, 0], f117: [13380, 8200, 0.9, 0],
+    ea18g: [15000, 6780, 0.81, 1.86], yf23: [13000, 8500, 0.74, 1.9], b52: [83250, 141100, 0.56, 0], b1b: [87100, 88450, 0.67, 2.4], b2: [71700, 75750, 0.65, 0], b21: [55000, 60000, 0.62, 0],
+    xb70: [115000, 136000, 0.98, 1.8], sr71: [30600, 36300, 0.89, 1.2], yf12: [27600, 31000, 0.9, 1.2], e175: [21800, 9300, 0.6, 0], b738: [41400, 20900, 0.6, 0], a380: [277000, 254000, 0.55, 0] };
   // Rotational inertia (1 = light fighter): how quickly rates and G build. Heavy airframes respond slowly.
   const INERTIA = { f22: 0.85, f16: 0.85, f35a: 0.95, fa18e: 1.0, ea18g: 1.05, f15c: 1.05, f15ex: 1.1, yf23: 1.0, f14: 1.25, f4: 1.35, a10: 1.45, p51: 0.9, f117: 1.6,
     b2: 3.4, b21: 3.0, b1b: 2.8, b52: 4.2, xb70: 3.3, sr71: 2.6, yf12: 2.5, x15: 1.9, hyperion: 2.0, e175: 2.4, b738: 3.0, a380: 4.6 };
+  /** Calibrate parasite drag so full power at the reference altitude gives exactly vmax (including wave drag). */
+  function calibrate(F) {
+    const rr = RJ.rho(F.ref), a = RJ.soundSpeed(F.ref);
+    F.machD = F.vmax / a; F.subsonic = F.machD < 1;
+    F._alt = F.ref;
+    const top = F.ab ? F.mil * RJ.thrustFactor(F.eng, rr, F.vmax, F, false) + (F.ab - F.mil) * RJ.thrustFactor(F.eng, rr, F.vmax, F, true) : F.mil * RJ.thrustFactor(F.eng, rr, F.vmax, F, false);
+    F._alt = null;
+    F.k = top / (rr * F.vmax * F.vmax * (1 + RJ.waveK(F, F.machD)));
+  }
+  RJ.calibrateFlight = calibrate;
   for (const id in A) {
     const F = A[id].flight;
-    const top = F.ab || F.mil;
-    const rr = RJ.rho(F.ref);
-    F.k = (top * RJ.thrustFactor(F.eng, rr, F.vmax, F)) / (rr * F.vmax * F.vmax);
+    calibrate(F);
     F.inertia = INERTIA[id] || 1;
     F.corner = F.vstall * Math.sqrt(F.gmax) * 1.05; // best sustained-turn speed
+    const ms = MASS[id];
+    if (ms) { F.mEmpty = ms[0]; F.mFuel = ms[1]; F.tsfc = ms[2]; F.tsfcAB = ms[3] || ms[2]; }
   }
   /** Register an aircraft defined elsewhere (vehicles.js): catalog entry, hangar order and derived flight constants. */
   RJ.addAircraft = function (id, o, inertia) {
     add(id, o);
     RJ.AIRCRAFT_ORDER.push(id);
-    const F = A[id].flight, top = F.ab || F.mil, rr = RJ.rho(F.ref);
-    F.k = (top * RJ.thrustFactor(F.eng, rr, F.vmax, F)) / (rr * F.vmax * F.vmax);
+    const F = A[id].flight;
+    calibrate(F);
     F.inertia = inertia || 1;
     F.corner = F.vstall * Math.sqrt(F.gmax) * 1.05;
     return A[id];
