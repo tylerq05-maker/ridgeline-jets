@@ -141,6 +141,11 @@
       // ---- lift + gravity bend the flight path ----
       const aL = tv.copy(this.up).multiplyScalar(gAct * RJ.G0);
       aL.addScaledVector(this.fwd, -aL.dot(this.fwd));
+      // ground effect: within about one wingspan of the ground the wing makes extra lift and less induced drag,
+      // so the jet floats in the flare instead of dropping onto the runway
+      const span = this.vis.dims.span, agl0 = this.agl;
+      this.ge = agl0 < span * 1.2 && this.up.y > 0.7 ? RJ.clamp(1 - agl0 / (span * 1.2), 0, 1) : 0;
+      if (this.ge > 0) aL.addScaledVector(this.up, RJ.G0 * 0.14 * this.ge * Math.min(1, liftG));
       const capL = F.pitch * DEG * 1.25 * v * (F.tvc ? 1.12 : 1);
       const aLm = aL.length();
       if (aLm > capL) aL.multiplyScalar(capL / aLm);
@@ -182,7 +187,7 @@
       const gearDrag = this.gearT * 0.45;
       const parasite = q * ((inp.brake ? 2.6 : 1) + gearDrag) + (inp.brake ? 5 * Math.sqrt(rho) : 0);
       // induced drag grows below corner speed: hard turns slow you down, more so when already slow
-      const induced = F.ind * Math.pow(Math.max(0, Math.abs(gAct) - 1), 1.5) * RJ.clamp(Math.pow((F.corner || 200) / v, 0.8), 0.6, 2.2);
+      const induced = (1 - 0.45 * (this.ge || 0)) * F.ind * Math.pow(Math.max(0, Math.abs(gAct) - 1), 1.5) * RJ.clamp(Math.pow((F.corner || 200) / v, 0.8), 0.6, 2.2);
       this.mach = v / RJ.soundSpeed(alt);
       const subsonicDesign = F.vmax / RJ.soundSpeed(F.ref) < 1;
       const wave = this.mach > 0.85 ? q * (subsonicDesign ? 2.4 : 0.32) * RJ.smooth(0.85, 1.05, this.mach) * (1 - 0.5 * RJ.smooth(1.2, 1.7, this.mach)) : 0;
@@ -431,9 +436,13 @@
       for (const sw of vis.sweep) sw.grp.rotation.y = -sw.s * RJ.lerp(sw.min, sw.max, RJ.smooth(sw.mach[0], sw.mach[1], this.mach));
       // ailerons, flaps and rudders follow the (smoothed) stick; flaps drop with the gear or at low speed
       const flapT = RJ.clamp(Math.max(this.gearT, 1 - (this.speed - F.vstall * 1.2) / (F.vstall * 0.8)), 0, 1);
-      if (vis.ailerons) for (const ai of vis.ailerons) ai.grp.rotation.x = -roll * 0.38 * ai.s - pitch * 0.06;
-      if (vis.flaps) for (const fl of vis.flaps) fl.grp.rotation.x = 0.5 * flapT - roll * 0.08 * fl.s;
-      if (vis.rudders) for (const ru of vis.rudders) ru.grp.rotation.y = -this.ctl.yaw * 0.42 - roll * 0.06;
+      // speed brake (B in flight): fighters split their surfaces like an F-22 / F-18 — ailerons up, flaps down,
+      // twin rudders toed out — so you can see the brake working
+      this.brakeT = RJ.damp(this.brakeT || 0, this.input.brake && this.state === "flying" ? 1 : 0, 5, dt);
+      const bk = this.brakeT;
+      if (vis.ailerons) for (const ai of vis.ailerons) ai.grp.rotation.x = -roll * 0.38 * ai.s - pitch * 0.06 - bk * 0.45;
+      if (vis.flaps) for (const fl of vis.flaps) fl.grp.rotation.x = 0.5 * Math.max(flapT, bk * 0.8) - roll * 0.08 * fl.s;
+      if (vis.rudders) for (const ru of vis.rudders) ru.grp.rotation.y = -this.ctl.yaw * 0.42 - roll * 0.06 + (ru.s || 0) * bk * 0.45;
       if (vis.nav) { const t = this.time % 1.3; vis.nav.strobe.color.setScalar(t < 0.06 || (t > 0.16 && t < 0.2) ? 5 : 0); }
       for (const pr of vis.props) { pr.hub.rotation.z += dt * (25 + this.throttle * 55); pr.disc.material.opacity = 0.12 + this.throttle * 0.12; }
       for (const dr of vis.droop) dr.grp.rotation.z = -dr.s * (RJ.smooth(0.9, 1.4, this.mach) * 0.44 + RJ.smooth(1.4, 2.5, this.mach) * 0.7);

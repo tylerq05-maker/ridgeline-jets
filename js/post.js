@@ -70,13 +70,13 @@
         "uniform float motion; uniform vec2 motionCenter; uniform float chroma;",
         "uniform vec4 heat[4]; uniform vec4 shock[3]; uniform float shockWidth;",
         "uniform float useDepth; uniform vec3 dof; uniform float camNear; uniform float camFar;",
+        "uniform vec3 sunP; uniform vec3 sunC; uniform float rays; uniform float flare;",
         "varying vec2 vUv;",
         "float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }",
         "float linDepth(float d){ float z = d * 2.0 - 1.0; return 2.0 * camNear * camFar / (camFar + camNear - z * (camFar - camNear)); }",
         // ACES filmic (Narkowicz fit) applied in linear light; the buffer holds display-referred values
         "vec3 acesF(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }",
         "vec3 tone(vec3 c){ vec3 lin = pow(max(c, 0.0), vec3(2.2)) * 0.9; return pow(acesF(lin), vec3(1.0 / 2.2)); }",
-        "vec3 toneOld(vec3 x){ vec3 a = vec3(0.72); vec3 o = a + (1.0 - a) * (1.0 - exp(-(x - a) / (1.0 - a))); return mix(x, o, step(a, x)); }",
         "void main(){",
         "  vec2 uv = vUv;",
         // shockwave refraction rings
@@ -103,6 +103,29 @@
         "  }",
         "  vec3 bloom = texture2D(tBloom1, uv).rgb * 0.55 + texture2D(tBloom2, uv).rgb * 0.75;",
         "  col += bloom * bloomStrength;",
+        // sun shafts: march toward the sun through sky / bright-cloud pixels; lens flare ghosts along the optical axis
+        "  if (sunP.z > 0.001 && useDepth > 0.5) {",
+        "    float vis = 0.0;",
+        "    for (int k = 0; k < 5; k++) { vec2 o = vec2(float(k - 2) * 0.004, float((k * 3) % 5 - 2) * 0.004); vec2 sq = sunP.xy + o;",
+        "      vis += step(0.99999, texture2D(tDepth, sq).x) * smoothstep(0.55, 1.2, dot(texture2D(tScene, sq).rgb, vec3(0.333))); }",
+        "    vis = vis / 5.0 * sunP.z;",
+        "    if (rays > 0.0) {",
+        "      vec2 dl = (sunP.xy - uv) / 20.0; vec2 q = uv; float acc = 0.0, w = 1.0;",
+        "      for (int i = 0; i < 20; i++) { q += dl; vec3 sc = texture2D(tScene, q).rgb; float sky = step(0.99999, texture2D(tDepth, q).x);",
+        "        acc += sky * smoothstep(0.5, 1.5, dot(sc, vec3(0.333))) * w; w *= 0.95; }",
+        "      vec2 dd = (uv - sunP.xy) * vec2(aspect, 1.0);",
+        "      col += sunC * acc / 20.0 * rays * sunP.z * (1.0 - smoothstep(0.0, 1.1, length(dd)));",
+        "    }",
+        "    if (flare > 0.0 && vis > 0.01) {",
+        "      vec2 ax = vec2(0.5) - sunP.xy;",
+        "      vec3 fl = vec3(0.0);",
+        "      for (int g = 0; g < 5; g++) { float f = 0.35 + float(g) * 0.42; vec2 gp = sunP.xy + ax * f * 2.0; float r = 0.025 + 0.02 * float(g % 3);",
+        "        float dg = length((uv - gp) * vec2(aspect, 1.0)); fl += mix(vec3(0.4, 0.6, 1.0), vec3(1.0, 0.7, 0.4), fract(f)) * smoothstep(r, r * 0.6, dg) * 0.05; }",
+        "      float dh = length((uv - sunP.xy) * vec2(aspect, 1.0)); fl += sunC * 0.06 * smoothstep(0.012, 0.0, abs(dh - 0.28));", // halo ring
+        "      fl += sunC * 0.35 * exp(-dh * 9.0) * 0.4;",
+        "      col += fl * vis * flare;",
+        "    }",
+        "  }",
         "  col = mix(col, flashCol, flash);",
         "  col *= exposure;",
         "  col = tone(col);",
@@ -121,7 +144,8 @@
         vignette: { value: 0.32 }, grain: { value: 0.012 }, flash: { value: 0 }, flashCol: { value: new THREE.Vector3(1, 1, 1) },
         motion: { value: 0 }, motionCenter: { value: new THREE.Vector2(0.5, 0.5) }, chroma: { value: 0 },
         heat: { value: heat }, shock: { value: shock }, shockWidth: { value: 0.035 },
-        useDepth: { value: 0 }, dof: { value: new THREE.Vector3(100, 200, 0) }, camNear: { value: 0.5 }, camFar: { value: 20000 }
+        useDepth: { value: 0 }, dof: { value: new THREE.Vector3(100, 200, 0) }, camNear: { value: 0.5 }, camFar: { value: 20000 },
+        sunP: { value: new THREE.Vector3() }, sunC: { value: new THREE.Vector3(1, 0.9, 0.8) }, rays: { value: 0 }, flare: { value: 0 }
       });
       P.fxaa = mk([
         "uniform sampler2D tDiffuse; uniform vec2 resolution; varying vec2 vUv;",
@@ -154,7 +178,7 @@
       P.ok = true;
     } catch (e) { console.warn("Post-processing unavailable", e); P.ok = false; }
     // per-frame inputs set by the game
-    P.fx = { motion: 0, motionCenter: [0.5, 0.5], chroma: 0, heat: [], shocks: [], flash: 0, flashCol: [1, 1, 1], dof: null };
+    P.fx = { sun: null, motion: 0, motionCenter: [0.5, 0.5], chroma: 0, heat: [], shocks: [], flash: 0, flashCol: [1, 1, 1], dof: null };
   };
 
   P.setSize = function (w, h) {
@@ -265,7 +289,10 @@
     U.flash.value = fx.flash; U.flashCol.value.set(fx.flashCol[0], fx.flashCol[1], fx.flashCol[2]);
     for (let i = 0; i < 4; i++) { const h = S.heatHaze !== false && fx.heat[i]; if (h) U.heat.value[i].set(h[0], h[1], h[2], h[3]); else U.heat.value[i].set(0, 0, 0, 0); }
     for (let i = 0; i < 3; i++) { const s = fx.shocks[i]; if (s) U.shock.value[i].set(s[0], s[1], s[2], s[3]); else U.shock.value[i].set(0, 0, 0, 0); }
-    U.useDepth.value = dofOn ? 1 : 0;
+    const sunOn = S.sunFx !== false && fx.sun && P.depthOK;
+    U.useDepth.value = dofOn || sunOn ? 1 : 0;
+    if (!dofOn) U.dof.value.set(0, 1, 0);
+    if (sunOn) { U.sunP.value.set(fx.sun[0], fx.sun[1], fx.sun[2]); U.sunC.value.set(fx.sun[3], fx.sun[4], fx.sun[5]); U.rays.value = fx.sun[6]; U.flare.value = fx.sun[7]; } else U.sunP.value.z = 0;
     if (dofOn) U.dof.value.set(fx.dof[0], fx.dof[1], fx.dof[2]);
     U.camNear.value = camera.near; U.camFar.value = camera.far;
     const fxaaOn = S.fxaa !== false;

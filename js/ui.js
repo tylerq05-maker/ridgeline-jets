@@ -144,11 +144,11 @@
     $("fight-start").disabled = !!bad;
     opts($("fight-match"), RJ.modes.MATCHES, s.match, (v) => { s.match = v; UI.renderFight(); });
     const done = (RJ.progress.missions || {});
-    opts($("fight-missions"), RJ.modes.MISSIONS.map((m) => ({ id: m.id, name: m.name + (done[m.id] && done[m.id].won ? " ✓" : ""), desc: m.desc })), s.match, (v) => { s.match = v; UI.renderFight(); });
+    opts($("fight-missions"), RJ.modes.MISSIONS.map((m) => ({ id: m.id, name: m.name + (done[m.id] && done[m.id].won ? " " + "★".repeat(done[m.id].stars || 1) + "☆".repeat(3 - (done[m.id].stars || 1)) : ""), desc: m.desc })), s.match, (v) => { s.match = v; UI.renderFight(); });
     const isMission = RJ.modes.isMission(s.match);
     $("fight-arena-group").hidden = isMission;
     const k = RJ.settings.keys;
-    const wingy = isMission ? ["escort", "castle", "carrier"].includes(s.match) : (RJ.modes.MATCHES.find((m) => m.id === s.match) || {}).blue > 1;
+    const wingy = isMission ? ["escort", "castle", "carrier", "nightraid", "sweep"].includes(s.match) : (RJ.modes.MATCHES.find((m) => m.id === s.match) || {}).blue > 1;
     $("fight-wing-help").textContent = wingy && !RJ.isTouch ? `Wingman calls: ${RJ.keyLabel(k.wingAttack)} attack my target · ${RJ.keyLabel(k.wingCover)} cover me · ${RJ.keyLabel(k.wingForm)} form up · ${RJ.keyLabel(k.wingDefend)} defend objective` : wingy ? "Wingman calls are on the WING buttons in flight." : "";
     chips($("fight-diff"), RJ.modes.DIFFS, s.diff, (v) => { s.diff = v; UI.renderFight(); });
     chips($("fight-arena"), RJ.modes.ARENAS, s.arena, (v) => { s.arena = v; UI.renderFight(); });
@@ -325,6 +325,9 @@
     if (special.length) facts.push(["Special", special.join(". ")]);
     $("hg-facts").innerHTML = facts.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
     const un = RJ.isUnlocked(h.sel);
+    // paint jobs: saved per aircraft, applied to the hangar model and to your jet in every mode
+    const paint = (RJ.settings.paint || {})[a.id] || "factory";
+    $("hg-paint").innerHTML = Object.entries(RJ.PAINTS).map(([k, v]) => `<button class="chip" data-paint="${k}" aria-pressed="${k === paint}">${esc(v.name)}</button>`).join("");
     $("hg-lock").hidden = un;
     if (!un) $("hg-lock").innerHTML = `<b>Locked for Dogfight.</b> ${esc(UI.unlockText(a))} You can still take it on a test flight in Free Flight.`;
     const sel = $("hg-select");
@@ -351,6 +354,7 @@
       h += row("Dynamic resolution", "Lowers the render resolution a little when the frame rate drops, restores it when there's headroom", toggle("dynRes"));
       h += row("Shadows", "Real-time aircraft and airbase shadows (mountain shadows are always on)", toggle("shadows"));
       h += row("Bloom", "Glow from the sun, afterburners and runway lights", toggle("bloom"));
+      h += row("Sun shafts & lens flare", "God rays through clouds and terrain edges, camera lens flare (Medium and up)", toggle("sunFx"));
       h += row("Motion blur", "Subtle radial blur at very high speed", toggle("motionBlur"));
       h += row("Heat haze", "Exhaust distortion behind the engines", toggle("heatHaze"));
       h += row("Depth of field", "Cinematic camera and hangar only", toggle("dof"));
@@ -365,6 +369,7 @@
       h += row("Master volume", null, range("master", 0, 1, 0.05));
       h += row("Aircraft engines", "Your jet and the aircraft around you", range("engineVol", 0, 1, 0.05));
       h += row("Wind and ambience", "Airflow, runway rumble, cabin and cockpit ambience", range("envVol", 0, 1, 0.05));
+      h += row("Menu music", "Ambient synth score on the main menu and in the hangar", range("musicVol", 0, 1, 0.05));
       h += row("Weapons and effects", null, range("sfxVol", 0, 1, 0.05));
       h += row("Nova (flight companion)", "Greets you in Free Flight, talks during flights and answers anything you ask. Hold " + RJ.keyLabel(RJ.settings.keys.talk) + " or tap 🎙 to talk.", toggle("compOn"));
       h += row("Nova's volume", null, range("compVol", 0, 1, 0.05));
@@ -502,6 +507,12 @@
     hold("t-gun", "gun"); hold("t-ab", "ab"); hold("t-brk", "brake");
     const tap = (id, action) => $(id).addEventListener("pointerdown", (e) => { e.preventDefault(); RJ.input.touchEdges.add(action); });
     tap("t-msl", "missile"); tap("t-flr", "flares"); tap("t-tgt", "target"); tap("t-cam", "camera"); tap("t-gear", "gear");
+    $("hg-paint").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-paint]"); if (!b) return;
+      UI.click();
+      RJ.settings.paint = Object.assign({}, RJ.settings.paint, { [UI.hangar.sel]: b.dataset.paint === "factory" ? null : b.dataset.paint });
+      RJ.saveSettings(); UI.renderHangar(); RJ.hangarView.setAircraft(UI.hangar.sel);
+    });
     $("t-wing").addEventListener("pointerdown", (e) => {
       const b = e.target.closest("[data-wing]"); if (!b) return;
       e.preventDefault();

@@ -53,3 +53,21 @@ The renderer is not what caps the look today; the missing art assets and the rem
   (e.g. Poly Haven "aerial_rocks", "snow_field", "forrest_ground") and CC-BY jet models into the repo; I wire them in.
 - Real engine recordings for audio: same.
 - fps per preset: needs a real GPU (the test browser is software-rendered at ~1 fps).
+
+## Results (this pass)
+
+| Phase | What changed | Files |
+|---|---|---|
+| 0–1 | Audit + plan; 30-mode smoke test clean; dead tone-curve code removed | docs/OVERHAUL.md, post.js |
+| 2 Visuals | Physically based sky (Rayleigh + Mie + ozone single scattering, per pixel) with a JS twin that drives fog, ambient, sunlight, water and cloud colours; multi-scatter horizon whitening and highlight knee; sun shafts (god rays) and lens flare with depth-tested occlusion; ACES (previous pass) | world.js, post.js, main.js, ui.js, core.js |
+| 3 Jet detail | Pilot with helmet, visor and ejection-seat headrest in every fighter/trainer cockpit; exhaust heat discolouration (bronze → blued titanium) on nozzle metal; speed brake animation (ailerons up, flaps down, twin rudders toe out) | aircraft.js, flight.js |
+| 4 Flight | Spec audit vs published figures (A-10 top speed corrected); ground effect (extra lift + less induced drag within ~1 span of the ground); G tolerance tunnel → G-LOC blackout with slack stick; starfighters exempt | aircraft.js, flight.js, main.js |
+| 5 Gameplay | 3 new missions (Air Superiority Sweep, Night Raid, Recon Run) → 8 total; Nova radio briefings; 1–3 star ratings saved and shown in the picker | missions.js, ui.js |
+| 6 Progression | Paint jobs in the hangar (Factory, Blue Angels tribute, Arctic, Desert, Shadow, Racer, Jungle), saved per aircraft, applied in every mode | aircraft.js, ui.js, modes.js, main.js, index.html |
+| 7 Nova | New calls: stall, terrain pull-up, low fuel, G-LOC, mission complete/failed (all from live flight state) | companion.js, missions.js |
+| 8 Audio | Ambient synth menu music with volume setting | audio.js, ui.js, main.js, core.js |
+
+**Not done / limits**: no SSAO, SSR or TAA; no new texture or model assets (downloads blocked); canopy does not open; ocean
+is the existing wave/reflection shader (no FFT simulation); fps per preset unmeasured (software-rendered test browser).
+
+**Asset sources**: none added. Everything remains procedural; no third-party assets or licences involved.

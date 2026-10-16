@@ -263,6 +263,19 @@
         if (k > 0.02) P.heat.push([(s.x + 1) / 2, (s.y + 1) / 2, Math.max(rad, 0.01), k]);
       }
     }
+    // sun on screen for shafts and lens flare (fades near the frame edge and when the sun is low or gone)
+    const W = RJ.world, sd = W.sunDir;
+    P.sun = null;
+    if (W.sunElev > -2 && !W.underwater && RJ.settings.quality !== "low") {
+      const sp = tv.copy(camera.position).addScaledVector(sd, 10000).project(camera);
+      const inFront = tv2.copy(sd).dot(tv.set(0, 0, -1).applyQuaternion(camera.quaternion)) > 0;
+      if (inFront && Math.abs(sp.x) < 1.4 && Math.abs(sp.y) < 1.4) {
+        const edge = 1 - RJ.smooth(0.9, 1.4, Math.max(Math.abs(sp.x), Math.abs(sp.y)));
+        const c = W.sun.color, k = RJ.smooth(-2, 6, W.sunElev) * (1 - (W.inCloud || 0)) * edge;
+        const wx = W.WEATHER[W.env.weather] || {};
+        P.sun = [(sp.x + 1) / 2, (sp.y + 1) / 2, k, c.r, c.g, c.b, 0.55 * (1 - (wx.dark || 0)), camMode === "cockpit" ? 0.6 : 1.0];
+      }
+    }
     P.shocks = RJ.sonic.screenShocks(camera);
     P.flash = Math.max(0, P.flash - dt * 2.2);
     P.chroma = RJ.damp(P.chroma, 0, 4, dt);
@@ -308,7 +321,7 @@
   HV.setAircraft = function (id) {
     if (HV.model) { HV.scene.remove(HV.model); HV.model.traverse((o) => { if (o.geometry && o.geometry.type !== "ConeGeometry") o.geometry.dispose(); }); }
     HV.id = id;
-    HV.model = RJ.buildAircraft(id);
+    HV.model = RJ.buildAircraft(id, (RJ.settings.paint || {})[id] || null);
     const d = HV.model.userData.dims;
     HV.size = Math.max(d.len, d.span);
     HV.model.position.y = d.gearH || d.height * 0.5 + 1.8;
@@ -523,7 +536,7 @@
   document.addEventListener("visibilitychange", () => { if (document.hidden) RJ.pause(); });
 
   /* ======================= PLAY FRAME ======================= */
-  let gStress = 0, dmgFlash = 0, lastOverlays = null;
+  let gStress = 0, gloc = 0, dmgFlash = 0, lastOverlays = null;
   /* Fixed-timestep simulation: physics, AI and weapons always step at SIM_DT whatever the frame rate, so the
    * aircraft fly identically at 30, 60 or 240 fps. Rendering then shows each aircraft interpolated between its
    * last two physics states (alpha = leftover time / SIM_DT), and the true state is restored before the next step. */
@@ -563,6 +576,7 @@
       Object.assign(pl.input, { pitch: ax.pitch, roll: ax.roll, yaw: ax.yaw, thr: ax.thr, thrAbs: ax.thrAbs, ab: ax.ab, brake: ax.brake, guns: ax.guns });
       RJ.lever.apply(pl, dt);
       RJ.nav.control(pl, dt);
+      if (RJ.glocActive) { pl.input.pitch = 0; pl.input.roll = 0; pl.input.yaw = 0; } // unconscious: hands off
       if (I.action("hyper")) { if (pl.spec.flight.model === "space") RJ.vehicles.toggleHyper(pl); else RJ.ui.flash("HYPERSONIC: STAR WARS CRAFT ONLY", null, 0.9); }
       if (I.action("autopilot")) RJ.nav.toggleAuto(pl);
       if (I.action("gear")) { pl.toggleGear(); if (!pl.spec.flight.model) RJ.ui.flash(pl.gearDown ? "GEAR DOWN" : "GEAR UP", null, 0.8); }
@@ -632,14 +646,20 @@
     RJ.ui.banner(missileIn ? "missile" : lockedOn ? "lock" : null);
     if (RJ.companion) RJ.companion.update(dt, player, turb);
     // G-effects
-    const fighter = player.spec.flight.gmax > 5;
-    if (player.alive && fighter && player.g > 6.5) gStress += (player.g - 6.5) * 0.22 * dt;
-    else gStress = Math.max(0, gStress - dt * 0.45);
-    gStress = Math.min(gStress, 1.2);
+    // G tolerance: sustained high G narrows the view to a tunnel, then G-LOC (the pilot blacks out for a few
+    // seconds and the stick goes slack). Negative G reddens the view. Starfighters have inertial dampers.
+    const fighter = player.spec.flight.gmax > 5 && player.spec.flight.model !== "space";
+    if (player.alive && fighter && player.g > 6.5) gStress += (player.g - 6.5) * 0.12 * dt;
+    else gStress = Math.max(0, gStress - dt * (gloc > 0 ? 0.2 : 0.45));
+    gStress = Math.min(gStress, 1.3);
+    if (gStress >= 1.25 && gloc <= 0 && player.alive) { gloc = 3; RJ.ui.flash("G-LOC", "Ease off the pull", 2.5, true); }
+    gloc = Math.max(0, gloc - dt);
+    RJ.glocActive = gloc > 0.6;
     const neg = player.alive && player.g < -1.8;
     const vg = $("vignette");
-    vg.style.opacity = RJ.clamp(gStress * 0.75 + (neg ? 0.35 : 0), 0, 0.9).toFixed(3);
-    vg.style.background = neg ? "radial-gradient(ellipse at center, rgba(120,0,0,0) 35%, rgba(150,0,0,.85) 100%)" : "";
+    const tunnel = Math.round(RJ.clamp(62 - gStress * 46, 6, 62));
+    vg.style.opacity = (gloc > 0 ? RJ.clamp(gloc, 0, 1) : RJ.clamp(gStress * 0.85 + (neg ? 0.35 : 0), 0, 0.95)).toFixed(3);
+    vg.style.background = gloc > 0 ? "#000" : neg ? "radial-gradient(ellipse at center, rgba(120,0,0,0) 35%, rgba(150,0,0,.85) 100%)" : `radial-gradient(ellipse at center, rgba(0,0,0,0) ${tunnel}%, rgba(0,0,0,.97) ${Math.min(100, tunnel + 38)}%)`;
     dmgFlash = Math.max(0, dmgFlash - dt * 2.5);
     $("dmgflash").style.opacity = dmgFlash.toFixed(3);
     RJ.hud.hitFlash = Math.max(0, RJ.hud.hitFlash - dt);
@@ -764,6 +784,8 @@
       else if (st === "hangar") HV.render(dt);
       else if (st === "menu") menuFrame(dt);
     } catch (e) { console.error(e); }
+    const musKey = st + (RJ.audio.ctx ? "+" : "") + (RJ.settings.muted ? "m" : "") + RJ.settings.musicVol;
+    if (RJ.audio.music && musKey !== RJ._lastSt) { RJ.audio.music(st === "menu" || st === "hangar"); RJ._lastSt = musKey; }
     RJ.ui.tick(dt);
     RJ.input.endFrame();
   }

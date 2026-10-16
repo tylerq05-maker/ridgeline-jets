@@ -15,7 +15,7 @@
   const yawFromDir = (d) => Math.atan2(-d.x, -d.z);
 
   function makePlayer(id, pos, yaw, speed, ground) {
-    const ac = new RJ.Aircraft(id, { team: "blue", player: true, assist: RJ.settings.assist, callsign: "You" });
+    const ac = new RJ.Aircraft(id, { team: "blue", player: true, assist: RJ.settings.assist, callsign: "You", livery: (RJ.settings.paint || {})[id] || null });
     ac.place(pos, yaw, speed, { ground: !!ground });
     RJ.combat.add(ac);
     RJ.audio.setPlayerEngine(ac.spec);

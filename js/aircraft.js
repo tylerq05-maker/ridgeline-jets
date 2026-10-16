@@ -594,7 +594,7 @@
   add("a10", { name: "A-10 Thunderbolt II", short: "A-10", cat: "modern", role: "Close air support", status: "Active · USAF", year: 1972,
     desc: "Built around a 30 mm cannon and a titanium cockpit tub. Slow and heavy, but it takes enormous punishment and hits hardest.",
     colors: { body: 0x5f6862, trim: 0x4a524c, glass: 0x5d6f80 }, build: "a10",
-    flight: { vmax: 210, ref: 1000, mil: 5.6, ab: 0, vstall: 47, gmax: 7.3, roll: 170, pitch: 31, yaw: 22, ind: 0.9, eng: "fan" },
+    flight: { vmax: 196, ref: 1000, mil: 5.6, ab: 0, vstall: 47, gmax: 7.3, roll: 170, pitch: 31, yaw: 22, ind: 0.9, eng: "fan" },
     hp: 290, stealth: 1, radar: 5000, gun: GUN.gau8, msl: { n: 2, name: "AIM-9M", lock: 1.4, cone: 25, range: 3500 }, flares: 60,
     unlock: { start: true }, sound: { type: "fan", pitch: 1.2 } });
   add("f14", { name: "F-14 Tomcat", short: "F-14", cat: "historic", role: "Fleet defense interceptor", status: "Retired 2006 · US Navy", year: 1970,
@@ -869,9 +869,36 @@
       geo.translate(0, len / 2, chord / 2);
       const m = new THREE.Mesh(geo, F.mat); m.castShadow = true;
       rud.add(m); hinge.add(rud); outer.add(hinge); g.add(outer);
-      U.rudders.push({ grp: rud });
+      U.rudders.push({ grp: rud, s: Math.sign(F.o.x || 0) });
     }
     delete U._plates; delete U._fins;
+  }
+  /** A pilot in the front seat: helmet with a dark visor, shoulders and the ejection-seat headrest. */
+  const PILOT_SKIP = { airliner: 1, bomber: 1, car: 1, heli: 1, cargo: 1 };
+  function addPilot(g, a) {
+    if (PILOT_SKIP[a.cat] || ["c17", "g650", "falcon", "bwing"].includes(a.id)) return;
+    const E = g.userData.cockpit; if (!E) return;
+    const hist = a.cat === "historic";
+    const suit = new THREE.MeshStandardMaterial({ color: hist ? 0x5b4a33 : 0x4f5a3a, roughness: 0.9, metalness: 0 });
+    const helm = new THREE.MeshStandardMaterial({ color: hist ? 0x3b2f22 : 0xd9dcd6, roughness: 0.35, metalness: 0.1 });
+    const visor = new THREE.MeshStandardMaterial({ color: 0x15130f, roughness: 0.05, metalness: 0.9, envMapIntensity: 1.6 });
+    const seat = new THREE.MeshStandardMaterial({ color: 0x23262a, roughness: 0.7, metalness: 0.2 });
+    const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(E.x + x, E.y + y, E.z + z); g.add(m); return m; };
+    add(new THREE.SphereGeometry(0.135, 14, 10), helm, 0, 0.0, 0.07);
+    const v = add(new THREE.SphereGeometry(0.128, 14, 8, -Math.PI * 0.5, Math.PI, 0.9, 1.05), visor, 0, 0.005, 0.06); v.rotation.y = Math.PI;
+    add(new THREE.BoxGeometry(0.46, 0.34, 0.28), suit, 0, -0.33, 0.12);
+    add(new THREE.BoxGeometry(0.34, 0.5, 0.1), seat, 0, -0.12, 0.3);
+  }
+  /** Exhaust heat: metal near the tail shifts to bronze, then blued titanium at the nozzle lip (heat-treated look). */
+  function heatTint(mat, dims) {
+    const prev = mat.onBeforeCompile;
+    mat.onBeforeCompile = (sh, r) => {
+      if (prev) prev(sh, r);
+      sh.uniforms.rjHeatZ = { value: new THREE.Vector2(dims.maxZ - dims.len * 0.2, dims.maxZ) };
+      sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying float vHz;").replace("#include <begin_vertex>", "#include <begin_vertex>\nvHz = position.z;");
+      sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nuniform vec2 rjHeatZ; varying float vHz;")
+        .replace("#include <color_fragment>", "#include <color_fragment>\nfloat rjH = smoothstep(rjHeatZ.x, rjHeatZ.y, vHz);\ndiffuseColor.rgb *= mix(vec3(1.0), vec3(0.86, 0.68, 0.48), rjH * 0.85);\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.30, 0.29, 0.42), smoothstep(0.75, 1.0, rjH) * 0.55);");
+    };
   }
   /** Position lights (red port, green starboard, white tail), strobes and a nose pitot probe. */
   function addLights(g, M, a) {
@@ -941,13 +968,24 @@
 
   const AGGRESSOR = [[0xa3956d, 0x7a6e4e], [0x667c97, 0x4b5d73], [0x7f8a5c, 0x5f6844], [0x8f97a0, 0x5c6168]];
   /** Build a model. livery: undefined | "aggressor" | "wingman". */
+  /** Paint jobs (hangar). null body = the aircraft's own factory scheme. */
+  RJ.PAINTS = {
+    factory: { name: "Factory", body: null },
+    blueangels: { name: "Blue Angels tribute", body: 0x0d2c6c, trim: 0xf2b705, accent: 0xf2b705 },
+    arctic: { name: "Arctic", body: 0xe9edf0, trim: 0x9aa4ad, accent: 0xc0392b },
+    desert: { name: "Desert", body: 0xc4a77d, trim: 0x8a6f4c, accent: 0x5b4a33 },
+    shadow: { name: "Shadow", body: 0x2a2d31, trim: 0x1b1d20, accent: 0x7d1f1f },
+    racer: { name: "Racer", body: 0xf2f2f0, trim: 0xc8102e, accent: 0xc8102e },
+    jungle: { name: "Jungle", body: 0x4b5a36, trim: 0x2f3a22, accent: 0xb59b3c }
+  };
   RJ.buildAircraft = function (id, livery) {
     const a = A[id];
     const g = new THREE.Group();
     g.userData = { flames: [], nozzles: [], stabs: [], sweep: [], props: [], droop: [], cockpit: V3(0, 1, -5), tips: [], _plates: [], _fins: [] };
     let body = a.colors.body, trim = a.colors.trim;
     if (livery === "aggressor") { const p = AGGRESSOR[Math.floor(Math.random() * AGGRESSOR.length)]; body = p[0]; trim = p[1]; }
-    if (livery === "blueangels") { body = 0x0d2c6c; trim = 0xf2b705; } // tribute scheme: navy blue with gold trim
+    const PJ = RJ.PAINTS[livery];
+    if (PJ && PJ.body != null) { body = PJ.body; trim = PJ.trim; }
     const stealthy = a.stealth > 1.5;
     const M = {
       body: panelize(std(body, stealthy ? 0.72 : 0.46, stealthy ? 0.12 : 0.38)),
@@ -957,7 +995,7 @@
       dark: std(0x1c1e21, 0.82, 0.2),
       metal: std(0x707176, 0.3, 0.9, { emissive: 0x000000 }),
       white: std(0xe8e8e4, 0.45, 0.08),
-      accent: std(livery === "blueangels" ? 0xf2b705 : a.colors.accent || trim, 0.45, 0.3),
+      accent: std(PJ && PJ.accent != null ? PJ.accent : a.colors.accent || trim, 0.45, 0.3),
       glow: new THREE.MeshBasicMaterial({ color: a.colors.accent || 0x3d7dff }),
       rubber: std(0x151515, 0.92, 0),
       strut: std(0xb9bdc2, 0.32, 0.85)
@@ -977,6 +1015,8 @@
     g.userData.dims = { len: size.z, span: size.x, height: size.y, minZ: bb.min.z, maxZ: bb.max.z, minY: bb.min.y };
     addGear(g, M, a, bb);
     addLights(g, M, a);
+    addPilot(g, a);
+    heatTint(M.metal, g.userData.dims);
     g.userData.materials = M;
     g.traverse((o) => { if (o.isMesh && o.material !== M.glass && o.material.blending !== THREE.AdditiveBlending) o.castShadow = true; });
     if (!RJ.noMerge) mergeStatic(g);

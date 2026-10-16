@@ -652,6 +652,36 @@
     o.type = "square"; o.frequency.value = 1800; g.gain.setValueAtTime(0.03, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
     o.connect(g).connect(AU.uiBus); o.start(t); o.stop(t + 0.05);
   };
+  /* ---------------- menu music: a slow, warm synth pad (Am – F – C – G) with a soft bass and echo ---------------- */
+  const CHORDS = [[220, 261.63, 329.63], [174.61, 220, 261.63], [196, 261.63, 329.63], [196, 246.94, 293.66]];
+  AU.music = function (on) {
+    if (!AU.ctx) return;
+    const want = on && !RJ.settings.muted && (RJ.settings.musicVol == null ? 0.5 : RJ.settings.musicVol) > 0;
+    if (want && !AU._mus) {
+      const ctx = AU.ctx, M = (AU._mus = { out: mkGain(ctx, 0), voices: [], step: 0 });
+      const lp = mkFilt(ctx, "lowpass", 1100, 0.6), dl = ctx.createDelay(1.5), fb = mkGain(ctx, 0.38), wet = mkGain(ctx, 0.35);
+      dl.delayTime.value = 0.62;
+      M.out.connect(lp); lp.connect(AU.uiBus); lp.connect(dl); dl.connect(fb).connect(dl); dl.connect(wet).connect(AU.uiBus);
+      for (let i = 0; i < 3; i++) {
+        const g = mkGain(ctx, 0); g.connect(M.out);
+        const a = mkOsc(ctx, "sawtooth", 220), b = mkOsc(ctx, "sawtooth", 220); b.detune.value = 9; a.detune.value = -7;
+        a.connect(g); b.connect(g); M.voices.push({ a, b, g });
+      }
+      M.bass = mkOsc(ctx, "sine", 55); M.bassG = mkGain(ctx, 0); M.bass.connect(M.bassG).connect(M.out);
+      const next = () => {
+        const t = ctx.currentTime, ch = CHORDS[M.step++ % CHORDS.length];
+        M.voices.forEach((v, i) => { v.a.frequency.setTargetAtTime(ch[i], t, 0.4); v.b.frequency.setTargetAtTime(ch[i], t, 0.4); v.g.gain.setTargetAtTime(0.05, t, 1.2); });
+        M.bass.frequency.setTargetAtTime(ch[0] / 2, t, 0.3); M.bassG.gain.setTargetAtTime(0.12, t, 0.8);
+      };
+      next(); M.timer = setInterval(next, 6400);
+    }
+    if (AU._mus) {
+      const vol = (RJ.settings.musicVol == null ? 0.5 : RJ.settings.musicVol) * 0.5;
+      AU._mus.out.gain.setTargetAtTime(want ? vol : 0, AU.ctx.currentTime, want ? 1.5 : 0.6);
+      if (!want && !AU._mus.stopT) AU._mus.stopT = setTimeout(() => { const M = AU._mus; if (!M) return; clearInterval(M.timer); try { M.out.disconnect(); } catch (e) { /* gone */ } [M.bass, ...M.voices.flatMap((v) => [v.a, v.b])].forEach((o) => { try { o.stop(); } catch (e) { /* stopped */ } }); AU._mus = null; }, 2500);
+      if (want && AU._mus.stopT) { clearTimeout(AU._mus.stopT); AU._mus.stopT = null; }
+    }
+  };
   AU.thunder = () => { burst({ brown: true, f0: 400, f1: 50, dur: 3.5, gain: 0.8, attack: 0.15 }); thump(45, 2.5, 0.4, 0.1); };
   AU.splash = (dist = 0) => burst({ f0: 1800, f1: 300, dur: 1.2, gain: 0.6 * distGain(dist) });
   AU.bombWhistle = () => {

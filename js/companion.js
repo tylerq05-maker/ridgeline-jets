@@ -390,6 +390,11 @@
       else event("hardturn", 35, 0, () => pick(["Ooh, tight turn.", "Nice hard turn.", `Pulling ${g.toFixed(1)} G. Show-off.`]), "hard turn");
     }
     C.turbT = turb > 0.35 ? C.turbT + dt : 0;
+    // safety calls, from the real flight state only
+    if (pl.state === "flying" && !F.model && pl.agl > 40 && pl.speed < F.vstall * 1.12 && pl.vel.y < 2) event("stall", 25, 3, ["Speed's bleeding off! Nose down before we stall.", "We're about to stall. Lower the nose, add power.", "Stall warning! Get the nose down."], "near stall");
+    if (pl.state === "flying" && pl.vel.y < -15 && pl.agl < 700 && pl.agl / -pl.vel.y < 5) event("pullup", 8, 3, ["Pull up! Pull up!", "Terrain! Pull up now!", "Ground! Pull up!"], "terrain warning");
+    if (pl.fuel != null && F.fuel && pl.fuel / F.fuel < 0.15 && pl.throttle > 0.5) event("fuel", 120, 2, [`Fuel's down to ${Math.round(pl.fuel / F.fuel * 100)} percent. Ease off the burner.`, "Bingo fuel. Throttle back and it'll recover."], "low fuel");
+    if (RJ.glocActive) event("gloc", 30, 3, ["Hey! Wake up! You blacked out. Easy on the pull.", "You blacked out! Wake up and ease the pull!"], "G-LOC");
     if (C.turbT > 1.5) event("turb", 60, 0, ["Bit bumpy down here. Hold on.", "Turbulence. Nothing we can't handle.", "Rough air. Hands steady."], "turbulence");
     // when it's been quiet a while she starts a conversation herself (AI when connected, otherwise a line of her own)
     const quietFor = performance.now() / 1000 - Math.max(C.last, C._lastChat || 0);

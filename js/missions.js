@@ -14,11 +14,22 @@
   const CALL = ["Viper", "Cobra", "Jester", "Iceman", "Spike", "Mako", "Havoc", "Razor", "Talon", "Saber", "Bishop", "Wraith"];
 
   M.MISSIONS = [
-    { id: "escort", name: "Escort the B-2", desc: "Keep a B-2 alive along its 28 km strike route. Three flights of fighters will hunt it.", obj: "B-2" },
-    { id: "intercept", name: "Canyon Intercept", desc: "Four strike jets are running the bridge gorge at low level. Stop them before two get through.", obj: "Leakers" },
-    { id: "castle", name: "Defend Highkeep", desc: "Three raids are inbound on Highkeep Castle. Every bomber that reaches it damages the keep.", obj: "Castle" },
-    { id: "carrier", name: "Protect the Carrier", desc: "Escorted strike raids are heading for the carrier. Keep the ship in the fight.", obj: "Carrier" },
-    { id: "pursuit", name: "Pursuit", desc: "A stolen YF-23 is escaping low through the mountains. Shoot it down before it clears the range.", obj: "Target" }
+    { id: "escort", name: "Escort the B-2", desc: "Keep a B-2 alive along its 28 km strike route. Three flights of fighters will hunt it.", obj: "B-2",
+      brief: "Spirit is a B-2 on a twenty-eight kilometre strike run, and three flights of fighters want it dead. Stay close, pick them off before they reach the bomber, and use your wingman." },
+    { id: "intercept", name: "Canyon Intercept", desc: "Four strike jets are running the bridge gorge at low level. Stop them before two get through.", obj: "Leakers",
+      brief: "Four strike jets are coming down the bridge gorge, low and fast. Get down into that canyon with them. If two get through, we lose." },
+    { id: "castle", name: "Defend Highkeep", desc: "Three raids are inbound on Highkeep Castle. Every bomber that reaches it damages the keep.", obj: "Castle",
+      brief: "Three raids are heading for Highkeep Castle. The bombers are the priority, the escorts are a distraction. Don't let them reach the keep." },
+    { id: "carrier", name: "Protect the Carrier", desc: "Escorted strike raids are heading for the carrier. Keep the ship in the fight.", obj: "Carrier",
+      brief: "Strike raids are inbound on the carrier. Five thousand sailors are counting on you. Intercept them well out." },
+    { id: "pursuit", name: "Pursuit", desc: "A stolen YF-23 is escaping low through the mountains. Shoot it down before it clears the range.", obj: "Target",
+      brief: "Someone just stole a YF-23 and it's running low through the mountains. Cut the corners, keep your speed, and bring it down before it reaches the coast." },
+    { id: "sweep", name: "Air Superiority Sweep", desc: "Clear the sky over the range: three waves of fighters, each bigger than the last. Faster clears score more.", obj: "Bandits",
+      brief: "Air superiority sweep. Three waves of fighters, each one bigger than the last. Clear the sky, and the faster you do it, the better I'll grade you." },
+    { id: "nightraid", name: "Night Raid", desc: "Bombers are coming for the home airbase after dark. Find them on radar and stop them.", obj: "Airbase", time: "night",
+      brief: "It's dark, and bombers are heading for our home airbase. Use your radar, watch for their engines, and stop every one of them before they drop." },
+    { id: "recon", name: "Recon Run", desc: "Fly through four photo checkpoints over the landmarks before the clock runs out. Fighters will try to stop you.", obj: "Checkpoints",
+      brief: "Recon run. Four photo checkpoints over the landmarks, and the clock is ticking. Fighters will try to intercept. Stay fast, stay low, and don't stop to fight unless you have to." }
   ];
   M.isMission = (id) => M.MISSIONS.some((m) => m.id === id);
 
@@ -28,7 +39,7 @@
       const o = this.o, ms = this.mission;
       this.match = { id: ms.id, name: ms.name, blue: 1, red: 0 };
       this.diff = M.DIFFS.find((d) => d.id === o.diff) || M.DIFFS[1];
-      RJ.world.setEnvironment({ time: o.time, weather: ms.id === "carrier" || ms.id === "escort" ? "scattered" : "clear" });
+      RJ.world.setEnvironment({ time: ms.time || o.time, weather: ms.id === "carrier" || ms.id === "escort" ? "scattered" : "clear" });
       RJ.atlas.ensure();
       if (RJ.world.airbase) RJ.world.setAirbase(null);
       this.score = 0; this.kills = 0; this.deaths = 0; this.t = 0; this.wave = 0; this.ended = false; this.spectate = null; this.endT = null;
@@ -49,6 +60,8 @@
       if (plan.start) plan.start();
       RJ.progress.stats.matches++; RJ.saveProgress();
       RJ.ui.flash(ms.name.toUpperCase(), plan.brief, 3.5);
+      // Nova gives the briefing over the radio once the jet is live
+      if (RJ.companion && ms.brief) setTimeout(() => { if (RJ.game.mode === this) RJ.companion.say(ms.brief, 3); }, 1800);
     }
     objectivePoint() {
       const p = this.plan;
@@ -174,7 +187,7 @@
           const left = this.raids.flat().filter((e) => e.alive && e.striker && !(e.bombed && e.pos.distanceTo(objPos) > 4000));
           if (allSpawned && !left.length) return this.finish(true, `The ${label} held with ${this.objHp}% integrity.`);
         },
-        status: () => `<b>${id === "castle" ? "DEFEND HIGHKEEP" : "PROTECT THE CARRIER"}</b>${label} ${this.objHp}% · raid ${this.wave}/3 · ${this.raids.flat().filter((e) => e.alive).length} hostile`,
+        status: () => `<b>${{ castle: "DEFEND HIGHKEEP", carrier: "PROTECT THE CARRIER", nightraid: "NIGHT RAID" }[id] || id.toUpperCase()}</b>${label} ${this.objHp}% · raid ${this.wave}/3 · ${this.raids.flat().filter((e) => e.alive).length} hostile`,
         objective: () => { const k = RJ.settings.keys; return `Bombers (marked on radar) must not reach the ${label}. ${RJ.keyLabel(k.wingDefend)} · wingmen defend it, ${RJ.keyLabel(k.wingAttack)} · wingmen attack your target.`; },
         marker: () => objPos
       };
@@ -192,6 +205,90 @@
       const P = this.raidPlan("carrier", objPos, "carrier");
       P.pPos = objPos.clone().add(V3(2200, 900, 600)); P.pYaw = yawFromDir(objPos.clone().sub(P.pPos).setY(0).normalize());
       return P;
+    }
+    plan_nightraid() {
+      const h = RJ.atlas.home, objPos = V3(h.x, G(h.x, h.z) + 40, h.z);
+      const P = this.raidPlan("nightraid", objPos, "airbase");
+      P.pPos = objPos.clone().add(V3(1800, 0, -1400)); P.pPos.y = Math.max(objPos.y + 800, M.highestAround(P.pPos.x, P.pPos.z, 1500, 3) + 500);
+      P.pYaw = yawFromDir(objPos.clone().sub(P.pPos).setY(0).normalize());
+      P.brief = "Bombers inbound on the airbase. Night intercept.";
+      return P;
+    }
+    plan_sweep() {
+      const h = RJ.atlas.home, yaw = h.yaw + Math.PI * 0.6, d = dirFromYaw(yaw);
+      const pPos = V3(h.x, 0, h.z).addScaledVector(d, 1500); pPos.y = M.highestAround(pPos.x, pPos.z, 2000, 3) + 900;
+      const waves = this.diff.id === "rookie" ? [1, 2, 3] : this.diff.id === "veteran" ? [2, 3, 4] : [2, 4, 5];
+      return {
+        pPos, pYaw: yaw, wing: true, objPos: null, brief: "Three waves. Clear the sky.",
+        start: () => { this.sweep = { wave: 0, group: [], waves, next: 4 }; },
+        tick: (dt) => {
+          const S = this.sweep;
+          if (S.group.length && S.group.every((e) => !e.alive)) { S.group = []; S.next = this.t + 5; if (S.wave >= S.waves.length) return this.finish(true, `Sky clear in ${RJ.fmtTime(this.t)}.`); RJ.ui.flash(`WAVE ${S.wave} CLEARED`, "Next wave inbound", 2); }
+          if (!S.group.length && this.t >= S.next && S.wave < S.waves.length) {
+            const n = S.waves[S.wave++]; this.wave = S.wave;
+            const pl = this.player, ang = yawFromDir(pl.fwd) + RJ.rand(-0.8, 0.8);
+            const c = pl.pos.clone().addScaledVector(dirFromYaw(ang), 7000); c.y = Math.max(pl.pos.y, M.highestAround(c.x, c.z, 2000, 3) + 600);
+            for (let i = 0; i < n; i++) {
+              const p = c.clone().add(V3(RJ.rand(-600, 600), RJ.rand(-150, 150), RJ.rand(-600, 600)));
+              S.group.push(this.spawnAI(this.enemyId(), "red", p, yawFromDir(pl.pos.clone().sub(p)), CALL[(S.wave * 5 + i) % CALL.length], this.skill()));
+            }
+            RJ.ui.flash(`WAVE ${S.wave} OF ${S.waves.length}`, `${n} bandit${n > 1 ? "s" : ""} inbound`, 2.2);
+          }
+        },
+        status: () => { const S = this.sweep; return `<b>SWEEP</b>wave ${S.wave}/${S.waves.length} · ${S.group.filter((e) => e.alive).length} hostile · ${RJ.fmtTime(this.t)}`; },
+        objective: () => "Find and destroy every bandit. Missiles at range, guns up close.",
+        marker: () => null
+      };
+    }
+    plan_recon() {
+      const h = RJ.atlas.home, list = (RJ.atlas.list || []).filter((lm) => lm.marker && lm.id !== "airbase" && lm.id !== "carrier");
+      // chain the four landmarks nearest to the airbase, each time hopping to the closest unvisited one
+      const pts = []; let cur = V3(h.x, 0, h.z); const pool = list.slice();
+      while (pts.length < 4 && pool.length) {
+        pool.sort((a, b) => Math.hypot(a.marker.x - cur.x, a.marker.z - cur.z) - Math.hypot(b.marker.x - cur.x, b.marker.z - cur.z));
+        const lm = pool.shift(); const p = V3(lm.marker.x, 0, lm.marker.z); p.y = M.highestAround(p.x, p.z, 700, 2) + 250; p.name = lm.def ? lm.def.name : lm.id; pts.push(p); cur = p;
+      }
+      let dist = 0; let prev = V3(h.x, 0, h.z); for (const p of pts) { dist += Math.hypot(p.x - prev.x, p.z - prev.z); prev = p; }
+      const pv = RJ.AIRCRAFT[this.o.aircraft].flight, v = RJ.clamp(pv.vmax * 0.55, 160, 330);
+      const limit = Math.round(dist / v * 1.45 + 40);
+      const yaw = pts.length ? yawFromDir(V3(pts[0].x - h.x, 0, pts[0].z - h.z).normalize()) : h.yaw;
+      const pPos = V3(h.x, 0, h.z); pPos.y = M.highestAround(h.x, h.z, 1200, 3) + 400;
+      return {
+        pPos, pYaw: yaw, wing: false, objPos: null, limit, brief: `Four checkpoints, ${RJ.fmtTime(limit)} on the clock.`,
+        start: () => { this.cp = 0; this.cpPts = pts; this.chasersOut = false; },
+        tick: () => {
+          const pl = this.player, p = pts[this.cp];
+          if (!p) return this.finish(true, `All four photos taken with ${RJ.fmtTime(Math.max(0, limit - this.t))} to spare.`);
+          if (Math.hypot(pl.pos.x - p.x, pl.pos.z - p.z) < 650 && Math.abs(pl.pos.y - p.y) < 900) {
+            this.cp++; this.score += 150; RJ.audio.discover && RJ.audio.discover();
+            RJ.ui.flash(`PHOTO ${this.cp} OF ${pts.length}`, p.name, 1.6);
+            if (RJ.companion) RJ.companion.say(this.cp < pts.length ? `Got it, ${p.name}. ${pts.length - this.cp} to go.` : "That's the last photo. Nicely done.", 2);
+          }
+          if (!this.chasersOut && this.t > 20) {
+            this.chasersOut = true;
+            const n = this.diff.id === "rookie" ? 1 : 2;
+            for (let i = 0; i < n; i++) { const c = pl.pos.clone().addScaledVector(pl.fwd, -6000).add(V3(RJ.rand(-800, 800), 400, RJ.rand(-800, 800))); this.spawnAI(this.enemyId(), "red", c, yawFromDir(pl.fwd), CALL[i + 7], this.skill()).target = pl; }
+            RJ.ui.flash("BANDITS ON YOUR SIX", "Keep moving", 2, true);
+          }
+          if (this.t > limit) return this.finish(false, "Out of time.");
+        },
+        status: () => `<b>RECON</b>photo ${Math.min(this.cp + 1, pts.length)}/${pts.length} · ${pts[this.cp] ? (Math.hypot(this.player.pos.x - pts[this.cp].x, this.player.pos.z - pts[this.cp].z) / 1000).toFixed(1) + " km" : ""} · ${RJ.fmtTime(Math.max(0, limit - this.t))} left`,
+        objective: () => pts[this.cp] ? `Next photo: ${pts[this.cp].name}. Fly within 650 m of the marker.` : "",
+        marker: () => pts[this.cp] || null
+      };
+    }
+    /** 1–3 stars for a win: winning, flying it on Veteran or Ace, and an objective-specific bonus. */
+    stars() {
+      if (!this.win) return 0;
+      const id = this.mission.id, pl = this.player;
+      let bonus = false;
+      if (this.plan.objPos && ["castle", "carrier", "nightraid"].includes(id)) bonus = this.objHp >= 75;
+      else if (id === "escort") bonus = this.plan.vip && this.plan.vip.hp / this.plan.vip.maxHp > 0.6;
+      else if (id === "intercept") bonus = this.leaks === 0;
+      else if (id === "pursuit") bonus = this.t < this.plan.limit * 0.6;
+      else if (id === "sweep") bonus = this.t < 240 && pl.stats.dmgTaken < pl.maxHp * 0.5;
+      else if (id === "recon") bonus = this.t < this.plan.limit * 0.75;
+      return 1 + (this.diff.id !== "rookie" ? 1 : 0) + (bonus ? 1 : 0);
     }
     spawnRaid(objPos) {
       this.wave++;
@@ -271,6 +368,7 @@
       if (win) this.score += 500;
       this.end(win);
       RJ.ui.flash(win ? "MISSION COMPLETE" : "MISSION FAILED", why, 3, !win);
+      if (RJ.companion) RJ.companion.say(win ? `Mission complete. ${why}` : `That's a fail. ${why} We'll get them next time.`, 3);
     }
     showResults() {
       const pl = this.player, st = pl.stats, ms = this.mission;
@@ -280,15 +378,17 @@
       P.stats.kills += this.kills; if (this.win) P.stats.wins++; else P.stats.losses++;
       P.missions = P.missions || {};
       const rec = P.missions[ms.id] || {};
+      const stars = this.stars();
       if (this.win) { rec.won = true; rec.bestDiff = Math.max(rec.bestDiff || 0, ["rookie", "veteran", "ace"].indexOf(this.diff.id) + 1); }
+      rec.stars = Math.max(rec.stars || 0, stars);
       rec.best = Math.max(rec.best || 0, this.score); rec.tries = (rec.tries || 0) + 1;
       P.missions[ms.id] = rec;
       RJ.saveProgress();
       RJ.ui.showResults({
         eyebrow: `${ms.name} · ${this.diff.name} · ${pl.spec.short}`, title: this.win ? "MISSION COMPLETE" : "MISSION FAILED", win: this.win,
         sub: this.why || "",
-        stats: [["Score", RJ.fmtInt(this.score)], ["Kills", this.kills], ["Time", RJ.fmtTime(this.t)], ["Missiles hit", `${st.mslHits}/${st.msl}`],
-          ["Damage dealt", RJ.fmtInt(st.dmgDealt)], ["Damage taken", RJ.fmtInt(st.dmgTaken)]].concat(this.plan.objPos && this.mission.id !== "intercept" && this.mission.id !== "pursuit" && this.mission.id !== "escort" ? [["Objective integrity", `${this.objHp}%`]] : []),
+        stats: [["Rating", "★".repeat(stars) + "☆".repeat(3 - stars)], ["Score", RJ.fmtInt(this.score)], ["Kills", this.kills], ["Time", RJ.fmtTime(this.t)], ["Missiles hit", `${st.mslHits}/${st.msl}`],
+          ["Damage dealt", RJ.fmtInt(st.dmgDealt)], ["Damage taken", RJ.fmtInt(st.dmgTaken)]].concat(this.plan.objPos && ["castle", "carrier", "nightraid"].includes(this.mission.id) ? [["Objective integrity", `${this.objHp}%`]] : []),
         xp, unlocked
       });
     }
