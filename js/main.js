@@ -45,6 +45,7 @@
     cam.up.copy(focus.up);
   };
   cam.kick = (a) => { if (RJ.settings.shake) cam.shake = Math.min(2, cam.shake + a); };
+  RJ.camKick = (a) => cam.kick(a);
 
   function chaseTarget(f, dt, outP, outQ) {
     const d = f.vis.dims;
@@ -134,10 +135,10 @@
     if (cam.temp) { cam.temp.t -= dt; if (cam.temp.t <= 0 || mode === "death") { cam.temp = null; cam.set(cam.mode); } else mode = "boom"; }
     if (mode === "chase") {
       chaseTarget(f, dt, cp, cq);
-      fov += RJ.clamp((f.mach - 0.6) * 6, 0, 10) + f.abLevel * 5;
+      fov += RJ.clamp((f.mach - 0.6) * 6, 0, 10) + f.abLevel * 5 + (f.isPlayer ? RJ.camFx.fov : 0);
     } else if (mode === "cockpit") {
       cockpitTarget(f, cp, cq);
-      fov += 4 + f.abLevel * 4;
+      fov += 4 + f.abLevel * 4 + (f.isPlayer ? RJ.camFx.fov * 0.6 : 0);
     } else if (mode === "cinematic") {
       fov = cinematicTarget(f, dt, cp, cq);
     } else if (mode === "boom") {
@@ -159,7 +160,7 @@
     if (camera.position.y < gy) camera.position.y = gy;
     // shake: kicks (boom, blasts, hits) + continuous (afterburner, guns, G, transonic buffet, low-level turbulence)
     if (RJ.settings.shake && f.alive) {
-      let s = cam.shake + cam.base + f.abLevel * 0.05 + (f.firing ? 0.12 : 0) + Math.max(0, Math.abs(f.g) - 5) * 0.02;
+      let s = cam.shake + cam.base + (f.isPlayer ? RJ.camFx.shake : 0) + f.abLevel * 0.05 + (f.firing ? 0.12 : 0) + Math.max(0, Math.abs(f.g) - 5) * 0.02;
       if (mode === "cinematic" || mode === "boom") s *= 0.25;
       if (s > 0.001) {
         const k = s * (mode === "cockpit" ? 0.0045 : 0.008);
@@ -244,6 +245,7 @@
     const sp = RJ.clamp((focus.speed - 260) / 700, 0, 1);
     const low = 1 - RJ.smooth(30, 450, focus.agl);
     let motion = (camMode === "chase" || camMode === "cockpit") && focus.state === "flying" ? sp * (0.012 + 0.022 * low) : 0;
+    if (focus.spec.flight.model === "space" && focus.state === "flying") motion += RJ.smooth(800, 2300, focus.speed) * 0.012 + (focus.hyperK || 0) * 0.05;
     P.motion = RJ.damp(P.motion, motion, 3, dt);
     const ahead = tv.copy(focus.pos).addScaledVector(focus.vel, 3).project(camera);
     P.motionCenter = [RJ.clamp((ahead.x + 1) / 2, 0.2, 0.8), RJ.clamp((ahead.y + 1) / 2, 0.2, 0.8)];
@@ -251,13 +253,13 @@
     P.heat = [];
     if (camMode !== "cockpit" && focus.state === "flying" && focus.mesh.visible) {
       for (const f of focus.vis.flames) {
-        if (P.heat.length >= 4 || f.small) continue;
+        if (P.heat.length >= 4 || (f.small && focus.spec.flight.model !== "space")) continue;
         const wp = focus.mesh.localToWorld(tv.copy(f.flame.position).add(tv2.set(0, 0, f.r * 3.5)));
         const dist = wp.distanceTo(camera.position);
         const s = tv2.copy(wp).project(camera);
         if (s.z > 1 || Math.abs(s.x) > 1.2 || Math.abs(s.y) > 1.2) continue;
         const rad = (f.r * 3 / dist) / (2 * tanH);
-        const k = (focus.throttle * 0.45 + focus.abLevel) * RJ.clamp(90 / dist, 0, 1);
+        const k = (focus.throttle * 0.45 + focus.abLevel + (focus.hyperK || 0) * 1.5) * RJ.clamp(90 / dist, 0, 1);
         if (k > 0.02) P.heat.push([(s.x + 1) / 2, (s.y + 1) / 2, Math.max(rad, 0.01), k]);
       }
     }
@@ -382,6 +384,7 @@
     RJ.combat.reset();
     RJ.sonic.reset();
     RJ.audio.stopEngines();
+    if (RJ.lever) RJ.lever.hideFx(); if (RJ.nav) RJ.nav.reset();
     if (RJ.companion) RJ.companion.stop();
     cam.hidden = null; cam.temp = null; PIP.t = 0; PIP.target = null; CP.owner = null;
   }
@@ -404,6 +407,7 @@
     RJ.ui.gameChrome(true);
     cam.set(RJ.settings.cam, true);
     cam.reset(mode.player);
+    RJ.lever.reset(mode.player); RJ.nav.reset();
     cam.fov = RJ.settings.fov;
     RJ.state.mode = "playing";
     RJ.input.keys.clear();
@@ -463,11 +467,16 @@
     if (I.action("photo")) { RJ.photo.start("playing"); return; }
     if (I.action("ghost") && mode.kind === "challenge") RJ.ghost.toggle();
     if (I.action("camera")) cam.cycle();
+    if (I.action("map")) RJ.nav.toggle();
     if (I.action("hud")) { RJ.settings.hud = !RJ.settings.hud; RJ.saveSettings(); }
     if (I.action("mute")) { RJ.settings.muted = !RJ.settings.muted; RJ.saveSettings(); RJ.ui.flash(RJ.settings.muted ? "SOUND OFF" : "SOUND ON", null, 0.8); }
     if (pl.alive) {
       const ax = I.axes();
       Object.assign(pl.input, { pitch: ax.pitch, roll: ax.roll, yaw: ax.yaw, thr: ax.thr, thrAbs: ax.thrAbs, ab: ax.ab, brake: ax.brake, guns: ax.guns });
+      RJ.lever.apply(pl, dt);
+      RJ.nav.control(pl, dt);
+      if (I.action("hyper")) { if (pl.spec.flight.model === "space") RJ.vehicles.toggleHyper(pl); else RJ.ui.flash("HYPERSONIC: STAR WARS CRAFT ONLY", null, 0.9); }
+      if (I.action("autopilot")) RJ.nav.toggleAuto(pl);
       if (I.action("gear")) { pl.toggleGear(); if (!pl.spec.flight.model) RJ.ui.flash(pl.gearDown ? "GEAR DOWN" : "GEAR UP", null, 0.8); }
       if (mode.kind === "fight") {
         if (mode.command) for (const [k, o] of [["wingAttack", "attack"], ["wingCover", "cover"], ["wingForm", "form"], ["wingDefend", "defend"]]) if (I.action(k)) mode.command(o);
@@ -495,7 +504,9 @@
     const turb = focus.state === "flying" ? RJ.clamp((focus.speed - 120) / 400, 0, 1) * (1 - RJ.smooth(40, 600, focus.agl)) : focus.onGround ? RJ.clamp(focus.speed / 120, 0, 1) * 0.3 : 0;
     cam.base = buffet * 0.4 + turb * 0.35 + (RJ.world.inCloud || 0) * 0.25;
     RJ.audio.buffet(focus === player ? buffet * 0.8 + turb * 0.25 : 0);
+    RJ.lever.frame(player, camera, dt);
     const camMode = cam.update(dt, focus);
+    RJ.nav.update(player, camera, dt);
     RJ.world.update(dt, camera, focus.pos, focus.vel, focus.agl);
     RJ.fx.update(dt, camera, renderer);
     // clouds rushing past
@@ -507,10 +518,12 @@
     }
     // afterburner light spilling onto the airframe and the ground (dramatic at dusk and at night)
     const abL = RJ.fx.abLight;
-    if (focus.alive && focus.abLevel > 0.02 && focus.vis.flames.length) {
+    const abK = Math.max(focus.abLevel, focus.hyperK || 0), swc = focus.spec.flight.model === "space";
+    if (focus.alive && abK > 0.02 && focus.vis.flames.length) {
       abL.position.copy(focus.pos).addScaledVector(focus.fwd, -focus.vis.dims.len * 0.75);
-      abL.intensity = focus.abLevel * (1.2 + (RJ.world.night ? 5 : RJ.smooth(15, 0, RJ.world.sunElev) * 3)) * (0.9 + Math.random() * 0.2);
-      abL.distance = 60 + focus.vis.dims.len * 4;
+      abL.color.setHex(swc ? focus.spec.colors.glow || focus.spec.engineColor || 0xff9a4a : 0xff9a4a);
+      abL.intensity = abK * (1.2 + (RJ.world.night ? 5 : RJ.smooth(15, 0, RJ.world.sunElev) * 3)) * (0.9 + Math.random() * 0.2) * (swc ? 3 + (focus.hyperK || 0) * 4 : 1);
+      abL.distance = (60 + focus.vis.dims.len * 4) * (swc ? 2.5 : 1);
     } else abL.intensity = 0;
     // audio
     RJ.audio.update(player, camera, camMode === "cockpit", RJ.combat.aircraft);

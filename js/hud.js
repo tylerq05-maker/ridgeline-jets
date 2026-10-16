@@ -138,6 +138,7 @@
       tapes(pl, C, small);
       heading(pl, C);
       bottomStatus(pl, s, C, small, s.cockpit3d);
+      if (RJ.nav) RJ.nav.hud(x, { pl, cam, W, Hh, proj, text });
     }
     // contacts
     for (const o of s.others || []) {

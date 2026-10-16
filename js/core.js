@@ -37,14 +37,14 @@ window.RJ = window.RJ || {};
   RJ.DEFAULT_KEYS = {
     pitchUp: "w", pitchDown: "s", rollLeft: "a", rollRight: "d", yawLeft: "q", yawRight: "e",
     throttleUp: "r", throttleDown: "f", afterburner: "shift", airbrake: "b",
-    guns: "space", missile: "x", flares: "c", target: "t", camera: "v", hud: "h", pause: "p", mute: "m", gear: "g", retry: "backspace", replay: "k", photo: "o", ghost: "j", wingAttack: "1", wingCover: "2", wingForm: "3", wingDefend: "4", talk: "y"
+    guns: "space", missile: "x", flares: "c", target: "t", camera: "v", hud: "u", pause: "p", mute: "n", map: "m", hyper: "h", autopilot: "l", gear: "g", retry: "backspace", replay: "k", photo: "o", ghost: "j", wingAttack: "1", wingCover: "2", wingForm: "3", wingDefend: "4", talk: "y"
   };
   RJ.KEY_ALTS = { pitchUp: "arrowup", pitchDown: "arrowdown", rollLeft: "arrowleft", rollRight: "arrowright", pause: "escape", throttleUp: "pageup", throttleDown: "pagedown" };
   RJ.ACTION_NAMES = {
     pitchUp: "Pitch up (climb)", pitchDown: "Pitch down (dive)", rollLeft: "Roll left", rollRight: "Roll right",
     yawLeft: "Rudder left", yawRight: "Rudder right", throttleUp: "Throttle up", throttleDown: "Throttle down",
     afterburner: "Afterburner (hold)", airbrake: "Air brake (hold)", guns: "Guns / bombs", missile: "Fire missile",
-    flares: "Flares", target: "Next target", camera: "Change camera", hud: "Toggle HUD", pause: "Pause", mute: "Mute sound", gear: "Landing gear", retry: "Instant retry (challenges)", replay: "Replay last 60 s", photo: "Photo mode", ghost: "Show/hide ghost", wingAttack: "Wingmen: attack my target", wingCover: "Wingmen: cover me", wingForm: "Wingmen: form up", wingDefend: "Wingmen: defend objective", talk: "Talk to Nova (hold)"
+    flares: "Flares", target: "Next target", camera: "Change camera", hud: "Toggle HUD", pause: "Pause", mute: "Mute sound", gear: "Landing gear", retry: "Instant retry (challenges)", replay: "Replay last 60 s", photo: "Photo mode", ghost: "Show/hide ghost", wingAttack: "Wingmen: attack my target", wingCover: "Wingmen: cover me", wingForm: "Wingmen: form up", wingDefend: "Wingmen: defend objective", talk: "Talk to Nova (hold)", map: "Map and waypoints", hyper: "HYPERSONIC (Star Wars craft)", autopilot: "Autopilot to waypoint"
   };
   const DEFAULTS = {
     quality: "high", shadows: true, viewDist: 1, clouds: 1,
@@ -58,6 +58,8 @@ window.RJ = window.RJ || {};
   };
   RJ.settings = Object.assign({}, DEFAULTS, RJ.store.get("settings", {}));
   RJ.settings.keys = Object.assign({}, RJ.DEFAULT_KEYS, RJ.settings.keys || {});
+  // v2 keys: H is now HYPERSONIC and M the map, so the HUD and mute toggles moved to U and N
+  if (!RJ.settings.keysV2) { const K = RJ.settings.keys; if (K.hud === "h") K.hud = "u"; if (K.mute === "m") K.mute = "n"; RJ.settings.keysV2 = true; }
   RJ.settings.unlockAll = true; // every aircraft is available
   if (!["low", "medium", "high", "ultra"].includes(RJ.settings.quality)) RJ.settings.quality = "high";
   /** Speed in the player's chosen unit. */

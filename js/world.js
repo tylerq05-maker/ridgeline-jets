@@ -425,6 +425,10 @@
       else if (ch.sunKey !== W.sunKey) need.push({ cx, cz, lod, trees, d: d + 20 });
     }
     W.seaNear = sea;
+    // nearest ring with a missing chunk: the far terrain fills in there so fast flight never shows a hole
+    let miss = R + 1;
+    for (let dz = -R; dz <= R; dz++) for (let dx = -R; dx <= R; dx++) if (!W.chunks.has(key(cx0 + dx, cz0 + dz))) miss = Math.min(miss, Math.max(Math.abs(dx), Math.abs(dz)));
+    W.loadedR = miss > R ? null : Math.max(0, (miss - 0.5) * W.CH - Math.max(Math.abs(pos.x - cx0 * W.CH), Math.abs(pos.z - cz0 * W.CH)));
     need.sort((a, b) => a.d - b.d);
     if (W.workers.length) {
       const cap = W.workers.length * 2;
@@ -700,7 +704,7 @@
   function updateFar(cam) {
     if (!W.workers.length || W.far.pending) return;
     const c = W.far.center, p = cam.position;
-    if (c && Math.hypot(p.x - c.x, p.z - c.z) < 7000) return;
+    if (c && Math.hypot(p.x - c.x, p.z - c.z) < 4500) return;
     const step = 2500, cx = Math.round(p.x / step) * step, cz = Math.round(p.z / step) * step;
     W.far.center = { x: cx, z: cz };
     W.far.pending = true;
@@ -714,10 +718,10 @@
   W.renderBackdrop = function (renderer, camera) {
     const fc = W.farCam;
     fc.position.copy(camera.position); fc.quaternion.copy(camera.quaternion);
-    fc.fov = camera.fov; fc.aspect = camera.aspect; fc.near = Math.max(200, W.viewRange * 0.5);
+    fc.fov = camera.fov; fc.aspect = camera.aspect; fc.near = Math.max(40, Math.min(W.viewRange * 0.5, W.loadedR != null ? W.loadedR * 0.6 : 1e9));
     if (camera.view && camera.view.enabled) fc.setViewOffset(camera.view.fullWidth, camera.view.fullHeight, camera.view.offsetX, camera.view.offsetY, camera.view.width, camera.view.height); else fc.clearViewOffset();
     fc.updateProjectionMatrix(); fc.updateMatrixWorld();
-    W.farMat.uniforms.hole.value = W.viewRange * 0.78;
+    W.farMat.uniforms.hole.value = Math.min(W.viewRange * 0.78, W.loadedR != null ? W.loadedR : 1e9);
     W.farMat.uniforms.fogCol.value.copy(W.scene.fog.color);
     renderer.render(W.scene, fc);
     renderer.clearDepth();

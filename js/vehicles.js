@@ -92,53 +92,81 @@
   /* ======================= STARFIGHTER =======================
    * Thrust along the nose, direct rate control, and a per-craft "grip" that pulls the velocity toward the
    * nose: high grip carves, low grip slides through turns. Agility falls off at high speed. */
+  const MPH = 0.44704;
   function space(ac, dt, S) {
     const s = ac.vs, inp = ac.input;
     ac.throttleAndFuel(dt);
     const gnd = W().ground(ac.pos.x, ac.pos.z);
-    // boost: a limited reserve that recharges
-    const boosting = inp.ab && s.boost > 0.02;
-    s.boost = RJ.clamp(s.boost + (boosting ? -dt / S.boostTime : dt / (S.boostTime * 2.5)), 0, 1);
-    ac.abLevel = RJ.damp(ac.abLevel, boosting ? 1 : 0, 5, dt);
+    // afterburner (Shift or the lever's top detent): no reserve, this is a starfighter
+    const boosting = inp.ab && ac.state === "flying";
+    ac.abLevel = RJ.damp(ac.abLevel, boosting ? 1 : 0, 4, dt);
     if (S.foils) { s.foils = RJ.damp(s.foils, ac.firing ? 1 : s.foilsWant, 3, dt); }
+    // HYPERSONIC: a far bigger push than the afterburner, ramped in over ~2 s
+    if (ac.state !== "flying") s.hyperOn = false;
+    s.hyper = RJ.damp(s.hyper || 0, s.hyperOn ? 1 : 0, s.hyperOn ? 1.3 : 1.6, dt);
+    if (s.hyper < 0.002) s.hyper = 0;
+    ac.hyperK = s.hyper;
     if (ac.state === "ground") {
       ac.vel.set(0, 0, 0); ac.pos.y = gnd + S.gearH; s.spd = 0;
       if (ac.throttle > 0.12) { ac.state = "flying"; ac.vel.set(0, 6, 0); s.spd = 6; RJ.emit("liftoff", ac); }
-      s.status = "LANDED · R to lift off";
+      s.status = "LANDED · throttle up to lift off";
       finishFrame(ac, dt);
       return true;
     }
-    const vmax = S.vmax * (S.foils ? 1 + 0.12 * (1 - s.foils) : 1) * (boosting ? S.boostMul : 1);
-    const target = ac.throttle * vmax;
-    s.spd += RJ.clamp(target - s.spd, -S.decel * dt, S.accel * (boosting ? 1.6 : 1) * dt);
-    const agile = RJ.clamp(1.3 - (s.spd / (S.vmax * S.boostMul)) * 0.75, 0.45, 1.3);
+    // lever: bottom = half speed, top = full speed, afterburner detent = boost speed; B brakes down to a hover
+    const vmax = S.vmax * (S.foils ? 1 + 0.06 * (1 - s.foils) : 1);
+    let target = inp.brake ? 0 : boosting ? S.vboost : (0.5 + 0.5 * ac.throttle) * vmax;
+    if (s.hyper > 0) {
+      target = RJ.lerp(target, S.vhyper, s.hyper);
+      s.spd = RJ.damp(s.spd, target, 1.6, dt);
+    } else s.spd += RJ.clamp(target - s.spd, -S.decel * dt, S.accel * (boosting ? 1.5 : 1) * dt);
+    const agile = RJ.clamp(1.3 - (s.spd / S.vboost) * 0.55, 0.55, 1.3) * (1 - s.hyper * 0.7);
     ac.ctl.pitch = RJ.damp(ac.ctl.pitch, inp.pitch, S.resp, dt);
     ac.ctl.roll = RJ.damp(ac.ctl.roll, inp.roll, S.resp * 1.3, dt);
     ac.ctl.yaw = RJ.damp(ac.ctl.yaw, inp.yaw, S.resp, dt);
     ac.q.multiply(tq.setFromAxisAngle(AX, ac.ctl.pitch * S.pitch * DEG * agile * dt));
     ac.q.multiply(tq.setFromAxisAngle(AY, -ac.ctl.yaw * S.yaw * DEG * agile * dt));
-    ac.q.multiply(tq.setFromAxisAngle(AZ, -ac.ctl.roll * S.roll * DEG * dt));
+    ac.q.multiply(tq.setFromAxisAngle(AZ, -ac.ctl.roll * S.roll * DEG * (1 - s.hyper * 0.5) * dt));
     ac.q.normalize(); ac.updateBasis();
     const prevVel = tv3.copy(ac.vel);
     const want = tv.copy(ac.fwd).multiplyScalar(s.spd);
-    ac.vel.lerp(want, 1 - Math.exp(-S.grip * dt));
-    ac.pos.addScaledVector(ac.vel, dt);
+    ac.vel.lerp(want, 1 - Math.exp(-S.grip * (1 + s.hyper * 2) * dt));
+    // swept terrain check: at thousands of m/s one frame covers 30–160 m, so test the whole path, not just the end
+    const step = ac.vel.length() * dt, nSub = Math.min(24, Math.ceil(step / 25));
+    let hit = false, hitG = gnd;
+    for (let i = 1; i <= nSub; i++) {
+      const k = (i / nSub) * dt, px = ac.pos.x + ac.vel.x * k, py = ac.pos.y + ac.vel.y * k, pz = ac.pos.z + ac.vel.z * k;
+      const g = W().ground(px, pz);
+      if (py - g < S.gearH) { ac.pos.set(px, py, pz); hit = true; hitG = g; break; }
+    }
+    if (!hit) ac.pos.addScaledVector(ac.vel, dt);
     if (ac.pos.y > 60000) { ac.pos.y = 60000; ac.vel.y = Math.min(0, ac.vel.y); }
     const dv = prevVel.sub(ac.vel).multiplyScalar(-1 / Math.max(dt, 1e-3));
     // inertial dampers: the pilot feels a fraction of the manoeuvre (no blackout in a starfighter)
     ac.g = RJ.damp(ac.g, RJ.clamp(1 + dv.dot(ac.up) / G0 * 0.12, -1, 4.5), 6, dt); ac.aoa = 0;
-    if (ac.pos.y - gnd < S.gearH) {
-      if (ac.vel.length() < 30 && ac.fwd.y > -0.35 && !(gnd <= 0.5 && W().isWaterAt(ac.pos.x, ac.pos.z))) {
-        ac.state = "ground"; ac.vel.set(0, 0, 0); s.spd = 0;
+    if (hit || ac.pos.y - W().ground(ac.pos.x, ac.pos.z) < S.gearH) {
+      const g = hit ? hitG : W().ground(ac.pos.x, ac.pos.z);
+      if (ac.vel.length() < 30 && ac.fwd.y > -0.35 && !(g <= 0.5 && W().isWaterAt(ac.pos.x, ac.pos.z))) {
+        ac.state = "ground"; ac.vel.set(0, 0, 0); s.spd = 0; ac.pos.y = g + S.gearH;
         s.yaw = Math.atan2(-ac.fwd.x, -ac.fwd.z); setAttitude(ac, s.yaw, 0, 0);
         RJ.emit("touchdown", ac);
-      } else { crash(ac, gnd); return true; }
+      } else { crash(ac, g); return true; }
     }
     if (solid(ac.pos)) { crash(ac, gnd); return true; }
-    s.status = `${boosting ? "BOOST" : "BOOST RESERVE"} ${Math.round(s.boost * 100)}%` + (S.foils ? ` · S-FOILS ${s.foils > 0.5 ? "ATTACK" : "CLOSED"}` : "");
+    s.status = (s.hyper > 0.05 ? "HYPERSONIC" : boosting ? "AFTERBURNER" : inp.brake ? "BRAKING · land below 65 mph" : "") + (S.foils ? `${s.hyper > 0.05 || boosting || inp.brake ? " · " : ""}S-FOILS ${s.foils > 0.5 ? "ATTACK" : "CLOSED"}` : "");
     finishFrame(ac, dt);
     return true;
   }
+  /** H: hypersonic on/off (Star Wars craft only). Returns the new state, or null when unavailable. */
+  V.toggleHyper = function (ac) {
+    const F = ac.spec.flight;
+    if (F.model !== "space" || !ac.alive || !ac.vs) return null;
+    if (ac.state !== "flying") { RJ.ui.flash("TAKE OFF FIRST", null, 0.8); return null; }
+    const s = ac.vs;
+    s.hyperOn = !s.hyperOn;
+    RJ.emit("hyper", { ac, on: s.hyperOn });
+    return s.hyperOn;
+  };
 
   /* ======================= GROUND DRIVING (cars and the bike) ======================= */
   function drive(ac, dt, D, bikeMode) {
@@ -350,7 +378,7 @@
   V.action = function (ac, what) {
     if (what !== "gear" || !ac.alive) return;
     const F = ac.spec.flight, s = ac.vs || V.place(ac, {});
-    if (F.model === "space" && F.space.foils) { s.foilsWant = s.foilsWant > 0.5 ? 0 : 1; RJ.ui.flash(s.foilsWant ? "S-FOILS: ATTACK POSITION" : "S-FOILS CLOSED", s.foilsWant ? null : "+12% speed", 0.9); }
+    if (F.model === "space" && F.space.foils) { s.foilsWant = s.foilsWant > 0.5 ? 0 : 1; RJ.ui.flash(s.foilsWant ? "S-FOILS: ATTACK POSITION" : "S-FOILS CLOSED", s.foilsWant ? null : "+6% speed", 0.9); }
     else if (F.model === "heli") RJ.ui.flash("FIXED LANDING GEAR", null, 0.6);
     else if (F.model === "bike") { s.wingsWant = s.wingsWant > 0.5 ? 0 : 1; RJ.ui.flash(s.wingsWant ? "WINGS DEPLOYED" : "WINGS STOWED", null, 0.8); }
     else if (F.model === "car") {
@@ -372,7 +400,7 @@
       if (opts.ground) { ac.throttle = 0; ac.pos.y = w.ground(ac.pos.x, ac.pos.z) + F.heli.skid; ac.vel.set(0, 0, 0); }
       else { ac.throttle = 0.5; ac.vel.copy(ac.fwd).multiplyScalar(Math.min(ac.speed, 35)); }
     } else if (F.model === "space") {
-      s.spd = opts.ground ? 0 : Math.min(ac.speed, F.space.vmax * 0.5);
+      s.spd = opts.ground ? 0 : F.space.vmax * 0.6;
       ac.throttle = opts.ground ? 0 : 0.5; ac.vel.copy(ac.fwd).multiplyScalar(s.spd);
       if (opts.ground) ac.pos.y = w.ground(ac.pos.x, ac.pos.z) + F.space.gearH;
     } else {
@@ -411,6 +439,31 @@
         RJ.fx.smoke(p, tv2.set(Math.cos(a) * 9, 1.5, Math.sin(a) * 9), 2.5, 0.6, 2.2, W().isWaterAt(p.x, p.z) ? 0.5 : 0.35);
       }
     }
+  };
+
+  /* ---------------- starfighter engines: afterburner glow, particle trail, Falcon's blue strip ---------------- */
+  const _c = new THREE.Color();
+  V.visual = function (ac, dt) {
+    if (ac.spec.flight.model !== "space" || ac.state !== "flying") return;
+    const U = ac.vis, hy = ac.hyperK || 0, ab = Math.max(ac.abLevel, hy), F = ac.spec;
+    const col = _c.setHex(F.colors.glow || F.engineColor || 0xff6a3a);
+    if (U.strip) {
+      const k = 1.2 + ac.throttle * 0.8 + ab * 3 + hy * 6; // HDR value → heavy bloom
+      U.strip.material.color.setRGB(0.25 * k, 0.5 * k, 1.0 * k);
+      U.strip.scale.set(1, 1 + ab * 0.6 + hy, 1);
+    }
+    if (ab < 0.08) return;
+    ac._trailT = (ac._trailT || 0) - dt;
+    if (ac._trailT > 0) return;
+    ac._trailT = 0.025;
+    const n = U.nozzles.length, every = Math.max(1, Math.round(n / 5)), big = U.strip ? 2.4 : 1;
+    U.nozzles.forEach((nz, i) => {
+      if (i % every) return;
+      const p = ac.mesh.localToWorld(tv.copy(nz));
+      const sz = (1.2 + ab * 1.8 + hy * 3) * big;
+      // glowing ionised exhaust that hangs in the air behind the ship
+      RJ.fx.fireP.spawn(p.x, p.y, p.z, ac.vel.x * 0.02, ac.vel.y * 0.02, ac.vel.z * 0.02, 0.35 + hy * 0.5, sz, sz * (2.5 + hy * 3), col.r, col.g, col.b, 0.75, 0, 0.4);
+    });
   };
 
   /* ---------------- hypersonic heating: leading edges glow, plasma sheath streams off the nose ---------------- */
@@ -571,7 +624,7 @@
     const cp = tube(g, 1.25, 1.35, 6.5, 9.2, 0.5, -8.2, M.body); cp.rotation.y = 0.25;
     blob(g, 1.1, 1.0, 0.9, 10.0, 0.6, -11.3, M.glass);
     box(g, 0.25, 1.2, 0.25, 3.2, 2.7, 1.5, M.dark); blob(g, 1.6, 0.25, 1.6, 3.2, 3.4, 1.5, M.trim);
-    box(g, 17, 1.0, 0.25, 0, 0, 12.75, M.glow);
+    g.userData.strip = box(g, 17, 1.0, 0.25, 0, 0, 12.75, new THREE.MeshBasicMaterial({ color: 0x3f7dff, fog: false }));
     for (let x = -6; x <= 6; x += 3) engine(g, M, 0.9, x, 0, 12.9, { noNozzle: true, small: true, color: 0x66aaff, core: 0xdff0ff });
     const r = (() => { let a = 7; return () => ((a = (a * 16807) % 2147483647) / 2147483647); })();
     for (let i = 0; i < 46; i++) { const a = r() * Math.PI * 2, d = 3 + r() * 8.5; box(g, 0.5 + r() * 1.6, 0.3 + r() * 0.4, 0.5 + r() * 1.6, Math.cos(a) * d, 2.1 + (1 - d / 12) * 0.4, Math.sin(a) * d + 0.5, i % 3 ? M.trim : M.dark); }
@@ -666,36 +719,38 @@
     flight: heliF(78, { tilt: 36, tiltRate: 4.2, yawRate: 110, yawResp: 5, climb: 12, tmax: 1.55, spool: 3.5, drag: 0.0011, vdrag: 0.03, skid: 1.42 }),
     hp: 110, stealth: 1, radar: 4000, gun: { name: "M134 miniguns", rate: 40, dmg: 3, heat: 0.008, spread: 0.006, speed: 850 }, msl: { n: 0 }, flares: 20, freeOnly: true,
     unlock: { start: true }, sound: { type: "heavy", pitch: 1.2, family: "heli", blades: 5, rotorHz: 7.8 } }, 1.2);
-  const spaceF = (S) => ({ model: "space", vmax: S.vmax * S.boostMul, ref: 0, mil: S.accel, ab: S.accel * 1.6, vstall: 10, gmax: 9, roll: S.roll, pitch: S.pitch, yaw: S.yaw, ind: 0.5, eng: "rocket", space: S });
+  // speeds in mph: lever full = cruise, afterburner = boost, H = hypersonic
+  const spaceF = (S) => { S.vmax = S.mph * MPH; S.vboost = S.boostMph * MPH; S.vhyper = (S.hyperMph || 22000) * MPH;
+    return { model: "space", vmax: S.vboost, ref: 0, mil: S.accel, ab: S.accel * 1.6, vstall: 10, gmax: 9, roll: S.roll, pitch: S.pitch, yaw: S.yaw, ind: 0.5, eng: "rocket", space: S }; };
   const SW = "Fan-made homage for a personal game; not an official Star Wars product. ";
   add("xwing", { name: "X-Wing", short: "X-WING", cat: "space", role: "Balanced multirole starfighter", status: "Fan-made · Rebel Alliance", year: 1977,
     desc: SW + "The all-rounder: good speed, good turn, good grip. G opens and closes the S-foils (closed is faster; they open to fire). Shift boosts.",
-    colors: { body: 0xd8d6cf, trim: 0x9a9890, glass: 0x1a2430, accent: 0xb3322a }, build: "xwing", noGear: true, gearH: 1.4,
-    flight: spaceF({ vmax: 290, accel: 60, decel: 70, boostMul: 1.45, boostTime: 5, roll: 200, pitch: 85, yaw: 45, resp: 6, grip: 2.4, foils: true, gearH: 1.4 }),
+    colors: { body: 0xd8d6cf, trim: 0x9a9890, glass: 0x1a2430, accent: 0xb3322a }, build: "xwing", engineColor: 0xff5533, noGear: true, gearH: 1.4,
+    flight: spaceF({ mph: 3600, boostMph: 4600, accel: 420, decel: 520, roll: 200, pitch: 85, yaw: 45, resp: 6, grip: 2.4, foils: true, gearH: 1.4 }),
     hp: 170, stealth: 1, radar: 12000, gun: LASER(0xff3322, 9, 11), msl: { n: 4, name: "Proton torpedoes", lock: 1.0, cone: 35, range: 7000 }, flares: 20, freeOnly: true,
     unlock: { start: true }, sound: { type: "jet", pitch: 1.0, family: "space" } }, 1.0);
   add("tie", { name: "TIE Interceptor", short: "TIE/IN", cat: "space", role: "Extremely agile interceptor", status: "Fan-made · Galactic Empire", year: 1983,
     desc: SW + "Twitchy, fast and fragile: the highest turn rate of anything in the game and almost no drift. One good hit and it's gone.",
-    colors: { body: 0x7d8288, trim: 0x5a5e63, glass: 0x10161e, accent: 0x7d8288 }, build: "tie", noGear: true, gearH: 1.5,
-    flight: spaceF({ vmax: 340, accel: 85, decel: 95, boostMul: 1.35, boostTime: 3.5, roll: 300, pitch: 130, yaw: 80, resp: 11, grip: 4.5, gearH: 1.5 }),
+    colors: { body: 0x7d8288, trim: 0x5a5e63, glass: 0x10161e, accent: 0x7d8288 }, build: "tie", engineColor: 0x6aa0ff, noGear: true, gearH: 1.5,
+    flight: spaceF({ mph: 3800, boostMph: 4800, accel: 560, decel: 650, roll: 300, pitch: 130, yaw: 80, resp: 11, grip: 4.5, gearH: 1.5 }),
     hp: 80, stealth: 1, radar: 10000, gun: LASER(0x33ff55, 12, 8), msl: { n: 0 }, flares: 0, freeOnly: true,
     unlock: { start: true }, sound: { type: "jet", pitch: 1.6, family: "space", scream: true } }, 0.7);
   add("awing", { name: "A-Wing", short: "A-WING", cat: "space", role: "High-speed interceptor", status: "Fan-made · Rebel Alliance", year: 1983,
     desc: SW + "Pure speed: the fastest starfighter here, with a long boost. Turns well but slides wide at full throttle.",
-    colors: { body: 0xd9d2c4, trim: 0x9c968a, glass: 0x1a2430, accent: 0xa8322b }, build: "awing", noGear: true, gearH: 0.9,
-    flight: spaceF({ vmax: 400, accel: 95, decel: 70, boostMul: 1.5, boostTime: 7, roll: 240, pitch: 95, yaw: 50, resp: 8, grip: 1.7, gearH: 0.9 }),
+    colors: { body: 0xd9d2c4, trim: 0x9c968a, glass: 0x1a2430, accent: 0xa8322b }, build: "awing", engineColor: 0xffa060, noGear: true, gearH: 0.9,
+    flight: spaceF({ mph: 4000, boostMph: 5000, accel: 620, decel: 480, roll: 240, pitch: 95, yaw: 50, resp: 8, grip: 1.7, gearH: 0.9 }),
     hp: 100, stealth: 1, radar: 12000, gun: LASER(0xff3322, 10, 8), msl: { n: 6, name: "Concussion missiles", lock: 0.9, cone: 40, range: 7000 }, flares: 20, freeOnly: true,
     unlock: { start: true }, sound: { type: "jet", pitch: 1.25, family: "space" } }, 0.85);
   add("bwing", { name: "B-Wing", short: "B-WING", cat: "space", role: "Heavy assault starfighter", status: "Fan-made · Rebel Alliance", year: 1983,
     desc: SW + "A flying wall of guns: slow to roll, heavy in the turn and tough as nails. G folds the S-foils.",
-    colors: { body: 0xcfc9bc, trim: 0x8f897d, glass: 0x1a2430, accent: 0x9a3a2c }, build: "bwing", noGear: true, gearH: 7.6,
-    flight: spaceF({ vmax: 230, accel: 38, decel: 45, boostMul: 1.3, boostTime: 4, roll: 95, pitch: 48, yaw: 30, resp: 3.2, grip: 1.6, foils: true, gearH: 7.6 }),
+    colors: { body: 0xcfc9bc, trim: 0x8f897d, glass: 0x1a2430, accent: 0x9a3a2c }, build: "bwing", engineColor: 0x7ab8ff, noGear: true, gearH: 7.6,
+    flight: spaceF({ mph: 3000, boostMph: 4000, accel: 260, decel: 320, roll: 95, pitch: 48, yaw: 30, resp: 3.2, grip: 1.6, foils: true, gearH: 7.6 }),
     hp: 330, stealth: 1, radar: 12000, gun: LASER(0xff3322, 14, 10), msl: { n: 8, name: "Proton torpedoes", lock: 1.2, cone: 30, range: 7000 }, flares: 30, freeOnly: true,
     unlock: { start: true }, sound: { type: "jet", pitch: 0.75, family: "space" } }, 2.2);
   add("falcon", { name: "Millennium Falcon", short: "FALCON", cat: "space", role: "Heavy modified freighter", status: "Fan-made · Corellian YT-1300", year: 1977,
     desc: SW + "Big, heavy and stubborn: it drifts through turns like a freight truck on ice, but it's fast in a straight line and takes a beating.",
     colors: { body: 0xb9b6ad, trim: 0x8d8a82, glass: 0x1a2430, accent: 0x7a7770, glow: 0x66aaff }, build: "falcon", noGear: true, gearH: 2.7,
-    flight: spaceF({ vmax: 310, accel: 32, decel: 30, boostMul: 1.35, boostTime: 6, roll: 70, pitch: 38, yaw: 24, resp: 2.2, grip: 0.75, gearH: 2.7 }),
+    flight: spaceF({ mph: 3500, boostMph: 4700, hyperMph: 26000, accel: 230, decel: 260, roll: 70, pitch: 38, yaw: 24, resp: 2.2, grip: 0.75, gearH: 2.7 }),
     hp: 600, stealth: 1, radar: 15000, gun: LASER(0xff3322, 8, 13), msl: { n: 4, name: "Concussion missiles", lock: 1.2, cone: 40, range: 7000 }, flares: 40, freeOnly: true,
     unlock: { start: true }, sound: { type: "heavy", pitch: 0.7, family: "space" } }, 3.2);
   add("skylark", { name: "Skylark VTOL Car", short: "SKYLARK", cat: "car", role: "Ducted-fan flying car", status: "Concept vehicle", year: 2031,

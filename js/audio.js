@@ -185,7 +185,8 @@
       if (this.rum.type !== "triangle") this.rum.type = "triangle";
       if (p.kind === "heli" || p.kind === "space" || p.kind === "electric") {
         const lit = RJ.clamp(N / p.idle, 0, 1), n = RJ.clamp((N - p.idle) / (1 - p.idle), 0, 1);
-        zero(this.abr.g, this.crk.g);
+        if (p.kind === "space") { T(this.abr.f.frequency, (300 + s.ab * 900) * d, 0.1); T(this.abr.g.gain, s.ab * 0.85 * (0.7 + rear * 0.6), 0.1); T(this.crk.f.frequency, 1500); T(this.crk.g.gain, s.ab * 0.22, 0.1); }
+        else zero(this.abr.g, this.crk.g);
         if (p.kind === "heli") {
           // blade slap: a low saw at blade-pass frequency, heavier with collective; turbine whine on top
           const bp = p.blades * p.rotorHz * lit * d;
@@ -387,7 +388,7 @@
     const now = performance.now() / 1000; // game clock: keeps spooling right even if the audio device is slow to start
     const dt = RJ.clamp(now - (AU._t || now), 0, 0.1); AU._t = now;
     // listener velocity (the camera may ride the jet, orbit it, or stand still for a fly-by)
-    if (AU._camP) { const cv = _v.subVectors(cam.position, AU._camP).divideScalar(Math.max(dt, 1e-3)); if (cv.length() > 1500) cv.set(0, 0, 0); AU._camV = AU._camV || new THREE.Vector3(); if (dt > 0) AU._camV.lerp(cv, RJ.clamp(dt * 8, 0, 1)); }
+    if (AU._camP) { const cv = _v.subVectors(cam.position, AU._camP).divideScalar(Math.max(dt, 1e-3)); if (cv.length() > 15000) cv.set(0, 0, 0); AU._camV = AU._camV || new THREE.Vector3(); if (dt > 0) AU._camV.lerp(cv, RJ.clamp(dt * 8, 0, 1)); }
     AU._camP = (AU._camP || new THREE.Vector3()).copy(cam.position);
     const camV = AU._camV || _f.set(0, 0, 0);
     const E = AU.engine, p = E.prof;
@@ -450,13 +451,13 @@
     const E = AU.env;
     if (!E) return;
     // listener airspeed: the jet's when inside it, the camera's otherwise (a fixed fly-by camera hears no wind)
-    const v = Math.min(1200, inCockpit ? pl.speed : camV.length());
+    const v = Math.min(1200, inCockpit ? pl.speed : camV.length()), hyK = pl.hyperK || 0;
     const rho = RJ.rho(inCockpit ? pl.pos.y : Math.max(0, AU._camP.y));
     const q = RJ.clamp(0.5 * rho * v * v / 42000, 0, 1.4);
     E.gustT -= 1 / 30;
     if (E.gustT <= 0) { E.gustT = 0.25 + Math.random() * 0.6; E.gustTo = 0.75 + Math.random() * 0.5; }
     E.gust = lerp(E.gust, E.gustTo || 1, 0.08);
-    const lo = Math.pow(q, 0.8) * (inCockpit ? 0.32 : 0.45) * E.gust, hi = q * (inCockpit ? 0.1 : 0.3);
+    const lo = Math.pow(q, 0.8) * (inCockpit ? 0.32 : 0.45) * E.gust + hyK * 0.5, hi = q * (inCockpit ? 0.1 : 0.3) + hyK * 0.25;
     P(E.windLo.g.gain, lo, 0.15); P(E.windLo.f.frequency, 120 + Math.sqrt(q) * 260, 0.2);
     P(E.windHi.g.gain, hi, 0.15); P(E.windHi.f.frequency, 700 + v * 6, 0.2);
     P(E.whistle.g.gain, inCockpit ? 0 : RJ.smooth(0.5, 1.2, q) * 0.025, 0.2); P(E.whistle.f.frequency, 1800 + v * 4, 0.2);

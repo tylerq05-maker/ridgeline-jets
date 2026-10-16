@@ -73,7 +73,10 @@
         "varying vec2 vUv;",
         "float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }",
         "float linDepth(float d){ float z = d * 2.0 - 1.0; return 2.0 * camNear * camFar / (camFar + camNear - z * (camFar - camNear)); }",
-        "vec3 tone(vec3 x){ vec3 a = vec3(0.72); vec3 o = a + (1.0 - a) * (1.0 - exp(-(x - a) / (1.0 - a))); return mix(x, o, step(a, x)); }",
+        // ACES filmic (Narkowicz fit) applied in linear light; the buffer holds display-referred values
+        "vec3 acesF(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }",
+        "vec3 tone(vec3 c){ vec3 lin = pow(max(c, 0.0), vec3(2.2)) * 0.9; return pow(acesF(lin), vec3(1.0 / 2.2)); }",
+        "vec3 toneOld(vec3 x){ vec3 a = vec3(0.72); vec3 o = a + (1.0 - a) * (1.0 - exp(-(x - a) / (1.0 - a))); return mix(x, o, step(a, x)); }",
         "void main(){",
         "  vec2 uv = vUv;",
         // shockwave refraction rings

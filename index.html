@@ -372,6 +372,29 @@ body.is-touch .touch { display: block; }
   .wingpads > span { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .banner { animation: none; } .mode { transition: none; } }
+
+/* throttle lever, hypersonic button, map */
+.thr { display: none !important; }
+#lever[hidden], #btn-hyper[hidden], #map[hidden] { display: none !important; }
+#lever { position: absolute; right: calc(max(10px, env(safe-area-inset-right, 0px))); top: 27%; width: 72px; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: auto; user-select: none; }
+#lever .lv-track { position: relative; width: 34px; height: 170px; border-radius: 6px; background: rgba(10,15,21,.55); border: 1px solid var(--line); cursor: ns-resize; touch-action: none; }
+#lever .lv-detent { position: absolute; left: 0; right: 0; top: 0; height: 14%; border-bottom: 2px dashed rgba(255,140,60,.8); color: #ffae6b; font: 600 10px var(--font-mono); text-align: center; line-height: 22px; }
+#lever .lv-fill { position: absolute; left: 3px; right: 3px; bottom: 3px; border-radius: 3px; background: linear-gradient(to top, rgba(141,255,176,.15), rgba(141,255,176,.45)); }
+#lever .lv-handle { position: absolute; left: -6px; right: -6px; height: 18px; border-radius: 4px; background: var(--hazard, #ffb81c); box-shadow: 0 2px 6px rgba(0,0,0,.5); }
+#lever .lv-read { order: -1; display: flex; flex-direction: column; align-items: center; gap: 1px; font: 11px var(--font-mono); color: #e8f2ff; text-shadow: 0 1px 2px #000; text-align: center; white-space: nowrap; }
+#lever .lv-read b { font-size: 16px; }
+#lever #lv-ab { color: rgba(255,174,107,.35); font-weight: 700; font-size: 10px; }
+#lever #lv-ab.on { color: #ffae6b; text-shadow: 0 0 8px #ff7a26; }
+body.is-touch #lever { top: 22%; }
+#btn-hyper { color: #9fd0ff; border-color: rgba(120,180,255,.6); font-weight: 700; }
+#btn-hyper.on { background: rgba(80,150,255,.55); color: #fff; box-shadow: 0 0 14px rgba(120,190,255,.9); }
+#map { position: fixed; inset: 0; z-index: 40; background: #0b1016; }
+#map canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+#map .map-bar { position: absolute; left: 0; right: 0; top: 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; background: linear-gradient(rgba(5,8,12,.85), rgba(5,8,12,0)); color: #e8f2ff; font: 13px var(--font-mono); }
+#map .map-hint { opacity: .7; }
+#map .map-sp { flex: 1; }
+#map .tool.on { background: rgba(255,184,28,.35); }
+#map .map-info { position: absolute; left: 16px; right: 16px; bottom: 50px; color: #ffd27a; font: 14px var(--font-mono); text-shadow: 0 1px 3px #000; }
 </style>
 
 <canvas id="gl" aria-label="3D flight view"></canvas>
@@ -802,6 +825,8 @@ body.is-touch .touch { display: block; }
 <script src="js/net.js"></script>
 <script src="js/multiplayer.js"></script>
 <script src="js/ui.js"></script>
+<script src="js/throttle.js"></script>
+<script src="js/nav.js"></script>
 <script src="js/main.js"></script>
 
 </html>
