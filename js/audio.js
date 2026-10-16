@@ -283,7 +283,6 @@
     P(AU.sfxBus.gain, s.sfxVol, 0.05);
     P(AU.uiBus.gain, s.sfxVol * 0.6, 0.05);
     P(AU.voiceBus.gain, s.voiceVol != null ? s.voiceVol : 0.9, 0.05);
-    if (s.muted && window.speechSynthesis) try { speechSynthesis.cancel(); } catch (e) { /* none */ }
   };
 
   AU.setPlayerEngine = function (spec) {
@@ -468,44 +467,8 @@
     }
   };
 
-  /* ---------------- Free Flight greeting ----------------
-   * A JARVIS-style assistant greeting on every Free Flight entry: a futuristic "systems online" startup,
-   * then the line in the best British male voice the browser offers (calm, measured), with the engines
-   * ducked underneath and brought back up smoothly when it finishes. Browser voices can't imitate a
-   * specific actor; this picks the closest British male voice available. A recorded line in
-   * AU.welcomeFile takes priority if one is added. */
-  const WELCOME = "Welcome back, TQ. All systems are online. Your aircraft is ready, and flight controls are standing by. The skies are yours, sir. Where shall we fly today?";
-  const GB_MALE = /ryan|thomas|alfie|elliot|ethan|noah|oliver|george|daniel|arthur|harry|google uk english male/i;
-  const EN_MALE = /guy|davis|christopher|eric|andrew|brian|roger|steffan|tony|jason|william|liam|alex|fred|aaron|tom|james|male/i;
-  const FEMALE = /female|serena|kate|hazel|susan|libby|sonia|maisie|mia|abbi|bella|hollie|martha|olivia|karen|moira|samantha|victoria|zira|aria|jenny|tessa|fiona|veena|ava|allison|emma|amy|joanna|salli|kimberly|ivy|kendra|nicole|catherine|natasha|clara|sara|michelle|ana|google us english/i;
-  /** English voices for the settings picker, British male first. */
-  AU.voiceList = function () {
-    if (!window.speechSynthesis) return [];
-    const all = speechSynthesis.getVoices().filter((v) => /^en([-_]|$)/i.test(v.lang));
-    const rank = (v) => (/en[-_]gb/i.test(v.lang) && GB_MALE.test(v.name) ? 0 : FEMALE.test(v.name) ? 2 : 1);
-    return all.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)).map((v) => ({ name: v.name, lang: v.lang, britishMale: rank(v) === 0 }));
-  };
-  /** The player's chosen voice, or the best British male voice; falls back to any male, then any non-female English voice. */
-  function pickVoice() {
-    const want = RJ.settings.voiceName;
-    if (want && window.speechSynthesis) { const v = speechSynthesis.getVoices().find((x) => x.name === want); if (v) return { v, british: true, chosen: true }; }
-    const vs = speechSynthesis.getVoices().filter((v) => /^en([-_]|$)/i.test(v.lang) && !FEMALE.test(v.name));
-    const gb = (v) => /en[-_]gb/i.test(v.lang);
-    const score = (v) => (gb(v) && GB_MALE.test(v.name) ? 100 : 0) + (gb(v) ? 30 : 0) + (GB_MALE.test(v.name) || EN_MALE.test(v.name) ? 20 : 0)
-      + (/natural|neural|online|premium|enhanced/i.test(v.name) ? 15 : 0);
-    const best = vs.sort((x, y) => score(y) - score(x))[0] || null;
-    return best ? { v: best, british: gb(best) && GB_MALE.test(best.name) } : null;
-  }
-  function voicesReady() {
-    if (!window.speechSynthesis || speechSynthesis.getVoices().length) return Promise.resolve();
-    return new Promise((r) => { const t = setTimeout(r, 1500); speechSynthesis.addEventListener("voiceschanged", () => { clearTimeout(t); r(); }, { once: true }); });
-  }
-  function caption(text, ms) {
-    let el = document.getElementById("rj-caption");
-    if (!el) { el = document.createElement("div"); el.id = "rj-caption"; document.body.appendChild(el); }
-    el.textContent = text; el.classList.add("on");
-    clearTimeout(caption.t); caption.t = setTimeout(() => el.classList.remove("on"), ms);
-  }
+  /* ---------------- Free Flight entry sound ----------------
+   * A futuristic "systems online" chime and a soft airfield bed; Nova (companion.js) speaks the greeting over it. */
   /** Duck the engines under the voice (0..1) until release(), with smooth ramps. */
   AU.duck = function (level) {
     if (!AU.ctx) return;
@@ -548,64 +511,15 @@
     bed.gain.setValueAtTime(0.14, t + hold); bed.gain.exponentialRampToValueAtTime(0.0001, t + hold + 2.5);
     const end = t + hold + 2.7; [a, r].forEach((x) => x.stop(end)); w.stop(end);
   }
-  /** Optional recorded line: set to a project path such as "audio/welcome.mp3" after adding the file. */
-  AU.welcomeFile = null;
-  async function playSample(t) {
-    if (!AU.welcomeFile) return false;
-    try {
-      const res = await fetch(AU.welcomeFile, { cache: "force-cache" });
-      if (!res.ok) return false;
-      const buf = await AU.ctx.decodeAudioData(await res.arrayBuffer());
-      const s = AU.ctx.createBufferSource(), hp = mkFilt(AU.ctx, "highpass", 110), pk = mkFilt(AU.ctx, "peaking", 2800, 0.8), g = mkGain(AU.ctx, 0);
-      pk.gain.value = 3; s.buffer = buf; s.connect(hp).connect(pk).connect(g).connect(AU.voiceBus);
-      const st = Math.max(t, AU.ctx.currentTime);
-      g.gain.setValueAtTime(0, st); g.gain.linearRampToValueAtTime(1, st + 0.12);
-      g.gain.setValueAtTime(1, st + buf.duration - 0.25); g.gain.linearRampToValueAtTime(0, st + buf.duration);
-      s.start(st);
-      return true;
-    } catch (e) { return false; }
-  }
-  /** Stop a greeting in progress (leaving the flight). */
-  AU.cancelGreeting = function () {
-    AU._greet = (AU._greet || 0) + 1;
-    try { if (window.speechSynthesis) speechSynthesis.cancel(); } catch (e) { /* none */ }
-    const el = document.getElementById("rj-caption"); if (el) el.classList.remove("on");
-    AU.unduck(0.3);
-  };
-  /** Settings "Test voice": the full greeting, startup sound included. */
-  AU.testVoice = function () { AU.init(); AU.cancelGreeting(); return AU.welcome("free", true); };
-  /** Called on every flight start; greets on each Free Flight entry, once per entry. */
-  AU.welcome = async function (kind, test) {
-    if (!AU.ctx || kind !== "free") return;
-    const id = (AU._greet = (AU._greet || 0) + 1), live = () => id === AU._greet;
-    const s = RJ.settings;
-    if (s.muted || !(s.voiceVol > 0)) { if (test) RJ.ui.toast("Turn up the Greeting voice slider (and unmute) to hear it.", 2500); return; }
+  /** Leaving the flight: make sure nothing stays ducked. */
+  AU.cancelGreeting = function () { AU.unduck(0.3); };
+  /** Free Flight entry: the systems-online chime (Nova greets over it). */
+  AU.welcome = async function (kind) {
+    if (!AU.ctx || kind !== "free" || RJ.settings.muted) return;
     if (AU.ctx.state === "suspended") await AU.ctx.resume();
     const t = AU.ctx.currentTime + 0.25;
     startupSound(t);
     ambienceBed(t, 9.5);
-    AU.duck(0.45);
-    const done = () => { if (live()) AU.unduck(1.1); };
-    setTimeout(done, 15000); // safety net if the browser never reports the end of speech
-    setTimeout(() => { if (live()) caption(WELCOME, 10000); }, 1700);
-    if (await playSample(t + 1.7)) { setTimeout(done, 11000); return; }
-    if (!window.speechSynthesis || typeof SpeechSynthesisUtterance !== "function") { setTimeout(done, 9000); return; }
-    await voicesReady();
-    setTimeout(() => {
-      if (!live() || RJ.settings.muted) return;
-      try {
-        const u = new SpeechSynthesisUtterance(WELCOME), pick = pickVoice();
-        if (pick) { u.voice = pick.v; u.lang = pick.v.lang; } else u.lang = "en-GB";
-        // calm and measured; a voice that isn't a British male one gets pulled a little lower
-        const S = RJ.settings;
-        u.rate = S.voiceRate || 0.95; u.pitch = (S.voicePitch || 0.96) * (pick && pick.british ? 1 : 0.88);
-        u.volume = RJ.clamp(RJ.settings.master * RJ.settings.voiceVol * 1.1, 0, 1);
-        u.onend = u.onerror = done;
-        speechSynthesis.cancel();
-        speechSynthesis.speak(u);
-        AU.lastVoice = pick ? pick.v.name : "default";
-      } catch (e) { console.warn("Greeting voice unavailable", e); done(); }
-    }, Math.max(0, (t + 1.7 - AU.ctx.currentTime) * 1000));
   };
 
   function burst(opts) {

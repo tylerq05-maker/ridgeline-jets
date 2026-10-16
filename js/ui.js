@@ -363,20 +363,15 @@
       h += row("Aircraft engines", "Your jet and the aircraft around you", range("engineVol", 0, 1, 0.05));
       h += row("Wind and ambience", "Airflow, runway rumble, cabin and cockpit ambience", range("envVol", 0, 1, 0.05));
       h += row("Weapons and effects", null, range("sfxVol", 0, 1, 0.05));
-      h += row("Greeting voice", "Your assistant greets you each time you enter Free Flight. 0 turns it off.", range("voiceVol", 0, 1, 0.05));
-      const vl = RJ.audio.voiceList();
-      const opts = [`<option value="">Auto (best British male voice)</option>`].concat(vl.map((v) => `<option value="${esc(v.name)}" ${RJ.settings.voiceName === v.name ? "selected" : ""}>${v.britishMale ? "★ " : ""}${esc(v.name)} (${esc(v.lang)})</option>`));
-      h += row("Assistant voice", vl.length ? "★ = British male. The list comes from your browser; Edge has the most natural voices." : "Your browser hasn't listed any voices yet. Reopen this tab in a moment.", `<select class="txt" id="set-voice" style="max-width:320px">${opts.join("")}</select>`);
-      h += row("Voice speed", null, range("voiceRate", 0.7, 1.2, 0.05));
-      h += row("Voice pitch", null, range("voicePitch", 0.7, 1.3, 0.02));
-      h += row("Try it", "Plays the full greeting with your current choices", `<button class="ghost small" id="voice-test">Test voice</button>`);
-      h += row("Flight companion (Nova)", "Talks about what's happening and answers your questions. Hold " + RJ.keyLabel(RJ.settings.keys.talk) + " or press 🎙 to talk.", toggle("compOn"));
-      h += row("How much she talks", null, chipCtl("compChat", [["quiet", "Quiet"], ["normal", "Normal"], ["chatty", "Chatty"]]));
-      h += row("Companion volume", null, range("compVol", 0, 1, 0.05));
+      h += row("Nova (flight companion)", "Greets you in Free Flight, talks during flights and answers anything you ask. Hold " + RJ.keyLabel(RJ.settings.keys.talk) + " or tap 🎙 to talk.", toggle("compOn"));
+      h += row("Nova's volume", null, range("compVol", 0, 1, 0.05));
       const cl = RJ.companion.voiceList();
-      h += row("Companion voice", "Natural voices (Edge) sound the most human", `<select class="txt" id="comp-voice" style="max-width:320px"><option value="">Auto (best natural female voice)</option>${cl.map((v) => `<option value="${esc(v.name)}" ${RJ.settings.compVoice === v.name ? "selected" : ""}>${v.female ? "♀ " : ""}${esc(v.name)} (${esc(v.lang)})</option>`).join("")}</select>`);
-      h += row("Microphone", "Off: holding the talk key opens a text box instead", toggle("compMic"));
-      h += row("Hear her", null, `<button class="ghost small" id="comp-test">Test companion</button>`);
+      h += row("Nova's voice", cl.length ? "Natural voices (Edge: Ava, Emma, Jenny) sound the most human" : "Your browser hasn't listed its voices yet. Reopen this tab in a moment.", `<select class="txt" id="comp-voice" style="max-width:320px"><option value="">Auto (most natural female voice)</option>${cl.map((v) => `<option value="${esc(v.name)}" ${RJ.settings.compVoice === v.name ? "selected" : ""}>${v.female ? "♀ " : ""}${esc(v.name)} (${esc(v.lang)})</option>`).join("")}</select>`);
+      h += row("How much she talks", null, chipCtl("compChat", [["quiet", "Quiet"], ["normal", "Normal"], ["chatty", "Chatty"]]));
+      h += row("Microphone", "Talk to Nova with your voice", toggle("compMic"));
+      h += row("Listen after her questions", "When Nova asks you something, the mic opens on its own for your answer", toggle("compFollow"));
+      h += row("Nova's AI server", "Lets her talk about anything on the website version. Paste your server address (see the setup guide).", `<input class="txt" id="nova-server" style="max-width:320px" placeholder="https://nova-server.yourname.workers.dev" value="${esc(RJ.settings.novaServer || "")}">`);
+      h += row("Test Nova", "Checks her AI connection and has her say hi", `<button class="ghost small" id="comp-test">Test</button> <span class="hint" id="comp-test-out"></span>`);
       h += row("Mute", null, toggle("muted"));
     } else if (t === "controls") {
       h += row("Flight assist", "Holds altitude in banked turns and levels the wings when you let go", toggle("assist"));
@@ -583,8 +578,7 @@
         return;
       }
       if (e.target.id === "keys-reset") { RJ.resetKeys(); UI.renderSettings(); }
-      if (e.target.id === "voice-test") { RJ.audio.testVoice(); }
-      if (e.target.id === "comp-test") { RJ.audio.init(); RJ.companion.say("Hey. I'm Nova. Altitude, speed, scenery, bad jokes, I've got you covered.", 1, { reply: true }); }
+      if (e.target.id === "comp-test") { RJ.audio.init(); const out = $("comp-test-out"); out.textContent = "Testing…"; RJ.companion.testBrain().then((t) => { out.textContent = t; }); }
       if (e.target.id === "prog-reset") {
         if (UI._confirmReset) { RJ.resetProgress(); UI._confirmReset = false; UI.toast("Progress reset."); }
         else UI._confirmReset = true;
@@ -592,8 +586,8 @@
       }
     });
     $("set-body").addEventListener("change", (e) => {
-      if (e.target.id === "set-voice") { RJ.settings.voiceName = e.target.value; RJ.saveSettings(); RJ.audio.testVoice(); }
       if (e.target.id === "comp-voice") { RJ.settings.compVoice = e.target.value; RJ.saveSettings(); RJ.companion.say("How do I sound? Better?", 1, { reply: true }); }
+      if (e.target.id === "nova-server") { RJ.settings.novaServer = e.target.value.trim(); RJ.saveSettings(); }
     });
     // voices load asynchronously in some browsers: refresh the list when they arrive
     if (window.speechSynthesis && speechSynthesis.addEventListener) speechSynthesis.addEventListener("voiceschanged", () => { if (UI.current === "scr-settings" && UI.setTab === "audio") UI.renderSettings(); });

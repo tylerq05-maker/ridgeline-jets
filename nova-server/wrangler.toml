@@ -1,0 +1,12 @@
+# Nova's conversation server for Ridgeline Jets (a Cloudflare Worker).
+# Secret (set in the Cloudflare dashboard, never in this file): ANTHROPIC_API_KEY
+name = "nova-server"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Only these sites may use the server (comma-separated).
+ALLOWED_ORIGINS = "https://tylerq05-maker.github.io"
+# Claude model for Nova's replies. claude-haiku-5-5 is much cheaper and faster for chat.
+MODEL = "claude-opus-5-5"

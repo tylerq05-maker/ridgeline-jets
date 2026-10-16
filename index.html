@@ -177,8 +177,12 @@ h2.title { font-family: var(--font-display); font-weight: 400; font-size: clamp(
 .txt.code { width: 170px; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
 .txt:focus { outline: 2px solid var(--hazard); outline-offset: 1px; }
 #comp-status { position: fixed; left: 50%; bottom: 23%; transform: translateX(-50%); z-index: 31; padding: 6px 14px; border-radius: 4px; background: rgba(10,15,21,.7); border: 1px solid rgba(255,184,28,.4); color: var(--hazard); font-family: var(--font-mono); font-size: 14px; pointer-events: none; max-width: calc(100vw - 32px); }
-#comp-box { position: fixed; left: 50%; bottom: 23%; transform: translateX(-50%); z-index: 32; width: min(460px, calc(100vw - 32px)); }
-#comp-box input { width: 100%; box-sizing: border-box; }
+#comp-status[data-state="error"] { color: var(--danger); border-color: rgba(255,90,79,.5); }
+#btn-talk[data-state="listening"] { background: var(--danger); color: #fff; animation: rj-pulse 1s infinite; }
+#btn-talk[data-state="thinking"] { background: rgba(255,184,28,.35); }
+#btn-talk[data-state="speaking"] { box-shadow: 0 0 0 2px var(--hud) inset; }
+#btn-talk[data-state="error"] { opacity: .55; }
+@keyframes rj-pulse { 50% { box-shadow: 0 0 0 6px rgba(255,90,79,.25); } }
 #rj-caption { position: fixed; left: 50%; bottom: 17%; transform: translate(-50%, 8px); z-index: 30; max-width: min(640px, calc(100vw - 32px)); padding: 9px 18px; border-radius: 4px; background: rgba(10,15,21,.62); border: 1px solid rgba(141,255,176,.25); color: #dff8e7; font-family: var(--font-mono); font-size: 15px; letter-spacing: .04em; text-align: center; opacity: 0; pointer-events: none; transition: opacity .6s, transform .6s; }
 #rj-caption.on { opacity: 1; transform: translate(-50%, 0); }
 .mdcode { font-family: var(--font-mono); font-size: 11px; line-height: 1.35; resize: vertical; word-break: break-all; margin: 4px 0 6px; }
@@ -382,7 +386,7 @@ body.is-touch .touch { display: block; }
     <div class="status" id="status"></div>
     <div class="rightcol">
       <div class="tools">
-        <button class="tool" id="btn-talk" title="Talk to Nova (hold Y)">🎙</button>
+        <button class="tool" id="btn-talk" title="Talk to Nova (tap, or hold Y)">🎙</button>
         <button class="tool" id="btn-cam" title="Camera (V)">CAM</button>
         <button class="tool" id="btn-pause" title="Pause (P / Esc)">II</button>
       </div>
@@ -769,7 +773,6 @@ body.is-touch .touch { display: block; }
 <div class="disc" id="discover" hidden><div class="ic" id="disc-ic"></div><span class="k">LANDMARK DISCOVERED</span><span class="n" id="disc-n"></span><span class="d" id="disc-d"></span><span class="r" id="disc-r"></span></div>
 
 <div id="comp-status" hidden></div>
-<div id="comp-box" hidden><input class="txt" id="comp-input" maxlength="200" autocomplete="off" placeholder="Ask Nova anything, then press Enter"></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="js/core.js"></script>
 <script src="js/noise.js"></script>
