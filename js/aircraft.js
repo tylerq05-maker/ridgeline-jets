@@ -947,6 +947,7 @@
     g.userData = { flames: [], nozzles: [], stabs: [], sweep: [], props: [], droop: [], cockpit: V3(0, 1, -5), tips: [], _plates: [], _fins: [] };
     let body = a.colors.body, trim = a.colors.trim;
     if (livery === "aggressor") { const p = AGGRESSOR[Math.floor(Math.random() * AGGRESSOR.length)]; body = p[0]; trim = p[1]; }
+    if (livery === "blueangels") { body = 0x0d2c6c; trim = 0xf2b705; } // tribute scheme: navy blue with gold trim
     const stealthy = a.stealth > 1.5;
     const M = {
       body: panelize(std(body, stealthy ? 0.72 : 0.46, stealthy ? 0.12 : 0.38)),
@@ -956,7 +957,7 @@
       dark: std(0x1c1e21, 0.82, 0.2),
       metal: std(0x707176, 0.3, 0.9, { emissive: 0x000000 }),
       white: std(0xe8e8e4, 0.45, 0.08),
-      accent: std(a.colors.accent || trim, 0.45, 0.3),
+      accent: std(livery === "blueangels" ? 0xf2b705 : a.colors.accent || trim, 0.45, 0.3),
       glow: new THREE.MeshBasicMaterial({ color: a.colors.accent || 0x3d7dff }),
       rubber: std(0x151515, 0.92, 0),
       strut: std(0xb9bdc2, 0.32, 0.85)

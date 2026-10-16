@@ -337,37 +337,102 @@
   };
 
   /* ======================= MENU SHOWCASE ======================= */
-  const show = { ac: null, t: 0, alt: 0 };
+  /* Main-menu backdrop: a six-ship Delta of blue-and-gold Super Hornets (a tribute to the US Navy Blue Angels)
+   * trailing white smoke. Each pass is scripted as a rigid formation; three shots alternate: crowd-line pan,
+   * air-to-air from the wing, and an overhead pass straight above the camera. */
+  const show = { jets: null, t: 0, pass: 0, c: V3(), yaw: 0, alt: 0, smokeT: 0 };
+  const DELTA = [[0, 0, 0], [10, -0.6, 12], [-10, -0.6, 12], [0, -1.3, 24], [20, -1.2, 24], [-20, -1.2, 24]]; // x right, y up, z behind (m)
+  const PASS_T = 11, SPEED = 175;
+  const fq = new THREE.Quaternion(), fq2 = new THREE.Quaternion(), fv = V3(), fv2 = V3(), fv3 = V3(), fm = new THREE.Matrix4();
+  RJ._show = show; // test hook
+  function disposeShow() { if (show.jets) for (const j of show.jets) j.dispose(); show.jets = null; }
   function makeShowcase(pos, yaw) {
-    if (show.ac) show.ac.dispose();
-    const id = RJ.settings.aircraft in RJ.AIRCRAFT ? RJ.settings.aircraft : "f22";
-    show.ac = new RJ.Aircraft(id, { team: "blue" });
-    show.ac.place(pos, yaw, Math.min(RJ.AIRCRAFT[id].flight.vmax * 0.5, 230));
-    show.ac.throttle = 0.7; show.t = 0;
-    show.alt = pos.y;
-    cam.set("cinematic", true);
+    disposeShow();
+    show.jets = DELTA.map(() => {
+      const j = new RJ.Aircraft("fa18e", { team: "blue", livery: "blueangels" });
+      j.place(pos.clone(), yaw, SPEED); j.throttle = 0.72; j.gearDown = false;
+      return j;
+    });
+    show.c.copy(pos); show.yaw = yaw; show.t = 0; show.pass = 0;
+    newPass();
+  }
+  function newPass() {
+    // track through the prepared area; check the terrain along it and keep 140 m above the highest point
+    if (show.pass > 0) show.yaw += 2.1; // a new heading each pass
+    const dir = fv.set(-Math.sin(show.yaw), 0, -Math.cos(show.yaw));
+    // clear the highest ground along the track and the camera corridor beside it, so no ridge blocks the view
+    let hi = 0;
+    for (let d = -PASS_T * SPEED * 0.6; d <= PASS_T * SPEED * 0.6; d += 150) for (const off of [-350, 0, 350]) hi = Math.max(hi, RJ.world.ground(show.c.x + dir.x * d - dir.z * off, show.c.z + dir.z * d + dir.x * off));
+    show.alt = hi + 260;
+    show.prev = null;
+    show.shot = show.pass % 3; show.t = 0;
+  }
+  function formationAt(t, outP, outQ) {
+    const turn = show.shot === 1 ? 0.035 : 0; // the air-to-air pass is a gentle banked turn
+    const yaw = show.yaw + turn * (t - PASS_T / 2);
+    const d = (t - PASS_T / 2) * SPEED;
+    const dir = fv3.set(-Math.sin(show.yaw), 0, -Math.cos(show.yaw));
+    outP.set(show.c.x + dir.x * d, show.alt + Math.sin(t * 0.6) * 3, show.c.z + dir.z * d);
+    outQ.setFromAxisAngle(fv2.set(0, 1, 0), yaw).multiply(fq2.setFromAxisAngle(fv2.set(0, 0, 1), -Math.atan(SPEED * turn / RJ.G0)));
   }
   function menuFrame(dt) {
-    const a = show.ac;
-    if (!a) { RJ.post.render(scene, camera, null, RJ.world.grade, dt, { world: true }); return; }
-    if (a.id !== RJ.settings.aircraft && RJ.settings.aircraft in RJ.AIRCRAFT) makeShowcase(a.pos.clone(), Math.atan2(-a.fwd.x, -a.fwd.z));
-    const s = show.ac;
+    if (!show.jets) { RJ.post.render(scene, camera, null, RJ.world.grade, dt, { world: true }); return; }
     show.t += dt;
-    if (Math.floor(show.t) !== Math.floor(show.t - dt)) {
-      const ahead = s.pos.clone().addScaledVector(s.fwd, 2500);
-      show.alt = Math.max(RJ.modes.highestAround(ahead.x, ahead.z, 1500, 2) + 450, RJ.modes.highestAround(s.pos.x, s.pos.z, 1200, 2) + 350);
+    if (show.t > PASS_T) { show.pass++; newPass(); }
+    const P = V3(), Q = new THREE.Quaternion();
+    formationAt(show.t, P, Q);
+    const fwd = V3(0, 0, -1).applyQuaternion(Q), right = V3(1, 0, 0).applyQuaternion(Q), up = V3(0, 1, 0).applyQuaternion(Q);
+    const prev = show.prev || (show.prev = show.jets.map(() => null));
+    show.jets.forEach((j, i) => {
+      const o = DELTA[i], w = show.t * 1.3 + i * 1.7; // tiny station-keeping wobble
+      j.pos.copy(P).addScaledVector(right, o[0] + Math.sin(w) * 0.25).addScaledVector(up, o[1] + Math.sin(w * 1.3) * 0.18).addScaledVector(fwd, -o[2] + Math.sin(w * 0.7) * 0.3);
+      j.q.copy(Q); j.updateBasis();
+      j.vel.copy(fwd).multiplyScalar(SPEED); j.speed = SPEED; j.state = "flying";
+      j.updateVisual(dt);
+      // continuous smoke: fill the gap since last frame so the trail is a ribbon, not a string of beads
+      const tail = V3().copy(j.pos).addScaledVector(fwd, -9);
+      if (prev[i]) {
+        const gap = prev[i].distanceTo(tail), n = Math.min(40, Math.ceil(gap / 2.5));
+        for (let k = 1; k <= n; k++) RJ.fx.smoke(fv.lerpVectors(prev[i], tail, k / n), fv2.copy(fwd).multiplyScalar(SPEED * 0.04), 2.6, 0.96, 7, 0.45);
+      }
+      prev[i] = tail;
+    });
+    // camera shots
+    const lead = show.jets[0].pos, mid = fv3.copy(P).addScaledVector(fwd, -12);
+    let fov = 38;
+    if (show.shot === 0) {
+      // crowd line: a fixed point 280 m off the track, panning as the Delta roars past
+      const side = fv.set(-Math.sin(show.yaw), 0, -Math.cos(show.yaw)).cross(fv2.set(0, 1, 0));
+      camera.position.set(show.c.x + side.x * 190, show.alt - 35, show.c.z + side.z * 190);
+      const d = camera.position.distanceTo(mid);
+      fov = RJ.clamp(2 * Math.atan(70 / d) / RJ.DEG, 9, 50);
+      camera.lookAt(mid);
+    } else if (show.shot === 1) {
+      // air-to-air: camera ship flying off the right wing, slightly behind and above
+      camera.position.copy(P).addScaledVector(right, 48 + Math.sin(show.t * 0.3) * 6).addScaledVector(fwd, -30 + show.t * 2.5).addScaledVector(up, 9);
+      camera.up.copy(up);
+      camera.lookAt(mid);
+      camera.up.set(0, 1, 0);
+      fov = 42;
+    } else {
+      // overhead: camera on the track, low, looking up as the formation passes straight over
+      const dir = fv.set(-Math.sin(show.yaw), 0, -Math.cos(show.yaw));
+      camera.position.set(show.c.x + dir.x * 120, show.alt - 70, show.c.z + dir.z * 120);
+      const d = camera.position.distanceTo(mid);
+      fov = RJ.clamp(2 * Math.atan(55 / d) / RJ.DEG, 14, 60);
+      camera.lookAt(mid);
     }
-    const bankT = Math.sin(show.t * 0.07) * 0.45;
-    s.input.roll = RJ.clamp((bankT - s.bank) * 2, -1, 1);
-    s.input.pitch = RJ.clamp((show.alt - s.pos.y) * 0.004 - s.vel.y * 0.03, -0.4, 0.6);
-    s.input.thrAbs = 0.72; s.input.ab = false; s.input.guns = false;
-    s.update(dt);
-    if (!s.alive) { makeShowcase(V3(s.pos.x, show.alt + 300, s.pos.z), 0); return; }
-    s.updateVisual(dt);
-    const mode = cam.update(dt, s);
-    RJ.world.update(dt, camera, s.pos, s.vel, s.agl);
+    const gy = RJ.world.ground(camera.position.x, camera.position.z) + 3;
+    if (camera.position.y < gy) { camera.position.y = gy; camera.lookAt(mid); }
+    camera.fov = RJ.damp(camera.fov, fov, 6, dt); camera.updateProjectionMatrix();
+    // the menu panel covers the left third: frame the formation in the open space on the right
+    if (innerWidth > 700) camera.rotateY(camera.fov * RJ.DEG * camera.aspect * (show.shot === 1 ? 0.1 : 0.26));
+    camera.updateMatrixWorld();
+    const s = show.jets[0];
+    RJ.world.update(dt, camera, s.pos, s.vel, s.pos.y - RJ.world.ground(s.pos.x, s.pos.z));
     RJ.fx.update(dt, camera, renderer);
-    postInputs(s, s, mode, dt);
+    postInputs(s, s, "cinematic", dt);
+    RJ.post.fx.dof = null;
     RJ.world.renderCloudShadow(renderer, camera);
     RJ.world.renderReflection(renderer, camera);
     RJ.post.render(scene, camera, null, RJ.world.grade, dt, { world: true });
@@ -392,7 +457,7 @@
     RJ.audio.init();
     RJ.game.config = { kind, opts: Object.assign({}, opts) };
     stopCurrent();
-    if (show.ac) { show.ac.dispose(); show.ac = null; }
+    disposeShow();
     RJ.state.mode = "loading";
     RJ.ui.gameChrome(false);
     RJ.ui.show("scr-loading");
