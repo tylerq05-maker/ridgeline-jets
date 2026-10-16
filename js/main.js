@@ -522,7 +522,7 @@
     if (focus.alive && abK > 0.02 && focus.vis.flames.length) {
       abL.position.copy(focus.pos).addScaledVector(focus.fwd, -focus.vis.dims.len * 0.75);
       abL.color.setHex(swc ? focus.spec.colors.glow || focus.spec.engineColor || 0xff9a4a : 0xff9a4a);
-      abL.intensity = abK * (1.2 + (RJ.world.night ? 5 : RJ.smooth(15, 0, RJ.world.sunElev) * 3)) * (0.9 + Math.random() * 0.2) * (swc ? 3 + (focus.hyperK || 0) * 4 : 1);
+      abL.intensity = (abK + (focus.abKick || 0) * 0.9) * (1.2 + (RJ.world.night ? 5 : RJ.smooth(15, 0, RJ.world.sunElev) * 3)) * (0.8 + Math.random() * 0.35) * (swc ? 3 + (focus.hyperK || 0) * 4 : 1);
       abL.distance = (60 + focus.vis.dims.len * 4) * (swc ? 2.5 : 1);
     } else abL.intensity = 0;
     // audio

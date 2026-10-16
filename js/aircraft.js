@@ -81,40 +81,71 @@
 
   const FLAME_GEO = (() => { const f = new THREE.ConeGeometry(1, 5, 16, 6, true); f.translate(0, 2.5, 0); f.rotateX(Math.PI / 2); return f; })();
   // Afterburner plume: animated turbulence, white-hot core, shock diamonds, HDR output for bloom.
+  // Exhaust plume, two layers on the same cone: an orange/yellow outer envelope and a short white-blue core
+  // carrying the shock diamonds. The vertex shader breathes and whips the tail so the flame never looks static.
   const FLAME_VERT = [
+    "uniform float time; uniform float ab; uniform float seed; uniform float layer;",
     "varying vec2 vUv; varying float vFres;",
-    "void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0);",
+    "void main(){ vUv = uv; vec3 p = position; float t = clamp(uv.y, 0.0, 1.0);",
+    "  float tb = (0.35 + ab * 0.65) * (layer > 0.5 ? 0.45 : 1.0);",
+    "  float w = sin(t * 9.0 - time * 28.0 + seed) * 0.5 + sin(t * 17.0 - time * 41.0 + seed * 1.7) * 0.5;",
+    "  p.xy *= 1.0 + w * 0.13 * t * tb;",
+    "  p.xy += vec2(sin(time * 23.0 + seed + t * 5.0), cos(time * 19.0 + seed * 2.0 + t * 4.0)) * 0.16 * t * t * tb;",
+    "  vec4 mv = modelViewMatrix * vec4(p, 1.0);",
     "  vec3 n = normalize(normalMatrix * normal); vFres = abs(dot(n, normalize(-mv.xyz)));",
     "  gl_Position = projectionMatrix * mv; }"
   ].join("\n");
   const FLAME_FRAG = [
-    "uniform float time; uniform float power; uniform float ab; uniform vec3 hot; uniform vec3 mid; uniform float seed;",
+    "uniform float time; uniform float power; uniform float ab; uniform vec3 hot; uniform vec3 mid; uniform float seed; uniform float layer; uniform float kick;",
     "varying vec2 vUv; varying float vFres;",
     "float fh(vec2 p){ p = mod(p, 289.0); return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }",
     "float fn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
     "  return mix(mix(fh(i), fh(i + vec2(1.0, 0.0)), f.x), mix(fh(i + vec2(0.0, 1.0)), fh(i + vec2(1.0, 1.0)), f.x), f.y); }",
     "void main(){",
     "  float t = clamp(vUv.y, 0.0, 1.0);",
+    // two octaves of noise scrolling down the plume: turbulence and flicker
     "  float n = fn(vec2(vUv.x * 9.0 + seed, t * 7.0 - time * 14.0)) * 0.6 + fn(vec2(vUv.x * 21.0, t * 16.0 - time * 23.0)) * 0.4;",
-    "  float core = exp(-t * 3.5);",
-    // shock diamonds: bright standing rings that tighten and fade down the plume
-    "  float dia = ab * pow(0.5 + 0.5 * cos(t * 30.0 - 0.6), 10.0) * exp(-t * 2.1) * (0.7 + 0.3 * n);",
-    "  vec3 col = mix(mid, hot, core) + hot * dia * 2.6;",
-    // blue-violet flame-holder glow right at the nozzle exit
-    "  col += vec3(0.35, 0.5, 1.0) * exp(-t * 14.0) * (0.3 + ab * 0.9);",
-    "  float a = (1.0 - t) * (0.45 + 0.55 * n) * pow(vFres, 1.2);",
-    "  a *= mix(0.22 + power * 0.28, 1.0, ab);",
-    "  gl_FragColor = vec4(col * (1.0 + ab * 2.2), a);",
+    "  float ctr = pow(vFres, 1.4);", // 1 looking through the middle of the plume, 0 at its silhouette edge
+    "  vec3 col; float a;",
+    "  if (layer > 0.5) {",
+    // core: blue-white at the nozzle, warming to yellow; Mach diamonds = bright standing bands that fade downstream
+    "    vec3 blueW = vec3(0.72, 0.84, 1.0);",
+    "    col = mix(blueW, hot, smoothstep(0.0, 0.75, t));",
+    "    float dia = pow(0.5 + 0.5 * cos(t * 31.4 - 0.9), 9.0) * exp(-t * 1.3) * (0.9 + 0.1 * n);",
+    "    col = col * (0.55 + kick * 1.2) + vec3(1.0, 0.95, 0.82) * dia * (3.2 + kick * 2.0);",
+    "    a = (1.0 - smoothstep(0.6, 1.0, t)) * (0.5 + 0.5 * ctr) * (0.12 + dia * 1.1) * ab;",
+    "  } else {",
+    // envelope: hot yellow-white in the middle and near the nozzle, orange at the edges, red-orange at the tail
+    "    vec3 tail = mid * vec3(1.0, 0.55, 0.35);",
+    "    vec3 body = mix(mid, hot, ctr * exp(-t * 2.2));",
+    "    col = mix(body, tail, smoothstep(0.35, 1.0, t));",
+    "    col += vec3(0.35, 0.5, 1.0) * exp(-t * 14.0) * (0.3 + ab * 0.9);", // flame-holder blue at the exit
+    "    float dia = ab * pow(0.5 + 0.5 * cos(t * 30.0 - 0.6), 10.0) * exp(-t * 2.4) * (0.7 + 0.3 * n);",
+    "    col += hot * dia * 0.8;",
+    "    col *= 0.75 + ab * 0.55 + kick * 1.2;",
+    "    a = pow(1.0 - t, 1.2) * (0.35 + 0.65 * n) * pow(vFres, 1.1) * 0.8;",
+    "    a *= mix(0.2 + power * 0.3, 1.0, ab);",
+    "  }",
+    "  gl_FragColor = vec4(col, a);",
     "}"
   ].join("\n");
-  function flameMaterial(o) {
+  function flameMaterial(o, layer = 0) {
     return new THREE.ShaderMaterial({
       vertexShader: FLAME_VERT, fragmentShader: FLAME_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
       uniforms: {
-        time: { value: Math.random() * 10 }, power: { value: 0.5 }, ab: { value: 0 }, seed: { value: Math.random() * 50 },
+        time: { value: Math.random() * 10 }, power: { value: 0.5 }, ab: { value: 0 }, seed: { value: Math.random() * 50 }, layer: { value: layer }, kick: { value: 0 },
         hot: { value: new THREE.Color(o.core || 0xfff1d0) }, mid: { value: new THREE.Color(o.color || 0xff7a26) }
       }
     });
+  }
+  let haloTex = null;
+  function haloTexture() {
+    if (haloTex) return haloTex;
+    const c = document.createElement("canvas"); c.width = c.height = 64;
+    const x = c.getContext("2d"), gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gr.addColorStop(0, "rgba(255,255,255,1)"); gr.addColorStop(0.18, "rgba(255,226,180,0.75)"); gr.addColorStop(0.5, "rgba(255,140,60,0.22)"); gr.addColorStop(1, "rgba(255,90,20,0)");
+    x.fillStyle = gr; x.fillRect(0, 0, 64, 64);
+    return (haloTex = new THREE.CanvasTexture(c));
   }
   /** Engine exhaust: hot nozzle (heat-glow emissive), shader plume and a glow disc the flight code animates. */
   function engine(g, M, r, x, y, z, o = {}) {
@@ -131,9 +162,18 @@
     flame.renderOrder = 9;
     const glow = new THREE.Mesh(new THREE.CircleGeometry(r * 0.92, 16), new THREE.MeshBasicMaterial({ color: o.rocket ? 0xffd090 : 0xff7a30, transparent: true, opacity: 0.0, blending: THREE.AdditiveBlending, depthWrite: false }));
     glow.position.set(x, y, z - 0.02);
-    flame.layers.set(RJ.LATE); glow.layers.set(RJ.LATE);
+    // white-blue core with the shock diamonds (child of the plume: shares its scale and visibility)
+    const coreMat = flameMaterial(o, 1);
+    const core = new THREE.Mesh(FLAME_GEO, coreMat);
+    core.scale.set(0.5, 0.5, 0.62); core.renderOrder = 10; core.visible = false;
+    flame.add(core);
+    // camera-facing halo for the bloom around the nozzle (child of the glow disc)
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTexture(), color: o.rocket ? 0xffd8a8 : 0xffb070, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+    halo.scale.setScalar(r * 3.2); halo.position.z = 0.05;
+    glow.add(halo);
+    for (const m of [flame, glow, core, halo]) m.layers.set(RJ.LATE);
     g.add(flame, glow);
-    g.userData.flames.push({ flame, glow, mat, r, small: !!o.small, rocket: !!o.rocket });
+    g.userData.flames.push({ flame, glow, mat, core, coreMat, halo, r, small: !!o.small, rocket: !!o.rocket });
     g.userData.nozzles.push(V3(x, y, z + r * 0.3));
   }
   function missile(g, M, x, y, z, len = 3, r = 0.09) {

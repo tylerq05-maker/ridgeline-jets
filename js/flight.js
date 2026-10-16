@@ -379,32 +379,53 @@
       const flick = 0.92 + Math.random() * 0.16;
       const machBoost = RJ.smooth(0.7, 1.4, this.mach) * 0.35;
       const burning = this.fuel == null || this.fuel > 0;
+      // afterburner ignition: a quick flash and lengthening as the burner lights; the cut-off fades with abLevel
+      if (this.abLevel > 0.2 && !this._abLit) {
+        this._abLit = true; this.abKick = 1;
+        if (vis.flames.length && RJ.camera && this.pos.distanceTo(RJ.camera.position) < 2500) {
+          for (const f of vis.flames) if (!f.small) { const p = this.mesh.localToWorld(tv.copy(f.flame.position)); RJ.fx.fire(p, tv2.copy(this.vel).multiplyScalar(0.85), f.r * 2.2); }
+        }
+      } else if (this.abLevel < 0.08) this._abLit = false;
+      const kick = (this.abKick = Math.max(0, (this.abKick || 0) - dt * 3.2));
+      // distance LOD: far away the diamond core is invisible anyway, so skip drawing it
+      const camD = RJ.camera ? this.pos.distanceTo(RJ.camera.position) : 0, near = camD < 2500;
       for (const f of vis.flames) {
-        const U = f.mat.uniforms;
+        const U = f.mat.uniforms, CU = f.coreMat ? f.coreMat.uniforms : null;
         U.time.value += dt;
-        let s, ab, power = this.throttle;
+        let s, ab, power = this.throttle, halo, glow;
         if (F.model === "space") {
           // starfighter drives: always lit, afterburner and hypersonic stretch them into long white-hot plumes
           const hy = this.hyperK || 0, a = Math.max(this.abLevel, hy);
           s = (0.35 + this.throttle * 0.45 + this.abLevel * 2.2 + hy * 5) * flick; ab = a; power = 0.6 + a * 0.4;
           f.flame.scale.set(f.r * (1 + a * 0.35), f.r * (1 + a * 0.35), s);
-          U.power.value = power; U.ab.value = ab;
-          f.glow.material.opacity = Math.min(1, 0.45 + this.throttle * 0.25 + a * 0.6);
+          glow = Math.min(1, 0.45 + this.throttle * 0.25 + a * 0.6);
           f.glow.scale.setScalar(1 + a * 1.2 + hy * 1.5);
-          continue;
+          halo = 0.25 + a * 0.6;
+        } else {
+          if (f.rocket) { const on = this.throttle > 0.03 && burning; s = on ? (1.0 + this.throttle * 1.1) * flick : 0.01; ab = on ? 1 : 0; power = on ? 1 : 0; }
+          else if (f.small) { s = (0.1 + this.throttle * 0.16) * flick; ab = 0; }
+          // dry power: a short, faint plume that only shows near full throttle; afterburner: long and blazing
+          else { s = (0.05 + this.throttle * this.throttle * 0.26 + this.abLevel * (1.75 + machBoost) + kick * 0.6 * this.abLevel) * flick * Math.sqrt(f.r / 0.5); ab = this.abLevel; }
+          f.flame.scale.set(f.r * (1 + ab * 0.18 + kick * 0.15), f.r * (1 + ab * 0.18 + kick * 0.15), Math.max(0.01, s));
+          glow = f.small ? 0.15 : 0.12 + this.throttle * 0.3 + ab * 0.5 + kick * 0.4;
+          halo = f.small ? 0.05 : this.throttle * this.throttle * 0.12 + ab * 0.55 + kick * 0.7;
         }
-        if (f.rocket) { const on = this.throttle > 0.03 && burning; s = on ? (1.0 + this.throttle * 1.1) * flick : 0.01; ab = on ? 1 : 0; power = on ? 1 : 0; }
-        else if (f.small) { s = (0.1 + this.throttle * 0.16) * flick; ab = 0; }
-        else { s = (0.14 + this.throttle * 0.24 + this.abLevel * (1.05 + machBoost)) * flick * Math.sqrt(f.r / 0.5); ab = this.abLevel; }
-        f.flame.scale.set(f.r * (1 + ab * 0.15), f.r * (1 + ab * 0.15), Math.max(0.01, s));
-        U.power.value = power; U.ab.value = ab;
-        f.glow.material.opacity = f.small ? 0.15 : 0.2 + this.throttle * 0.35 + ab * 0.45;
+        U.power.value = power; U.ab.value = ab; U.kick.value = kick;
+        f.glow.material.opacity = Math.min(1, glow);
+        if (f.halo) {
+          f.halo.material.opacity = Math.min(1, halo) * (0.85 + Math.random() * 0.15);
+          f.halo.scale.setScalar(f.r * (2.0 + ab * 1.8 + kick * 3.5));
+        }
+        if (f.core) {
+          f.core.visible = near && ab > 0.03 && !f.small;
+          if (f.core.visible) { CU.time.value = U.time.value; CU.ab.value = ab; CU.kick.value = kick; CU.power.value = power; }
+        }
       }
       if (F.model && RJ.vehicles) RJ.vehicles.visual(this, dt);
       // hot nozzles glow dull orange at high power
-      this.heat = RJ.damp(this.heat, this.throttle * 0.35 + this.abLevel * 0.65, 1.2, dt);
+      this.heat = RJ.damp(this.heat, this.throttle * this.throttle * 0.3 + this.abLevel * 0.8 + (this.abKick || 0) * 0.3, 1.5, dt);
       const metal = vis.materials && vis.materials.metal;
-      if (metal) metal.emissive.setRGB(0.55 * this.heat, 0.18 * this.heat, 0.05 * this.heat);
+      if (metal) metal.emissive.setRGB(0.9 * this.heat, 0.3 * this.heat, 0.08 * this.heat);
       const pitch = this.ctl.pitch, roll = this.ctl.roll;
       for (const st of vis.stabs) st.grp.rotation.x = RJ.clamp((st.canard ? 0.3 : -0.3) * pitch + st.s * roll * 0.18, -0.45, 0.45);
       for (const sw of vis.sweep) sw.grp.rotation.y = -sw.s * RJ.lerp(sw.min, sw.max, RJ.smooth(sw.mach[0], sw.mach[1], this.mach));
