@@ -770,9 +770,11 @@
         "    c = mix(c, cc, wisp * 0.75);",
         "  }",
         // stars
-        "  if (night > 0.01 && h > 0.0) {",
-        "    vec2 g2 = floor(vec2(atan(d.z, d.x) * 260.0, asin(clamp(h, 0.0, 1.0)) * 260.0));",
-        "    float st = step(0.9965, rjH(g2)) * night * smoothstep(0.0, 0.25, h);",
+        // stars: at night, and in daylight too once the air above you thins out (from ~15 km)
+        "  float starVis = max(night, smoothstep(0.1, 0.7, space) * (1.0 - envPass) * (1.0 - smoothstep(0.96, 0.995, s)));",
+        "  if (starVis > 0.01 && h > -0.05) {",
+        "    vec2 g2 = floor(vec2(atan(d.z, d.x) * 260.0, asin(clamp(h, -0.05, 1.0)) * 260.0));",
+        "    float st = step(0.9965, rjH(g2)) * starVis * smoothstep(mix(0.0, -0.05, space), mix(0.25, 0.05, space), h);",
         "    c += vec3(st) * (0.6 + 0.4 * rjH(g2 + 7.0));",
         "  }",
         // moon: disc with soft halo

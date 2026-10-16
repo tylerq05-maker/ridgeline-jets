@@ -7,11 +7,13 @@
   const tv = V3(), tv2 = V3(), tv3 = V3();
 
   /* ======================= BULLETS (instanced tracers) ======================= */
+  const sc2 = new THREE.Vector3(), _bc = new THREE.Color();
   const MAXB = 900;
   C.init = function (scene) {
     const geo = new THREE.BoxGeometry(0.16, 0.16, 9);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffd27a, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false });
     C.tracers = new THREE.InstancedMesh(geo, mat, MAXB);
+    C.tracers.setColorAt(0, new THREE.Color(0xffd27a)); // per-bolt colour: tracers amber, lasers their own
     C.tracers.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     C.tracers.frustumCulled = false; C.tracers.count = 0; C.tracers.layers.set(RJ.LATE);
     scene.add(C.tracers);
@@ -72,7 +74,7 @@
     b.v.copy(dir).add(tv.set((Math.random() - 0.5) * s * 2, (Math.random() - 0.5) * s * 2, (Math.random() - 0.5) * s * 2)).normalize().multiplyScalar(g.speed).add(ac.vel);
     const muzzle = ac.vis.cockpit.z + 1.5;
     b.p.copy(ac.pos).addScaledVector(ac.fwd, -muzzle + 2).addScaledVector(ac.right, (k % 2 ? 0.6 : -0.6) * (ac.id === "p51" ? 4 : 1));
-    b.life = 2.4; b.owner = ac; b.dmg = g.dmg;
+    b.life = 2.4; b.owner = ac; b.dmg = g.dmg; b.col = g.color || 0xffd27a; b.len = g.laser ? 2.6 : 1;
     ac.stats.shots++;
     if (k === 0) RJ.fx.muzzle(b.p, ac.vel, g.brrt ? 3.5 : 2);
   }
@@ -138,12 +140,16 @@
       }
       if (n < MAXB) {
         qq.setFromUnitVectors(Z, tv.copy(b.v).normalize());
-        mtx.compose(b.p, qq, sc);
+        const L = b.len || 1;
+        mtx.compose(b.p, qq, sc2.set(L > 1 ? 2.2 : 1, L > 1 ? 2.2 : 1, L));
+        _bc.setHex(b.col || 0xffd27a); if (L > 1) _bc.multiplyScalar(3); // lasers glow hot for bloom
+        C.tracers.setColorAt(n, _bc);
         C.tracers.setMatrixAt(n++, mtx);
       }
     }
     C.tracers.count = n;
     C.tracers.instanceMatrix.needsUpdate = true;
+    if (C.tracers.instanceColor) C.tracers.instanceColor.needsUpdate = true;
   }
 
   /* ======================= LOCK-ON ======================= */

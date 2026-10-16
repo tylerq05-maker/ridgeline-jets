@@ -266,11 +266,12 @@
     if (g && !g.turret && !s.bombMode) parts.push(pl.overheated ? "GUN HOT" : `GUN ${Math.round((1 - pl.gunHeat) * 100)}%`);
     if (g && g.turret) parts.push(pl.firing ? "TAIL GUN FIRING" : "TAIL GUN AUTO");
     if (s.bombMode) parts.push(`BOMBS ${pl.bombs}`);
-    if (pl.gearT > 0.02) parts.push(pl.gearT > 0.98 ? "GEAR DOWN" : "GEAR TRANSIT");
+    if (pl.gearT > 0.02 && !pl.spec.flight.model) parts.push(pl.gearT > 0.98 ? "GEAR DOWN" : "GEAR TRANSIT");
     if (pl.input && pl.input.brake) parts.push(pl.onGround ? "WHEEL BRAKES" : "SPEED BRAKE");
     if (pl.spec.msl.n) parts.push(`MSL ${pl.missiles}`);
     if (pl.spec.flares) parts.push(`FLR ${pl.flares}`);
     text(parts.join("   "), W / 2, y, "center", small ? 12 : 14);
+    if (pl.vstatus) text(pl.vstatus, W / 2, y - (pl.overheated ? 40 : 20), "center", small ? 12 : 13);
     if (pl.overheated) { x.fillStyle = RED; text("GUN OVERHEAT", W / 2, y - 20, "center", 13); x.fillStyle = x.strokeStyle; }
   }
 

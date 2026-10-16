@@ -63,6 +63,7 @@
       RJ.setGear(this.mesh, this.gearT);
       this.updateBasis();
       this.vel.copy(this.fwd).multiplyScalar(this.speed);
+      if (this.spec.flight.model && RJ.vehicles) RJ.vehicles.place(this, opts);
       this.syncMesh();
     }
     updateBasis() {
@@ -75,7 +76,10 @@
     get heading() { return (Math.atan2(this.fwd.x, -this.fwd.z) / DEG + 360) % 360; }
     get onGround() { return this.state === "ground"; }
 
-    toggleGear() { if (this.alive && this.state === "flying") { this.gearDown = !this.gearDown; this.gearAuto = false; } }
+    toggleGear() {
+      if (this.spec.flight.model && RJ.vehicles) return RJ.vehicles.action(this, "gear"); // S-foils, wings, drive/fly
+      if (this.alive && this.state === "flying") { this.gearDown = !this.gearDown; this.gearAuto = false; }
+    }
 
     throttleAndFuel(dt) {
       const F = this.spec.flight, inp = this.input;
@@ -104,6 +108,8 @@
       if (this.state === "falling") return this.updateFalling(dt);
       if (this.remote) return; // network-driven: pose comes from the multiplayer layer
       if (!this.alive) return;
+      // helicopters, starfighters, flying cars and the rocket bike have their own physics (vehicles.js)
+      if (this.spec.flight.model && RJ.vehicles && RJ.vehicles.update(this, dt)) return;
       if (this.state === "ground") return this.updateGround(dt);
       const F = this.spec.flight, inp = this.input;
       this.throttleAndFuel(dt);
@@ -124,7 +130,9 @@
       if (this.assist) neutral = this.up.y > 0.05 ? Math.min(1 / Math.max(this.up.y, 0.35), F.gmax * 0.6, 2.8) : Math.max(0, this.up.y + 1) * 0.5;
       const p = this.ctl.pitch;
       const gCmd = p >= 0 ? neutral + p * (F.gmax - neutral) : neutral + p * (neutral + 3);
-      const gLim = RJ.clamp(gCmd, -Math.min(3, liftG * 0.6), Math.min(F.gmax, liftG));
+      // thrust vectoring: the nozzles add pitch force on top of wing lift, so TVC jets out-turn others when slow
+      const tvcG = F.tvc ? 0.45 * this.throttle * F.mil / RJ.G0 * (1 + this.abLevel * 0.6) : 0;
+      const gLim = RJ.clamp(gCmd, -Math.min(3, liftG * 0.6), Math.min(F.gmax, liftG + tvcG));
       // G onset: load builds over a fraction of a second (longer for big airplanes), no instant snaps
       this.gS = this.gS == null ? gLim : RJ.damp(this.gS, gLim, 7 / inert, dt);
       const gAct = this.gS;
@@ -154,6 +162,17 @@
         const b = this.bank;
         if (Math.abs(b) < 0.4 && this.up.y > 0) this.q.multiply(tq.setFromAxisAngle(AZ, b * 0.9 * dt));
       }
+      // stall departures: pulling past the lift limit drops a wing (and slices the nose) on older airframes;
+      // fly-by-wire jets barely twitch. Prop torque yaws the nose left at high power and low speed.
+      const stalled = p > 0.55 && liftG < gCmd * 0.92 && liftG < F.gmax;
+      this.stallT = stalled ? (this.stallT || 0) + dt : Math.max(0, (this.stallT || 0) - dt * 2);
+      if (F.depart && this.stallT > 0.35) {
+        if (!this.dropDir) this.dropDir = Math.random() < 0.5 ? -1 : 1;
+        const sev = F.depart * RJ.clamp((this.stallT - 0.35) * 2, 0, 1) * (this.assist ? 0.6 : 1);
+        this.q.multiply(tq.setFromAxisAngle(AZ, this.dropDir * sev * 1.5 * dt));
+        this.q.multiply(tq.setFromAxisAngle(AY, this.dropDir * sev * 0.5 * dt));
+      } else if (this.stallT === 0) this.dropDir = 0;
+      if (F.torque) this.q.multiply(tq.setFromAxisAngle(AY, F.torque * 0.22 * this.throttle * RJ.clamp(1.6 - v / (F.vstall * 2), 0, 1) * dt));
       this.q.normalize();
       this.updateBasis();
 
@@ -173,7 +192,10 @@
       this.pos.addScaledVector(this.vel, dt);
       if (this.pos.y > 40000) this.pos.y = 40000;
 
-      const aoaT = RJ.clamp(0.26 * gAct * (F.vstall / v) * (F.vstall / v) / Math.max(rho, 0.04), -0.15, 0.42);
+      // post-stall: TVC jets can hold the nose far above the flight path (up to ~65°) when slow and pulling hard
+      const ps = F.tvc && p > 0.6 && liftG < F.gmax ? RJ.smooth(0.6, 1, p) * RJ.clamp(1.6 - v / (F.vstall * 2.2), 0, 1) : 0;
+      const aoaT = Math.max(RJ.clamp(0.26 * gAct * (F.vstall / v) * (F.vstall / v) / Math.max(rho, 0.04), -0.15, 0.42), ps * 1.1);
+      if (ps > 0.05) this.speed -= ps * this.aoa * 14 * dt; // high-alpha drag bleeds energy fast
       this.aoa = RJ.damp(this.aoa, aoaT, 6, dt);
 
       this.checkBoom();
@@ -282,6 +304,8 @@
       if (!this.firing) this.gunHeat = Math.max(0, this.gunHeat - dt * 0.28);
       if (this.overheated && this.gunHeat < 0.35) this.overheated = false;
       this.lockedByT = Math.max(0, this.lockedByT - dt);
+      if (RJ.vehicles && this.mach > 2.8) RJ.vehicles.heat(this, dt);
+      else if (this.heatGlow) this.heatGlow.visible = false;
     }
 
     damage(amount, attacker, kind) {
@@ -340,7 +364,7 @@
     syncMesh() {
       this.mesh.position.copy(this.pos);
       this.mesh.quaternion.copy(this.q);
-      if (this.state === "flying") this.mesh.quaternion.multiply(tq2.setFromAxisAngle(AX, this.aoa));
+      if (this.state === "flying" && !this.spec.flight.model) this.mesh.quaternion.multiply(tq2.setFromAxisAngle(AX, this.aoa));
       // keep world matrices current so cockpit camera and trail emitters don't lag a frame behind
       this.mesh.updateMatrixWorld(true);
     }

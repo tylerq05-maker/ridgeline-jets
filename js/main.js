@@ -468,7 +468,7 @@
     if (pl.alive) {
       const ax = I.axes();
       Object.assign(pl.input, { pitch: ax.pitch, roll: ax.roll, yaw: ax.yaw, thr: ax.thr, thrAbs: ax.thrAbs, ab: ax.ab, brake: ax.brake, guns: ax.guns });
-      if (I.action("gear")) { pl.toggleGear(); RJ.ui.flash(pl.gearDown ? "GEAR DOWN" : "GEAR UP", null, 0.8); }
+      if (I.action("gear")) { pl.toggleGear(); if (!pl.spec.flight.model) RJ.ui.flash(pl.gearDown ? "GEAR DOWN" : "GEAR UP", null, 0.8); }
       if (mode.kind === "fight") {
         if (mode.command) for (const [k, o] of [["wingAttack", "attack"], ["wingCover", "cover"], ["wingForm", "form"], ["wingDefend", "defend"]]) if (I.action(k)) mode.command(o);
         if (I.action("target")) RJ.combat.cycleTarget(pl);

@@ -457,7 +457,14 @@
       // belly fairing where the wing meets the body
       blob(g, R * 0.95, R * 0.45, o.c0 * 0.75, 0, wy + 0.1 * R, zLE0 + o.c0 * 0.45, M.body);
       // engines on pylons under the wing
-      for (const ex of o.engs) pair((x) => {
+      if (o.rearEng) pair((x) => { // business jet: engines on pylons either side of the rear fuselage
+        const r = o.nacR, len = o.nacL, zc = z1 - 3.6 * R, yc = R * sy * 0.45;
+        tube(g, r, r * 0.85, len, x, yc, zc, M.white);
+        tube(g, r * 0.86, r * 0.86, 0.1, x, yc, zc - len / 2 - 0.02, M.dark);
+        box(g, Math.abs(x) - R * 0.8, r * 0.35, len * 0.5, Math.sign(x) * (R * 0.8 + (Math.abs(x) - R * 0.8) / 2), yc, zc, M.body);
+        engine(g, M, r * 0.55, x, yc, zc + len / 2 + 0.3, { small: true, noNozzle: true, color: 0x9a8a78, core: 0xd8d0c4 });
+      }, R + o.nacR * 1.3);
+      for (const ex of o.rearEng ? [] : o.engs) pair((x) => {
         const zle = zLE0 + (Math.abs(x) - rx) * tanS, yw = wy + Math.abs(x) * Math.sin(o.dih);
         const r = o.nacR, len = o.nacL, zc = zle - len * 0.18, yc = yw - r * 1.25;
         tube(g, r, r * 0.82, len, x, yc, zc, M.white);
@@ -470,7 +477,9 @@
       const fc0 = o.finH * 1.05, finY = R * sy * 0.62, fz0 = z1 - fc0 - 0.45 * R, ftan = Math.tan(0.62);
       fin(g, [[fz0, finY], [fz0 + o.finH * ftan, finY + o.finH], [fz0 + o.finH * ftan + fc0 * 0.38, finY + o.finH], [z1 - 0.35 * R, finY]], M.trim, { thick: Math.max(0.2, R * 0.14) });
       const sc0 = o.stabHalf * 0.55, sz0 = z1 - 2.6 * R - sc0 * 0.35, stan = Math.tan(o.sweep + 0.08);
-      moving(g, [[0.3 * R, sz0], [o.stabHalf, sz0 + o.stabHalf * stan], [o.stabHalf, sz0 + o.stabHalf * stan + sc0 * 0.4], [0.3 * R, sz0 + sc0]], Math.max(0.12, sc0 * 0.07), M.body, sz0 + sc0 * 0.5, { y: 0.15 * R * sy });
+      // T-tail (cargo, business jets): the stabiliser sits on top of the fin
+      const tz = o.tTail ? fz0 + o.finH * ftan - sz0 + fc0 * 0.05 : 0, ty = o.tTail ? finY + o.finH * 0.97 : 0.15 * R * sy;
+      moving(g, [[o.tTail ? 0.1 : 0.3 * R, sz0 + tz], [o.stabHalf, sz0 + tz + o.stabHalf * stan], [o.stabHalf, sz0 + tz + o.stabHalf * stan + sc0 * 0.4], [o.tTail ? 0.1 : 0.3 * R, sz0 + tz + sc0]], Math.max(0.12, sc0 * 0.07), M.body, sz0 + tz + sc0 * 0.5, { y: ty });
       cockpit(g, 0.42 * R * sy, z0 + 1.35 * R);
       tips(g, o.half, tipY, zLEt + o.ct * 0.5);
     },
@@ -489,6 +498,10 @@
       cockpit(g, 0.85, -8.8); tips(g, 7.0, 0, 10.5);
     }
   };
+
+  // shared with vehicles.js, which adds helicopters, starfighters, flying cars and the rocket bike
+  RJ.AC_BUILDERS = BUILDERS;
+  RJ.acParts = { lathe, plate, fin, finPair, blob, box, tube, pair, engine, cockpit, tips, moving, propeller, shape2 };
 
   /* ======================= CATALOG ======================= */
   // Flight: vmax m/s at refAlt; mil/ab = thrust accel m/s² at sea level; vstall m/s; roll/pitch/yaw deg/s; ind = induced-drag factor.
@@ -687,6 +700,16 @@
     F.inertia = INERTIA[id] || 1;
     F.corner = F.vstall * Math.sqrt(F.gmax) * 1.05; // best sustained-turn speed
   }
+  /** Register an aircraft defined elsewhere (vehicles.js): catalog entry, hangar order and derived flight constants. */
+  RJ.addAircraft = function (id, o, inertia) {
+    add(id, o);
+    RJ.AIRCRAFT_ORDER.push(id);
+    const F = A[id].flight, top = F.ab || F.mil, rr = RJ.rho(F.ref);
+    F.k = (top * RJ.thrustFactor(F.eng, rr, F.vmax, F)) / (rr * F.vmax * F.vmax);
+    F.inertia = inertia || 1;
+    F.corner = F.vstall * Math.sqrt(F.gmax) * 1.05;
+    return A[id];
+  };
   A.f22.flight.tvc = true; // thrust vectoring: nose authority survives at low speed and high AoA
 
   /** Normalized stats (0..1) for the hangar. */
@@ -847,6 +870,7 @@
       g.add(grp); legs.push({ grp, nose, side: Math.sign(x) || 1 });
     };
     const ck = g.userData.cockpit;
+    if (a.noGear) { d.gearH = a.gearH != null ? a.gearH : -yb; g.userData.gear = { legs, t: 1 }; return; } // skids, wheels or none: modelled by the vehicle itself
     if (a.id === "p51") {
       leg(1.75, -1.4, 1.75, 0.36, false); leg(-1.75, -1.4, 1.75, 0.36, false); leg(0, 4.4, 0.55, 0.16, true);
       d.gearH = -yb + 1.75 + 0.36;

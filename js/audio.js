@@ -73,7 +73,15 @@
       whine: [4200, 7800], wg: [0.05, 0.04], roarF: [300, 1900], roarG: [0.07, 0.42], deepG: [0.02, 0.07], rasp: [1200, 3200], raspG: [0.03, 0.12],
       buzz: { on: 0.8, f: [120, 210], g: 0.04 }, rum: [36, 50], rumG: [0.02, 0.05], abG: 0, crk: 0, cock: [0.5, 1000] },
     prop: { kind: "prop", idle: 0.18, up: 1.6, down: 1.1, start: 3, size: 0.95, cock: [0.9, 1700] },
-    rocket: { kind: "rocket", idle: 0, up: 7, down: 7, start: 0.3, size: 1.25, cock: [0.9, 1600] }
+    rocket: { kind: "rocket", idle: 0, up: 7, down: 7, start: 0.3, size: 1.25, cock: [0.9, 1600] },
+    // turboshaft helicopter: turbine whine + main-rotor blade slap (blades × rotor Hz) + tail-rotor buzz
+    heli: { kind: "heli", idle: 0.3, up: 0.7, down: 0.5, start: 6, size: 1.2, whine: [5200, 7400], cock: [0.6, 900] },
+    // fan-made starfighter: ion-drive hum and roar (TIE: the twin-ion scream)
+    space: { kind: "space", idle: 0.2, up: 2.2, down: 1.6, start: 1.5, size: 1.1, cock: [0.85, 1500] },
+    // electric ducted fans: no combustion, a clean motor whine over the fan hiss
+    electric: { kind: "electric", idle: 0.15, up: 3, down: 2.5, start: 0.8, size: 0.7, cock: [0.7, 1500] },
+    // V-twin motorcycle engine
+    motor: { kind: "prop", idle: 0.15, up: 3.2, down: 2.4, start: 1.2, size: 0.75, cyl: 2, rpm: [1300, 9500], noProp: true, cock: [1, 2400] }
   };
   /** Pick the engine family from the aircraft's real powerplant. */
   AU.profileFor = function (spec) {
@@ -81,7 +89,11 @@
     const id = spec.cat === "airliner" ? "airliner" : eng === "prop" ? "prop" : eng === "rocket" ? "rocket"
       : spec.id === "a10" ? "fanmil" : spec.cat === "bizjet" ? "bizjet" : spec.cat === "cargo" || eng === "fan" ? "heavy"
       : spec.cat === "bomber" || eng === "ramjet" ? "heavyjet" : "fighter";
-    const p = Object.assign({ id }, PROFILES[id]);
+    const fam = spec.sound && spec.sound.family && PROFILES[spec.sound.family] ? spec.sound.family : id;
+    const p = Object.assign({ id: fam }, PROFILES[fam]);
+    if (fam === "prop" && spec.sound.cyl) { p.cyl = spec.sound.cyl; p.rpm = [700, 2700]; }
+    if (fam === "heli") { p.blades = spec.sound.blades || 4; p.rotorHz = spec.sound.rotorHz || 5; }
+    p.scream = !!(spec.sound && spec.sound.scream);
     p.pitch = Math.pow((spec.sound && spec.sound.pitch) || 1, 0.6);
     p.ab = !!spec.flight.ab;
     return p;
@@ -146,17 +158,19 @@
       const t = this.ctx.currentTime, T = (param, v, tc = 0.06) => param.setTargetAtTime(v, t, tc);
       const N = s.N, d = s.dop, fr = s.front, rear = 1 - fr;
       T(this.out.gain, s.gain, 0.09);
+      if (this.lastQ !== p.scream) { this.lastQ = p.scream; this.rasp.f.Q.setTargetAtTime(p.scream ? 6 : 0.9, t, 0.2); }
       T(this.air.frequency, s.air, 0.12);
       if (this.pan) T(this.pan.pan, s.pan, 0.08);
       const zero = (...gs) => gs.forEach((g) => T(g.gain, 0, 0.1));
       if (p.kind === "prop") {
         // V12 piston: firing note = rpm/10 (1100 rpm idle → 3000 rpm), 4-blade prop at 0.42 reduction
         const n = RJ.clamp((N - p.idle) / (1 - p.idle), 0, 1), lit = RJ.clamp(N / p.idle, 0, 1);
-        const rpm = N < p.idle ? 1100 * lit : lerp(1100, 3000, n);
-        const fire = (rpm / 10) * d, blade = (rpm * 0.42 * 4 / 60) * d;
+        const R = p.rpm || [1100, 3000], cyl = p.cyl || 12;
+        const rpm = N < p.idle ? R[0] * lit : lerp(R[0], R[1], n);
+        const fire = (rpm * cyl / 120) * d, blade = p.noProp ? 0 : (rpm * (cyl > 6 ? 0.42 * 4 : 2) / 60) * d;
         if (this.rum.type !== "square") this.rum.type = "square";
         T(this.rum.frequency, Math.max(8, fire)); T(this.rumF.frequency, Math.max(120, fire * 3.2)); T(this.rumG.gain, lit * (0.13 + n * 0.1));
-        T(this.pb.frequency, Math.max(4, blade)); T(this.pbF.frequency, 180 + n * 260); T(this.pbG.gain, lit * (0.12 + n * 0.16) * (0.6 + fr * 0.6));
+        T(this.pb.frequency, Math.max(4, blade)); T(this.pbF.frequency, 180 + n * 260); T(this.pbG.gain, p.noProp ? 0 : lit * (0.12 + n * 0.16) * (0.6 + fr * 0.6));
         T(this.roar.f.frequency, (320 + n * 700) * d); T(this.roar.g.gain, lit * (0.12 + n * 0.3) * (0.7 + rear * 0.5));
         T(this.deep.g.gain, lit * (0.05 + n * 0.08));
         T(this.rasp.f.frequency, 1400 * d); T(this.rasp.g.gain, lit * 0.02);
@@ -169,6 +183,47 @@
         return;
       }
       if (this.rum.type !== "triangle") this.rum.type = "triangle";
+      if (p.kind === "heli" || p.kind === "space" || p.kind === "electric") {
+        const lit = RJ.clamp(N / p.idle, 0, 1), n = RJ.clamp((N - p.idle) / (1 - p.idle), 0, 1);
+        zero(this.abr.g, this.crk.g);
+        if (p.kind === "heli") {
+          // blade slap: a low saw at blade-pass frequency, heavier with collective; turbine whine on top
+          const bp = p.blades * p.rotorHz * lit * d;
+          T(this.pb.frequency, Math.max(2, bp)); T(this.pbF.frequency, 140 + n * 160); T(this.pbG.gain, lit * (0.22 + n * 0.3) * (0.7 + fr * 0.5));
+          T(this.w1.frequency, lerp(p.whine[0] * 0.3, p.whine[0], lit) * d); T(this.w2.frequency, p.whine[1] * lit * d);
+          T(this.wg.gain, lit * 0.03 * (s.interior ? 0.5 : 1)); T(this.wobG.gain, 5);
+          const tr = bp * 5.2; // tail rotor buzz
+          T(this.bz1.frequency, Math.max(4, tr)); T(this.bz2.frequency, Math.max(4, tr * 1.01)); T(this.bzF.frequency, Math.max(60, tr * 4)); T(this.bzG.gain, lit * 0.04 * (0.4 + rear));
+          T(this.roar.f.frequency, (240 + n * 500) * d); T(this.roar.g.gain, lit * (0.12 + n * 0.28)); // downwash
+          T(this.deep.f.frequency, 160 * d); T(this.deep.g.gain, lit * (0.06 + n * 0.1));
+          T(this.rasp.f.frequency, 1800 * d); T(this.rasp.g.gain, lit * 0.03);
+          T(this.rum.frequency, Math.max(4, bp * 0.5)); T(this.rumF.frequency, 90); T(this.rumG.gain, lit * 0.08 * (s.interior ? 1.6 : 1));
+          return;
+        }
+        T(this.pbG.gain, 0, 0.1);
+        if (p.kind === "electric") {
+          T(this.w1.frequency, (900 + n * 3400) * p.pitch * d); T(this.w2.frequency, (900 + n * 3400) * p.pitch * 1.5 * d);
+          T(this.wg.gain, lit * (0.035 + n * 0.05)); T(this.wobG.gain, 3);
+          T(this.roar.f.frequency, (400 + n * 1600) * d); T(this.roar.g.gain, lit * (0.04 + n * 0.3));
+          T(this.rasp.f.frequency, (1500 + n * 2500) * d); T(this.rasp.g.gain, lit * n * 0.1);
+          T(this.deep.g.gain, lit * 0.03); zero(this.bzG, this.rumG);
+          return;
+        }
+        // space drive: a pitched hum chord, plus the scream for TIE-style craft
+        const hum = (55 + n * 70) * p.pitch * d;
+        T(this.rum.frequency, hum); T(this.rumF.frequency, 260 + n * 400); T(this.rumG.gain, lit * (0.1 + n * 0.08));
+        T(this.bz1.frequency, hum * 2); T(this.bz2.frequency, hum * 2.013); T(this.bzF.frequency, hum * 8); T(this.bzG.gain, lit * (0.03 + n * 0.05));
+        T(this.roar.f.frequency, (500 + n * 2200) * d); T(this.roar.g.gain, lit * (0.08 + n * 0.5) * (0.7 + rear * 0.6));
+        T(this.deep.f.frequency, 190 * d); T(this.deep.g.gain, lit * (0.05 + n * 0.12));
+        if (p.scream) {
+          T(this.rasp.f.frequency, (1100 + n * 900) * d); T(this.rasp.g.gain, lit * (0.15 + n * 0.45));
+          T(this.w1.frequency, (620 + n * 420) * d); T(this.w2.frequency, (620 + n * 420) * 1.06 * d); T(this.wg.gain, lit * (0.04 + n * 0.06)); T(this.wobG.gain, 40);
+        } else {
+          T(this.rasp.f.frequency, (1400 + n * 1500) * d); T(this.rasp.g.gain, lit * n * 0.12);
+          T(this.w1.frequency, (1800 + n * 2600) * p.pitch * d); T(this.w2.frequency, (1800 + n * 2600) * p.pitch * 1.5 * d); T(this.wg.gain, lit * 0.025); T(this.wobG.gain, 7);
+        }
+        return;
+      }
       if (p.kind === "rocket") {
         const on = RJ.clamp(N, 0, 1);
         T(this.roar.f.frequency, (1800 + on * 3600) * d); T(this.roar.g.gain, on * 1.05);

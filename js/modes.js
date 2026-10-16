@@ -357,6 +357,13 @@
       const cg = this.carrierGuide();
       if (cg) return cg;
       if (this.cat && this.cat.state === "hook" && pl.onGround) return `Hooked to the catapult. Full power (${RJ.keyLabel(RJ.settings.keys.throttleUp)} / ${RJ.keyLabel(RJ.settings.keys.afterburner)}) and the cat fires; the deck ends 130 m ahead.`;
+      const K = RJ.settings.keys, kl = RJ.keyLabel, md = pl.spec.flight.model;
+      if (md === "heli") return `Collective: ${kl(K.throttleUp)} up / ${kl(K.throttleDown)} down (middle holds height). ${kl(K.pitchUp)}/${kl(K.pitchDown)} tilt forward/back, ${kl(K.rollLeft)}/${kl(K.rollRight)} strafe, ${kl(K.yawLeft)}/${kl(K.yawRight)} turn.`;
+      if (md === "space") return `${kl(K.afterburner)} boosts (limited reserve, recharges).${pl.spec.flight.space.foils ? ` ${kl(K.gear)} toggles the S-foils.` : ""} Lasers on ${kl(K.guns)}.`;
+      if (md === "bike" && pl.onGround) return `${kl(K.pitchUp)} accelerate, ${kl(K.pitchDown)} brake, ${kl(K.rollLeft)}/${kl(K.rollRight)} lean. ${kl(K.afterburner)} fires the rocket, ${kl(K.gear)} deploys wings: pull back above take-off speed to fly.`;
+      if (md === "bike") return "Flip and roll for tricks. Land upright, wings level, pointing the way you're moving.";
+      if (md === "car" && pl.vs && pl.vs.mode === "drive") return `${kl(K.pitchUp)} drive, ${kl(K.pitchDown)} brake/reverse, ${kl(K.rollLeft)}/${kl(K.rollRight)} steer. ${kl(K.gear)}: ${pl.spec.flight.car.vtol ? "switch to flight mode" : "unfold the wings, then accelerate and pull up"}.`;
+      if (md === "car" && pl.spec.flight.car.vtol) return `Hovers like a drone: ${kl(K.throttleUp)}/${kl(K.throttleDown)} climb/descend, ${kl(K.gear)} lands and switches back to driving.`;
       if (pl.onGround) return `Throttle up with ${RJ.keyLabel(RJ.settings.keys.throttleUp)} (hold ${RJ.keyLabel(RJ.settings.keys.afterburner)} for afterburner). Pull back gently once you pass rotation speed. Gear retracts on its own (${RJ.keyLabel(RJ.settings.keys.gear)}).`;
       if (pl.mach > 0.85 && pl.mach < 1) return "Approaching the sound barrier. Keep accelerating to break Mach 1.";
       if (this.o.activity === "lowlevel") return "Stay below 60 m above the ground. Trees and ridgelines are solid.";
