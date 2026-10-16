@@ -782,12 +782,13 @@
     return [0, 1, 2].map((k) => 20 * (sR[k] * A_BR[k] * pR + sM[k] * bm * pM));
   };
   /** Colour of sunlight after the trip down through the atmosphere (normalised so the brightest channel is 1). */
-  W.sunTransmit = function (s, bm) {
-    const o = [0, A_R0 + 10, 0], l = aRsi(o, s, A_RA);
+  W.sunTransmit = function (s, bm, alt = 10, raw = false) {
+    const o = [0, A_R0 + alt, 0], l = aRsi(o, s, A_RA);
     if (aRsi(o, s, A_R0)[0] > 0) return [0, 0, 0];
     const dl = l[1] / 16; let lR = 0, lM = 0, lO = 0;
-    for (let j = 0; j < 16; j++) { const tt = dl * (j + 0.5), q = [s[0] * tt, A_R0 + 10 + s[1] * tt, s[2] * tt], hl = Math.hypot(q[0], q[1], q[2]) - A_R0; lR += Math.exp(-hl / 8000) * dl; lM += Math.exp(-hl / 1200) * dl; lO += aOzo(hl) * dl; }
+    for (let j = 0; j < 16; j++) { const tt = dl * (j + 0.5), q = [s[0] * tt, A_R0 + alt + s[1] * tt, s[2] * tt], hl = Math.hypot(q[0], q[1], q[2]) - A_R0; lR += Math.exp(-hl / 8000) * dl; lM += Math.exp(-hl / 1200) * dl; lO += aOzo(hl) * dl; }
     const T = [0, 1, 2].map((k) => Math.exp(-(A_BR[k] * lR + bm * 1.1 * lM + A_BO[k] * lO)));
+    if (raw) return T;
     const m = Math.max(T[0], T[1], T[2], 1e-6);
     return T.map((v) => v / m);
   };
@@ -800,13 +801,13 @@
         top: { value: new THREE.Color() }, horizon: { value: new THREE.Color() }, sunDir: { value: new THREE.Vector3(0, 1, 0) },
         sunCol: { value: new THREE.Color() }, alt: { value: 0 }, haze: { value: 0 }, flash: { value: 0 }, time: { value: 0 },
         night: { value: 0 }, cirrus: { value: 0.5 }, envPass: { value: 0 }, moonDir: { value: new THREE.Vector3(0, 1, 0) }, ground: { value: new THREE.Color(0.18, 0.2, 0.18) },
-        physW: { value: 1 }, physK: { value: 1.2 }, mieB: { value: 7e-6 }, gray: { value: 0 }, dark: { value: 0 }
+        physW: { value: 1 }, physK: { value: 1.2 }, mieB: { value: 7e-6 }, gray: { value: 0 }, dark: { value: 0 }, alto: { value: 0 }
       },
       vertexShader: "varying vec3 vDir; void main(){ vDir = normalize(position); vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position = p.xyww; }",
       fragmentShader: [
         "uniform vec3 top; uniform vec3 horizon; uniform vec3 sunDir; uniform vec3 sunCol; uniform vec3 ground;",
         "uniform float alt; uniform float haze; uniform float flash; uniform float time; uniform float night; uniform float cirrus; uniform float envPass; uniform vec3 moonDir;",
-        "uniform float physW; uniform float physK; uniform float mieB; uniform float gray; uniform float dark;",
+        "uniform float physW; uniform float physK; uniform float mieB; uniform float gray; uniform float dark; uniform float alto;",
         "varying vec3 vDir;",
         GLSL_NOISE,
         ATM_GLSL,
@@ -836,7 +837,7 @@
         // keep green from dominating (single scattering over long low-sun paths drifts olive; real skies don't)
         "    ph.g = min(ph.g, max(ph.r, ph.b) * 1.02);",
         "    ph = mix(ph, vec3(dot(ph, vec3(0.3, 0.59, 0.11))), gray) * (1.0 - dark * 0.55);",
-        "    c = mix(c, ph, physW);",
+        "    c = c * (1.0 - physW) + ph * mix(physW, 1.0, step(0.0, sd.y));",
         "  }",
         // ground below the horizon (mostly hidden; matters for reflections)
         "  c = mix(c, mix(horizon * 0.7, ground, 0.5), 1.0 - smoothstep(-0.25, 0.0, h));",
@@ -844,7 +845,8 @@
         "  float s = max(dot(d, sd), 0.0);",
         "  float g = 0.78; float mie = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * s, 1.5);",
         "  c += sunCol * mie * 0.028 * (1.0 - haze * 0.65) * alive * (1.0 - physW * 0.6);",
-        "  c += sunCol * smoothstep(0.99955, 0.9998, s) * 7.0 * (1.0 - haze * 0.9) * alive * (1.0 - envPass);", // the sun light itself already adds the glint
+        "  float sr = acos(clamp(dot(d, sd), -1.0, 1.0)) / 0.0048; float limb = 1.0 - 0.6 * (1.0 - sqrt(max(1.0 - sr * sr, 0.0)));",
+        "  c += sunCol * (1.0 - smoothstep(0.85, 1.0, sr)) * limb * 8.0 * (1.0 - haze * 0.9) * alive * (1.0 - envPass);", // the sun light itself already adds the glint
         // cirrus: wispy high clouds on a dome
         "  if (h > 0.0 && cirrus > 0.01) {",
         "    vec2 uv = d.xz / (h + 0.06) * 0.55 + vec2(time * 0.004, time * 0.0015);",
@@ -852,6 +854,17 @@
         "    float wisp = smoothstep(0.5, 0.82, n) * cirrus * smoothstep(0.0, 0.18, h) * (1.0 - space);",
         "    vec3 cc = mix(horizon * 1.05, vec3(1.0), 0.55) * (0.35 + 0.65 * alive) + sunCol * pow(s, 5.0) * 0.8 + sunCol * vec3(1.0, 0.55, 0.3) * lowSun * 0.25 * alive;",
         "    c = mix(c, cc, wisp * 0.75);",
+        "  }",
+        // altocumulus at ~6 km: a dappled "mackerel sky" of small cloudlets, white by day, pink and gold at sunset
+        "  if (h > 0.0 && alto > 0.01) {",
+        "    vec2 au = d.xz / (h + 0.09) * 1.6 + vec2(time * 0.006, time * 0.002);",
+        "    float big = rjFbm(au * 0.35 + 3.7);",
+        "    float cells = rjVN(au * 9.0) * 0.6 + rjVN(au * 21.0) * 0.4;",
+        "    float ac = smoothstep(0.55, 0.85, cells * smoothstep(0.42, 0.72, big) * 1.35) * alto * smoothstep(0.02, 0.2, h) * (1.0 - space);",
+        "    vec3 base = mix(horizon, vec3(dot(horizon, vec3(0.3, 0.59, 0.11)) * 1.25), 0.5) * (0.35 + 0.65 * alive);",
+        "    vec3 lit = sunCol * vec3(1.0, 0.62, 0.5) * lowSun * 0.9 + sunCol * pow(s, 6.0) * 0.6;",
+        "    vec3 ss = base * (0.85 + 0.3 * cells) + lit;",
+        "    c = mix(c, ss, ac * 0.8);",
         "  }",
         // stars
         // stars: at night, and in daylight too once the air above you thins out (from ~15 km)
@@ -911,11 +924,11 @@
     dynamic: { label: "Dynamic", e: 6, az: 90, dynamic: true, haze: 1.2 }
   };
   W.WEATHER = {
-    clear: { label: "Clear", clusters: 40, alt: [5200, 6400], thick: 0.35, dark: 0, fog: 1, sun: 1, haze: 0, density: 6e-5, cirrus: 0.75, mist: 0.25, humid: 0.3, wind: 4 },
-    scattered: { label: "Scattered clouds", clusters: 170, alt: [2300, 3300], thick: 1, dark: 0.04, fog: 1, sun: 1, haze: 0.05, density: 9e-5, cirrus: 0.5, mist: 0.7, humid: 0.55, wind: 7 },
+    clear: { label: "Clear", alto: 0.25,  clusters: 40, alt: [5200, 6400], thick: 0.35, dark: 0, fog: 1, sun: 1, haze: 0, density: 6e-5, cirrus: 0.75, mist: 0.25, humid: 0.3, wind: 4 },
+    scattered: { label: "Scattered clouds", alto: 0.55,  clusters: 170, alt: [2300, 3300], thick: 1, dark: 0.04, fog: 1, sun: 1, haze: 0.05, density: 9e-5, cirrus: 0.5, mist: 0.7, humid: 0.55, wind: 7 },
     overcast: { label: "Overcast", clusters: 380, alt: [2400, 3500], thick: 1.5, dark: 0.32, fog: 0.85, sun: 0.5, haze: 0.6, gray: 0.55, density: 1.8e-4, cirrus: 0.1, mist: 1, humid: 0.8, stratus: 0.8, wind: 10 },
     storm: { label: "Storm", clusters: 440, alt: [1500, 3600], thick: 1.8, dark: 0.6, fog: 0.7, sun: 0.28, haze: 0.9, gray: 0.75, rain: true, lightning: true, density: 3.4e-4, cirrus: 0, mist: 1, humid: 1, towers: 9, stratus: 1, wind: 16 },
-    cloudsea: { label: "Cloud sea", clusters: 520, alt: [1700, 2500], thick: 1.6, dark: 0.06, fog: 1, sun: 1, haze: 0.05, sea: true, density: 7e-5, cirrus: 0.65, mist: 0.6, humid: 0.7, stratus: 0.6, wind: 6 }
+    cloudsea: { label: "Cloud sea", alto: 0.35,  clusters: 520, alt: [1700, 2500], thick: 1.6, dark: 0.06, fog: 1, sun: 1, haze: 0.05, sea: true, density: 7e-5, cirrus: 0.65, mist: 0.6, humid: 0.7, stratus: 0.6, wind: 6 }
   };
 
   function todAt(e) {
@@ -953,8 +966,9 @@
     W.sunKey = (W.night ? "m" : "") + Math.round(W.sunElev / 2) + ":" + Math.round(W.sunAz / 4);
     const t = todAt(W.sunElev);
     // daylight and twilight colours come from the physical atmosphere; the keyframes only cover deep night
-    const physW = RJ.smooth(-8, -2, W.sunElev), mieB = 9e-6 * (1 + wx.haze * 3), K = 1.2 * (0.8 + 0.2 * RJ.smooth(5, 30, W.sunElev));
+    const physW = RJ.smooth(-14, -4, W.sunElev), mieB = 9e-6 * (1 + wx.haze * 3), K = 1.2 * (0.8 + 0.2 * RJ.smooth(5, 30, W.sunElev));
     W.physSky = { w: physW, mie: mieB, k: K };
+    if (physW <= 0) W.cloudSun = null;
     if (physW > 0) {
       const S = [W.sunDir.x, W.sunDir.y, W.sunDir.z], up = W.atmos(0, [0, 1, 0], S, mieB);
       // same horizon whitening and highlight knee as the sky shader, so fog matches the sky it fades into
@@ -969,6 +983,8 @@
       }
       for (let k = 0; k < 3; k++) hz[k] /= wsum;
       const tr = W.sunTransmit(S, mieB);
+      const cl = RJ.clouds ? RJ.clouds.layer() : null;
+      W.cloudSun = W.sunTransmit(S, mieB, cl ? cl.base + (cl.top - cl.base) * 0.4 : 3000, true);
       const mixIn = (arr, ph, w) => arr.map((v, k) => RJ.lerp(v, ph[k], w));
       t.top = mixIn(t.top, up.map((v) => v * K), physW);
       t.hor = mixIn(t.hor, hz.map((v) => Math.min(v * K, 1.4)), physW);
@@ -983,7 +999,7 @@
     U.physW.value = physW; U.physK.value = K; U.mieB.value = mieB; U.gray.value = gray; U.dark.value = wx.dark;
     U.top.value.setRGB(...top); U.horizon.value.setRGB(...hor);
     U.sunDir.value.copy(W.sunDir); U.sunCol.value.setRGB(...t.sun); U.moonDir.value.copy(W.moonDir);
-    U.haze.value = wx.haze; U.cirrus.value = wx.cirrus;
+    U.haze.value = wx.haze; U.cirrus.value = wx.cirrus; U.alto.value = wx.alto || 0;
     U.night.value = RJ.smooth(2, -8, W.sunElev);
     U.ground.value.setRGB(...t.hg).multiplyScalar(1.6);
     W.horizonColor = new THREE.Color().setRGB(...hor);
@@ -1009,7 +1025,8 @@
     W.grade = {
       tint: [1 + warm * 0.05 - wx.dark * 0.03, 1 - warm * 0.01, 1 - warm * 0.06 + wx.dark * 0.02],
       sat: 1.06 + warm * 0.06 - wx.dark * 0.25, contrast: 1.05 + warm * 0.03 - wx.dark * 0.05,
-      exposure: 1.0 + RJ.smooth(0, -8, W.sunElev) * 0.45, bloom: 0.55 + warm * 0.25
+      // eyes adapt in the blue hour: lift exposure through twilight, settling back to the night level
+      exposure: 1.0 + RJ.smooth(0, -8, W.sunElev) * 0.45 + RJ.smooth(2, -5, W.sunElev) * (1 - RJ.smooth(-6, -12, W.sunElev)) * 1.1, bloom: 0.55 + warm * 0.25
     };
     if (W.waterMat) {
       const WU = W.waterMat.uniforms;

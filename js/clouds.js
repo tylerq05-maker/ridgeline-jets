@@ -196,12 +196,14 @@
     "    if (dens > 0.002) {",
     "      float od = 0.0; float ls = 55.0; vec3 lp = p;",
     "      for (int k = 0; k < LSTEPS; k++) { lp += sunDir * ls; od += density(lp, true) * ls; ls *= 1.85; }",
-    "      float beer = exp(-od * sigma);",
-    "      float ms = exp(-od * sigma * 0.22) * 0.45;",
+    // multiple scattering (3 octaves): each bounce sees less extinction and a softer phase, which lights
+    // cloud interiors and makes thin edges facing the sun glow (silver lining)
+    "      float lum = 0.0, oa = 1.0, ob = 1.0, oc = 1.0;",
+    "      for (int o = 0; o < 3; o++) { float ph = mix(hg(cosT, 0.7 * oc), hg(cosT, -0.25 * oc), 0.3) * 0.3 + 0.06; lum += oa * exp(-od * sigma * ob) * ph; oa *= 0.5; ob *= 0.3; oc *= 0.5; }",
     "      float powder = 1.0 - exp(-dens * 4.0);",
     "      float hf = clamp((p.y - slab.x) / max(slab.y - slab.x, 1.0), 0.0, 1.0);",
     "      vec3 amb = mix(ambBot, ambTop, hf) * (0.55 + 0.45 * hf);",
-    "      vec3 S = sunCol * (max(beer, ms) * mix(0.6, 1.0, powder)) * phase * 6.0 + amb;",
+    "      vec3 S = sunCol * lum * mix(0.55, 1.0, powder) * 4.3 + amb;",
     "      float st = dens * sigma;",
     "      float Ts = exp(-st * ds);",
     "      col += T * S * (1.0 - Ts);",
@@ -429,6 +431,15 @@
     U.sunDir.value.copy(W.lightDir || W.sunDir);
     const sunUp = W.night ? 0.9 : RJ.smooth(-5, 4, W.sunElev);
     U.sunCol.value.copy(W.sun.color).multiplyScalar((W.sunIntensity || 1) * 1.05 * sunUp + 0.02);
+    // daylight and twilight: the sun's colour where the clouds actually are (redder, and still shining
+    // on the clouds for a few minutes after the ground below has gone into shadow)
+    if (W.cloudSun && !W.night) {
+      // hue from the transmittance at cloud height; brightness follows the scene's sun, plus an afterglow term
+      // that keeps the cloud layer lit (pink/red) after the sun has set for the ground
+      const T = W.cloudSun, m = Math.max(T[0], T[1], T[2], 1e-4);
+      const k = (W.sunIntensity || 1) * 1.05 * sunUp + (W.sunElev < 2 ? Math.min(m, 0.6) * RJ.smooth(-6, 0, W.sunElev) * 0.9 * (1 - sunUp) : 0);
+      U.sunCol.value.setRGB(T[0] / m * k + 0.02, T[1] / m * k + 0.02, T[2] / m * k + 0.02);
+    }
     const sky = W.skyMat.uniforms;
     U.ambTop.value.copy(sky.top.value).lerp(sky.horizon.value, 0.35).multiplyScalar(0.95);
     U.ambBot.value.copy(sky.horizon.value).multiplyScalar(0.5).lerp(W.hemi.groundColor, 0.25);
