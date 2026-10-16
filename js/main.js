@@ -820,7 +820,7 @@
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     scene = new THREE.Scene(); RJ.scene = scene;
     camera = new THREE.PerspectiveCamera(RJ.settings.fov, innerWidth / innerHeight, 0.5, 20000); RJ.camera = camera;
-    camera.layers.enable(1); camera.layers.enable(RJ.LATE);
+    camera.layers.enable(1); camera.layers.enable(RJ.LATE); camera.layers.enable(5); // 5: near-only city detail (skipped by the water reflection)
     RJ.renderer = renderer;
     clock = new THREE.Clock();
     RJ.world.init(renderer, scene);

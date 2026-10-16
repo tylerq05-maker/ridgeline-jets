@@ -474,6 +474,12 @@
     if (P.carrier && RJ.carrier) tryB("carrier", (s) => { const g = RJ.carrier.build(s); return { group: g, s, heightAt: RJ.carrier.heightAt, marker: V3(s.x, 80, s.z), deck: true }; }, P.carrier);
     tryB("summit", buildSummit, P.summit);
     if (RJ.realms) RJ.realms.build(add);
+    if (RJ.nyc) {
+      // New York builds lazily: the first time the camera comes within 45 km (or a flight starts there)
+      const [cx, cz] = RJ.nyc.esbWorld();
+      add("nyc", { group: null, cx, cz, marker: V3(cx, 600, cz), heightAt: RJ.nyc.heightAt,
+        update: (dt, cam) => { if (!RJ.nyc.ready) { if (Math.hypot(cam.position.x - cx, cam.position.z - cz) < 45000) RJ.nyc.ensure(); else return; } RJ.nyc.update(dt, cam); } });
+    }
     A.built = true;
   };
   A.heightAt = function (x, z) {

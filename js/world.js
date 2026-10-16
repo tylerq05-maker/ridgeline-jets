@@ -96,6 +96,7 @@
     W.sun.shadow.bias = -0.0004;
     W.sun.shadow.normalBias = 0.4;
     scene.add(W.hemi, W.sun, W.sun.target);
+    W.sun.shadow.camera.layers.enable(5); // near-only city detail still casts shadows
     scene.fog = new THREE.Fog(0xbcd9ee, 6000, 9000);
     initTerrainMaterials();
     initVegetation();
@@ -511,6 +512,7 @@
     clouds: (f) => f.mtn > 0.6 && f.land > 0.95
   };
   W.findRegion = function (type) {
+    if (type === "nyc" && RJ.nyc) { const s = RJ.nyc.spawn(); return { x: s.x, z: s.z, yaw: s.yaw, alt: s.alt }; }
     if (regionCache[type]) return regionCache[type];
     const test = REGION_TEST[type] || REGION_TEST.mountains;
     const step = type === "canyon" ? 600 : 1500;
@@ -1508,7 +1510,9 @@
     // dynamic shadow frustum: tight when low for crisp aircraft shadows, wider when high
     if (W.sun.castShadow) {
       const agl = focusAgl != null ? focusAgl : 200;
-      const half = RJ.clamp(90 + agl * 0.35, 90, 700);
+      // over New York the frustum widens so skyscrapers throw shadows across whole blocks
+      const city = RJ.nyc && RJ.nyc.ready && RJ.nyc.within(focus.x, focus.z, -6000);
+      const half = city ? RJ.clamp(300 + agl * 0.5, 300, 950) : RJ.clamp(90 + agl * 0.35, 90, 700);
       const sc = W.sun.shadow.camera;
       if (Math.abs(sc.right - half) > 5) { sc.left = sc.bottom = -half; sc.right = sc.top = half; sc.updateProjectionMatrix(); }
       W.sun.target.position.copy(focus);

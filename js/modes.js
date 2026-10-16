@@ -102,7 +102,8 @@
   ];
   M.REGIONS = [
     { id: "mountains", name: "Mountains" }, { id: "canyon", name: "Canyons" }, { id: "desert", name: "Desert" },
-    { id: "ocean", name: "Ocean and islands" }, { id: "forest", name: "Forest valleys" }, { id: "clouds", name: "Above the clouds" }
+    { id: "ocean", name: "Ocean and islands" }, { id: "forest", name: "Forest valleys" }, { id: "clouds", name: "Above the clouds" },
+    { id: "nyc", name: "New York City" }
   ];
 
   /* ======================= FREE FLIGHT ======================= */
@@ -130,7 +131,7 @@
       } else {
         pos = V3(reg.x, 0, reg.z);
         const top = M.highestAround(pos.x, pos.z, 2500, 4);
-        pos.y = regionId === "clouds" ? Math.max(top + 600, RJ.world.cloudTop + 700) : o.activity === "lowlevel" ? top + 250 : top + 600;
+        pos.y = regionId === "clouds" ? Math.max(top + 600, RJ.world.cloudTop + 700) : regionId === "nyc" ? reg.alt : o.activity === "lowlevel" ? top + 250 : top + 600;
       }
       // "Fly there" from the atlas: start a few km out from a logged landmark, pointed at it
       const near = !course && o.near && RJ.atlas.byId[o.near];
@@ -149,7 +150,7 @@
         pos = V3(cx, K.DECK + 3, cz); yaw = yawFromDir(V3(fx - cx, 0, fz - cz).normalize());
       }
       // Runway start: a mountain airbase laid along the valley floor
-      this.runway = !course && !near && !this.carrierStart && o.activity === "roam" && o.start === "runway" && regionId !== "ocean" && regionId !== "clouds";
+      this.runway = !course && !near && !this.carrierStart && o.activity === "roam" && o.start === "runway" && regionId !== "ocean" && regionId !== "clouds" && regionId !== "nyc";
       if (this.runway) {
         const ab = regionId === "mountains" ? RJ.atlas.home.ab : RJ.world.planAirbase(reg.x, reg.z, reg.yaw);
         RJ.world.setAirbase(ab);
@@ -385,7 +386,8 @@
     { id: "mountains", name: "Mountains", region: "mountains", weather: "scattered" },
     { id: "desert", name: "Desert canyons", region: "desert", weather: "clear" },
     { id: "ocean", name: "Ocean", region: "ocean", weather: "scattered" },
-    { id: "clouds", name: "Above the clouds", region: "clouds", weather: "cloudsea" }
+    { id: "clouds", name: "Above the clouds", region: "clouds", weather: "cloudsea" },
+    { id: "nyc", name: "New York City", region: "nyc", weather: "scattered" }
   ];
   M.DIFFS = [{ id: "rookie", name: "Rookie", xp: 0.8 }, { id: "veteran", name: "Veteran", xp: 1.0 }, { id: "ace", name: "Ace", xp: 1.4 }];
   const ENEMY_POOL = { rookie: ["f4", "f16", "fa18e"], veteran: ["f16", "f15c", "fa18e", "f14"], ace: ["f15ex", "f22", "f35a", "f15c", "yf23"] };

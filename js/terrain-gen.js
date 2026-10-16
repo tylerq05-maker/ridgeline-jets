@@ -109,6 +109,111 @@
       redwood: { x: -12000, z: 52000, r: 11000 }     // giant forest valley
     };
     const zd = (z, x, y) => Math.hypot(x - z.x, y - z.z);
+
+    /* ---------------- New York City: real coastlines at 1:1 ----------------
+     * Shorelines are lat/lon polygons (traced from the real geography, ~50–150 m accuracy) converted to metres
+     * around the Empire State Building, which sits at world (NY.ex, NY.ez). North is −z. They are rasterised once
+     * into a signed-distance field (metres inland, negative over water) that terrain, buildings and the street
+     * shader all share. */
+    const NY = { ex: 15000, ez: 72000, lat0: 40.7484, lon0: -73.9857, mE: 84330, mN: 111045 };
+    NY.cx = NY.ex + 600; NY.cz = NY.ez + 1500; NY.R = 23000;
+    const NYP = {
+      manhattan: [[40.7003,-74.0160],[40.7035,-74.0180],[40.7085,-74.0185],[40.7140,-74.0175],[40.7180,-74.0160],[40.7225,-74.0138],[40.7290,-74.0118],[40.7350,-74.0105],[40.7410,-74.0098],[40.7470,-74.0092],[40.7530,-74.0075],[40.7590,-74.0045],[40.7650,-74.0005],[40.7720,-73.9948],[40.7790,-73.9897],[40.7860,-73.9848],[40.7930,-73.9802],[40.8000,-73.9748],[40.8070,-73.9693],[40.8140,-73.9642],[40.8210,-73.9592],[40.8290,-73.9547],[40.8380,-73.9502],[40.8470,-73.9476],[40.8540,-73.9441],[40.8610,-73.9381],[40.8680,-73.9312],[40.8740,-73.9257],[40.8782,-73.9218],[40.8760,-73.9142],[40.8720,-73.9112],[40.8660,-73.9132],[40.8600,-73.9162],[40.8530,-73.9222],[40.8460,-73.9282],[40.8390,-73.9322],[40.8320,-73.9342],[40.8240,-73.9342],[40.8170,-73.9334],[40.8100,-73.9322],[40.8040,-73.9300],[40.7945,-73.9300],[40.7890,-73.9375],[40.7835,-73.9432],[40.7770,-73.9428],[40.7710,-73.9462],[40.7650,-73.9530],[40.7590,-73.9580],[40.7530,-73.9630],[40.7470,-73.9676],[40.7410,-73.9715],[40.7350,-73.9740],[40.7290,-73.9738],[40.7230,-73.9738],[40.7180,-73.9750],[40.7130,-73.9778],[40.7100,-73.9835],[40.7085,-73.9900],[40.7068,-73.9962],[40.7055,-74.0018],[40.7035,-74.0068],[40.7015,-74.0112]],
+      brooklynQueens: [[40.6060,-74.0345],[40.6200,-74.0405],[40.6330,-74.0385],[40.6430,-74.0310],[40.6550,-74.0215],[40.6640,-74.0170],[40.6735,-74.0190],[40.6820,-74.0110],[40.6930,-74.0025],[40.6990,-73.9990],[40.7035,-73.9905],[40.7030,-73.9800],[40.7035,-73.9745],[40.7062,-73.9668],[40.7112,-73.9688],[40.7160,-73.9662],[40.7230,-73.9610],[40.7300,-73.9598],[40.7370,-73.9618],[40.7425,-73.9598],[40.7465,-73.9585],[40.7525,-73.9545],[40.7575,-73.9497],[40.7625,-73.9415],[40.7690,-73.9375],[40.7745,-73.9320],[40.7790,-73.9228],[40.7800,-73.9050],[40.7780,-73.8800],[40.7800,-73.7900],[40.5750,-73.7900],[40.5740,-73.9800],[40.5840,-74.0110],[40.5960,-74.0280]],
+      newJersey: [[40.6475,-74.0880],[40.6515,-74.0720],[40.6650,-74.0660],[40.6800,-74.0560],[40.6930,-74.0525],[40.7020,-74.0482],[40.7100,-74.0372],[40.7160,-74.0322],[40.7270,-74.0292],[40.7370,-74.0272],[40.7450,-74.0252],[40.7540,-74.0217],[40.7620,-74.0172],[40.7720,-74.0082],[40.7820,-74.0002],[40.7950,-73.9902],[40.8100,-73.9792],[40.8300,-73.9662],[40.8500,-73.9562],[40.8750,-73.9432],[40.9100,-73.9200],[40.9300,-73.9150],[40.9300,-74.1500],[40.6400,-74.1500]],
+      statenIsland: [[40.6425,-74.1500],[40.6430,-74.0950],[40.6420,-74.0760],[40.6300,-74.0705],[40.6100,-74.0625],[40.5950,-74.0600],[40.5800,-74.0620],[40.5500,-74.1000],[40.5400,-74.1500]],
+      bronx: [[40.8800,-73.9150],[40.8742,-73.9082],[40.8642,-73.9104],[40.8542,-73.9176],[40.8462,-73.9246],[40.8332,-73.9296],[40.8202,-73.9296],[40.8102,-73.9256],[40.8042,-73.9206],[40.8008,-73.9122],[40.8030,-73.8980],[40.8080,-73.8800],[40.8100,-73.7900],[40.9300,-73.7900],[40.9300,-73.9100]],
+      randalls: [[40.7850,-73.9250],[40.7882,-73.9160],[40.7955,-73.9135],[40.7985,-73.9185],[40.7978,-73.9270],[40.7920,-73.9298]],
+      governors: [[40.6937,-74.0148],[40.6907,-74.0093],[40.6828,-74.0178],[40.6835,-74.0245],[40.6882,-74.0228]],
+      liberty: [[40.6907,-74.0470],[40.6912,-74.0442],[40.6895,-74.0425],[40.6876,-74.0432],[40.6872,-74.0457],[40.6886,-74.0472]],
+      ellis: [[40.7008,-74.0412],[40.7002,-74.0383],[40.6985,-74.0378],[40.6978,-74.0402],[40.6990,-74.0418]],
+      roosevelt: [[40.7509,-73.9600],[40.7724,-73.9394],[40.7738,-73.9402],[40.7736,-73.9416],[40.7521,-73.9619],[40.7510,-73.9612]]
+    };
+    NY.toLocal = (lat, lon) => [(lon - NY.lon0) * NY.mE, (lat - NY.lat0) * NY.mN]; // [east, north] metres from the ESB
+    NY.toWorld = (lat, lon) => { const l = NY.toLocal(lat, lon); return [NY.ex + l[0], NY.ez - l[1]]; };
+    let NYS = null; // signed-distance raster, built on first use
+    function nyRaster() {
+      if (NYS) return NYS;
+      const e0 = -16000, n0 = -22000, cs = 50, nx = 700, ny = 880;
+      const inside = new Uint8Array(nx * ny);
+      const polys = Object.values(NYP).map((p) => p.map(([la, lo]) => NY.toLocal(la, lo)));
+      // even–odd scanline fill, row by row
+      const xs = [];
+      for (let j = 0; j < ny; j++) {
+        const n = n0 + (j + 0.5) * cs;
+        for (let pi = 0; pi < polys.length; pi++) {
+          const P = polys[pi];
+          xs.length = 0;
+          for (let i = 0, k = P.length - 1; i < P.length; k = i++) {
+            const a = P[i], b = P[k];
+            if ((a[1] > n) !== (b[1] > n)) xs.push(a[0] + (n - a[1]) / (b[1] - a[1]) * (b[0] - a[0]));
+          }
+          xs.sort((p, q) => p - q);
+          for (let q = 0; q + 1 < xs.length; q += 2) {
+            const i0 = Math.max(0, Math.ceil((xs[q] - e0) / cs - 0.5)), i1 = Math.min(nx - 1, Math.floor((xs[q + 1] - e0) / cs - 0.5));
+            for (let i = i0; i <= i1; i++) inside[j * nx + i] = pi + 1; // which landmass (index into NYP + 1)
+          }
+        }
+      }
+      // two-pass chamfer distance transform on each side of the shore → signed distance (m)
+      const INF = 1e6, din = new Float32Array(nx * ny), dout = new Float32Array(nx * ny);
+      for (let i = 0; i < nx * ny; i++) { din[i] = inside[i] ? INF : 0; dout[i] = inside[i] ? 0 : INF; }
+      const D1 = cs, D2 = cs * 1.4142;
+      for (const d of [din, dout]) {
+        for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+          const k = j * nx + i; let v = d[k]; if (v === 0) continue;
+          if (i > 0) v = Math.min(v, d[k - 1] + D1);
+          if (j > 0) { v = Math.min(v, d[k - nx] + D1); if (i > 0) v = Math.min(v, d[k - nx - 1] + D2); if (i < nx - 1) v = Math.min(v, d[k - nx + 1] + D2); }
+          d[k] = v;
+        }
+        for (let j = ny - 1; j >= 0; j--) for (let i = nx - 1; i >= 0; i--) {
+          const k = j * nx + i; let v = d[k]; if (v === 0) continue;
+          if (i < nx - 1) v = Math.min(v, d[k + 1] + D1);
+          if (j < ny - 1) { v = Math.min(v, d[k + nx] + D1); if (i < nx - 1) v = Math.min(v, d[k + nx + 1] + D2); if (i > 0) v = Math.min(v, d[k + nx - 1] + D2); }
+          d[k] = v;
+        }
+      }
+      const sdf = new Float32Array(nx * ny);
+      for (let i = 0; i < nx * ny; i++) sdf[i] = inside[i] ? Math.min(din[i] - cs * 0.5, 3000) : -Math.min(dout[i] - cs * 0.5, 3000);
+      NYS = { sdf, owner: inside, names: Object.keys(NYP), e0, n0, cs, nx, ny };
+      return NYS;
+    }
+    /** Metres inland from the nearest New York shoreline (negative over water), at local [east, north]. */
+    function nySdfLocal(e, n) {
+      const R = nyRaster();
+      let fx = (e - R.e0) / R.cs - 0.5, fy = (n - R.n0) / R.cs - 0.5;
+      fx = clamp(fx, 0, R.nx - 1.001); fy = clamp(fy, 0, R.ny - 1.001);
+      const i = Math.floor(fx), j = Math.floor(fy), tx = fx - i, ty = fy - j, k = j * R.nx + i, S = R.sdf;
+      return (S[k] * (1 - tx) + S[k + 1] * tx) * (1 - ty) + (S[k + R.nx] * (1 - tx) + S[k + R.nx + 1] * tx) * ty;
+    }
+    NY.sdfLocal = nySdfLocal;
+    NY.sdf = (x, z) => nySdfLocal(x - NY.ex, NY.ez - z);
+    NY.raster = nyRaster;
+    NY.polys = NYP;
+    /** Parks (local e, n): Central Park on the street grid, Prospect Park, plus the Palisades woods. */
+    const CP_A = [0.4848, 0.8746], CP_C = [0.8746, -0.4848];
+    NY.inCentralPark = (e, n) => { const al = e * CP_A[0] + n * CP_A[1], ac = e * CP_C[0] + n * CP_C[1]; return al > 25 * 80.4 - 4 && al < 76 * 80.4 + 4 && ac > -846 && ac < 6; };
+    NY.inProspect = (e, n) => { const [pe, pn] = NY.toLocal(40.6602, -73.9690); const a = (e - pe) / 900, b = (n - pn) / 1150; return a * a + b * b < 1; };
+    function applyNYC(o, x, z) {
+      const dn = Math.hypot(x - NY.cx, z - NY.cz);
+      if (dn >= NY.R) return;
+      const m = smooth(NY.R, NY.R - 3500, dn);
+      const e = x - NY.ex, n = NY.ez - z, s = nySdfLocal(e, n);
+      let hl = 4;
+      // the Palisades: wooded basalt cliffs on the Jersey shore north of Weehawken
+      let pal = 0;
+      const al = e * CP_A[0] + n * CP_A[1], ac = e * CP_C[0] + n * CP_C[1];
+      if (ac < -2300) { pal = smooth(20, 420, s) * smooth(900, 3200, al); if (pal > 0) hl = 4 + pal * (82 + fbm(N2, x / 900, z / 900, 3) * 30); }
+      const hc = s >= 0 ? hl : Math.max(-17, 3.6 + s * 0.3);
+      o.h = lerp(o.h, hc, m);
+      o.land = lerp(o.land, s > 0 ? 1 : 0, m);
+      if (m > 0.2) o.wl = -1e9;
+      const park = NY.inCentralPark(e, n) || NY.inProspect(e, n) ? 1 : 0;
+      o.urban = m * (s > 0 ? 1 : 0) * (1 - park) * (1 - pal);
+      o.mtn *= 1 - m; o.dry *= 1 - m; o.canyon *= 1 - m; o.ash *= 1 - m; o.snowZ *= 1 - m; o.him *= 1 - m;
+      o.forest = lerp(o.forest, Math.max(pal, park * 0.55), m);
+      o.nyc = m;
+    }
     function applySites(o, x, z) {
       for (const st of SITES) {
         const dx = x - st.x, dz = z - st.z, R = (st.r || st.len) + (st.fall || 400);
@@ -322,7 +427,8 @@
         if (m > 0) { h = lerp(h, AB.elev, m); if (m > 0.2) wl = -1e9; }
       }
       const o = { h, land, mtn: Math.max(mtn, him), dry: dry * (1 - him) * (1 - lush) * (1 - snowZ), canyon, cv, wl,
-        forest: Math.max(forest * (1 - him) * (1 - ash), lush * 0.75, snowZ * smooth(1500, 700, h) * 0.8), lakeSite: 0, him, glac, snowZ, ash };
+        forest: Math.max(forest * (1 - him) * (1 - ash), lush * 0.75, snowZ * smooth(1500, 700, h) * 0.8), lakeSite: 0, him, glac, snowZ, ash, urban: 0, nyc: 0 };
+      applyNYC(o, x, z);
       if (SITES.length) applySites(o, x, z);
       return o;
     }
@@ -337,7 +443,8 @@
       snow: [0.94, 0.96, 0.99], desertA: [0.82, 0.60, 0.40], desertB: [0.68, 0.40, 0.24],
       strataA: [0.76, 0.50, 0.32], strataB: [0.55, 0.30, 0.18], strataC: [0.85, 0.71, 0.53],
       alpine: [0.40, 0.43, 0.30], bank: [0.40, 0.37, 0.29], tarmac: [0.30, 0.31, 0.30],
-      ice: [0.74, 0.84, 0.92], moraine: [0.42, 0.40, 0.38], darkRock: [0.21, 0.20, 0.21], tibet: [0.55, 0.50, 0.42]
+      ice: [0.74, 0.84, 0.92], moraine: [0.42, 0.40, 0.38], darkRock: [0.21, 0.20, 0.21], tibet: [0.55, 0.50, 0.42],
+      urbanA: [0.40, 0.40, 0.39], urbanB: [0.47, 0.45, 0.42], riprap: [0.36, 0.35, 0.33]
     };
     const mix3 = (o, a, b, t) => { o[0] = a[0] + (b[0] - a[0]) * t; o[1] = a[1] + (b[1] - a[1]) * t; o[2] = a[2] + (b[2] - a[2]) * t; return o; };
     const T1 = [0, 0, 0], T2 = [0, 0, 0], T3 = [0, 0, 0];
@@ -384,9 +491,10 @@
       }
       // riverbanks, beaches, seabed
       if (f.wl > -1e8 && h - f.wl < 8) mix3(out, out, C.bank, smooth(8, 1, h - f.wl) * 0.8);
-      if (h < 22) mix3(out, out, C.sand, smooth(22, 5, h) * (1 - f.dry * 0.3));
+      if (h < 22) mix3(out, out, f.nyc > 0.5 ? C.riprap : C.sand, smooth(22, 5, h) * (1 - f.dry * 0.3)); // NYC: bulkheads and riprap, not beaches
       if (h < 1.5) mix3(out, out, C.wet, smooth(1.5, -1, h) * 0.6);
       if (h < -2) mix3(out, out, C.seabed, smooth(-2, -30, h));
+      if (f.urban > 0.01) { mix3(T1, C.urbanA, C.urbanB, clamp(0.5 + v2 * 0.7, 0, 1)); mix3(out, out, T1, f.urban); }
       if (AB) { const m = airbaseMask(x, z); if (m > 0.85) mix3(out, out, C.dryGrass, 0.35); }
       if (SITES.length) for (const st of SITES) {
         if (st.type !== "plateau" && st.type !== "flat" && st.type !== "pad") continue;
@@ -611,7 +719,7 @@
       return { far: true, cx: req.cx, cz: req.cz, pos, nor, col, index, reqId: req.reqId };
     }
 
-    return { everest: { x: EVX, z: EVZ, h: 8848.86, r: EVR }, zones: ZONES, fields, height, setAirbase, airbaseMask, setCastle, castleMask, setSites, siteMask, clearMask, buildChunk, buildFar, smooth, fbm, N1, N2, N3, mulberry32 };
+    return { everest: { x: EVX, z: EVZ, h: 8848.86, r: EVR }, zones: ZONES, nyc: NY, fields, height, setAirbase, airbaseMask, setCastle, castleMask, setSites, siteMask, clearMask, buildChunk, buildFar, smooth, fbm, N1, N2, N3, mulberry32 };
   }
   root.makeTerrainGen = makeTerrainGen;
 })(window.RJ = window.RJ || {});
