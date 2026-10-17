@@ -374,7 +374,9 @@
       h += row("Master volume", null, range("master", 0, 1, 0.05));
       h += row("Aircraft engines", "Your jet and the aircraft around you", range("engineVol", 0, 1, 0.05));
       h += row("Wind and ambience", "Airflow, runway rumble, cabin and cockpit ambience", range("envVol", 0, 1, 0.05));
-      h += row("Menu music", "Ambient synth score on the main menu and in the hangar", range("musicVol", 0, 1, 0.05));
+      h += row("Menu music", "Cinematic military score on the menus and in the hangar. It fades out when you take off; flying has no music.", range("musicVol", 0, 1, 0.05));
+      h += row("Menu soundtrack", RJ.settings.musicTrack ? "Playing your track: " + RJ.settings.musicTrack + " (stored in this browser only)" : "\"Scramble\", Jet City's original score. You can use your own music file (one you have the rights to) instead.",
+        `<label class="ghost small" style="cursor:pointer">Use my own track<input type="file" accept="audio/*" id="mus-file" hidden></label>${RJ.settings.musicTrack ? ` <button class="ghost small" id="mus-reset">Back to original score</button>` : ""} <span class="hint" id="mus-out"></span>`);
       h += row("Weapons and effects", null, range("sfxVol", 0, 1, 0.05));
       h += row("Nova (flight companion)", "Greets you in Free Flight, talks during flights and answers anything you ask. Hold " + RJ.keyLabel(RJ.settings.keys.talk) + " or tap 🎙 to talk.", toggle("compOn"));
       h += row("Nova's volume", null, range("compVol", 0, 1, 0.05));
@@ -411,6 +413,11 @@
     }
     $("set-body").innerHTML = h;
     if (t === "albums" && RJ.yeAlbums) RJ.yeAlbums.bindUI($("set-body"), UI.renderSettings);
+    if (t === "audio") {
+      const mf = $("mus-file"), mr = $("mus-reset");
+      if (mf) mf.addEventListener("change", () => { const f = mf.files && mf.files[0]; if (!f) return; $("mus-out").textContent = "Loading…"; RJ.audio.setMusicTrack(f).then(UI.renderSettings, () => { $("mus-out").textContent = "That file can't be played. Try an MP3, M4A, OGG or WAV."; }); });
+      if (mr) mr.addEventListener("click", () => RJ.audio.setMusicTrack(null).then(UI.renderSettings));
+    }
   };
   function applySetting(key) {
     RJ.saveSettings();

@@ -691,35 +691,177 @@
     o.type = "square"; o.frequency.value = 1800; g.gain.setValueAtTime(0.03, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.04);
     o.connect(g).connect(AU.uiBus); o.start(t); o.stop(t + 0.05);
   };
-  /* ---------------- menu music: a slow, warm synth pad (Am – F – C – G) with a soft bass and echo ---------------- */
-  const CHORDS = [[220, 261.63, 329.63], [174.61, 220, 261.63], [196, 261.63, 329.63], [196, 246.94, 293.66]];
+  /* ---------------- menu music: "Scramble", an original cinematic military score (D minor, 92 bpm) ----------------
+     Composed here and synthesised once into a buffer (OfflineAudioContext) the first time a menu needs it, then looped:
+     the 8-bar build-up plays once, bars 8-31 loop seamlessly (the reverb tail is folded back onto the loop start).
+     Being original it needs no licence. A track the player loads in Settings ▸ Audio (their own file, kept in this
+     browser's IndexedDB) replaces it. main.js turns it on only in the "menu" and "hangar" states. */
+  const BPM = 92, BAR = 240 / BPM, INTRO = 8, BARS = 32;
+  const midi = (m) => 440 * Math.pow(2, (m - 69) / 12);
+  const SR = 32000, TAIL = 5;
+  // bars [b0, b1) with their tails; the parts render in parallel (one thread each) and are overlap-added
+  function renderPart(b0, b1) {
+    const sr = SR, oc = new OfflineAudioContext(2, Math.ceil(((b1 - b0) * BAR + TAIL) * sr), sr), inR = (b) => b >= b0 && b < b1;
+    const G = (v, to) => { const g = mkGain(oc, v); if (to) g.connect(to); return g; };
+    const at = (b, beat = 0) => (b - b0) * BAR + beat * BAR / 4, S16 = BAR / 16;
+    const mix = G(0.7, oc.destination), verb = oc.createConvolver(), irN = Math.floor(sr * 3.4), ir = oc.createBuffer(2, irN, sr);
+    for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < irN; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irN, 3.2) * Math.min(1, i / (sr * 0.015)); }
+    verb.buffer = ir; const send = G(1); send.connect(verb); verb.connect(G(0.45, mix));
+    const bus = (pan, wet, gain = 1) => { const g = G(gain), p = oc.createStereoPanner(); p.pan.value = pan; g.connect(p); p.connect(mix); p.connect(G(wet, send)); return g; };
+    const B = { drum: bus(0, 0.3, 0.55), snare: bus(0.12, 0.28, 0.6), low: bus(-0.1, 0.25, 1.2), str: bus(-0.35, 0.35, 2.5), hi: bus(0.4, 0.7, 1.9), brass: bus(0.22, 0.45, 3), fx: bus(0, 0.6, 0.7) };
+    const nb = oc.createBuffer(1, sr * 2, sr), nd = nb.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+    const noise = (t0 = 0, t1) => { const s = oc.createBufferSource(); s.buffer = nb; s.loop = true; s.start(t0, Math.random() * 2); if (t1) s.stop(t1); return s; };
+    // drums: one voice per drum, retriggered by automation (cheap, and no clicks between hits)
+    const drum = (f0, decay, to, click) => {
+      const o = mkOsc(oc, "sine", f0), g = G(0, to), ng = G(0, to); o.connect(g); noise().connect(mkFilt(oc, "lowpass", click, 0.7)).connect(ng);
+      return (t, v = 1) => {
+        o.frequency.setValueAtTime(f0 * 2.3, t); o.frequency.exponentialRampToValueAtTime(f0, t + 0.07);
+        g.gain.setTargetAtTime(v, t, 0.002); g.gain.setTargetAtTime(0, t + 0.012, decay);
+        ng.gain.setTargetAtTime(v * 0.45, t, 0.001); ng.gain.setTargetAtTime(0, t + 0.005, 0.03);
+      };
+    };
+    const low = drum(38, 0.7, B.drum, 300), taiko = drum(54, 0.38, B.drum, 800), tom = drum(84, 0.24, B.drum, 1400);
+    const sBody = drum(185, 0.05, B.snare, 5000), sWire = G(0, B.snare);
+    noise().connect(mkFilt(oc, "highpass", 1400, 0.5)).connect(mkFilt(oc, "peaking", 3200, 1)).connect(sWire);
+    const snare = (t, v) => { sBody(t, v * 0.6); sWire.gain.setTargetAtTime(v, t, 0.001); sWire.gain.setTargetAtTime(0, t + 0.006, 0.055); };
+    const roll = (t, d, v0, v1) => { const n = Math.round(d / (S16 / 2)); for (let i = 0; i < n; i++) snare(t + i * S16 / 2, v0 + (v1 - v0) * i / n); };
+    const boom = (t, v = 1) => {
+      const o = oc.createOscillator(), g = G(0, B.drum); o.frequency.setValueAtTime(72, t); o.frequency.exponentialRampToValueAtTime(27, t + 1.6); o.connect(g);
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v * 0.8, t + 0.008); g.gain.setTargetAtTime(0, t + 0.05, 0.8); o.start(t); o.stop(t + 5);
+      const f = mkFilt(oc, "lowpass", 3000, 0.5), ng = G(0, B.fx); f.frequency.setValueAtTime(3000, t); f.frequency.exponentialRampToValueAtTime(110, t + 1.4);
+      noise(t, t + 4).connect(f).connect(ng); ng.gain.setValueAtTime(0, t); ng.gain.linearRampToValueAtTime(v * 0.8, t + 0.004); ng.gain.setTargetAtTime(0, t + 0.02, 0.45);
+    };
+    const crash = (t, v) => { const g = G(0, B.fx); noise(t, t + 5).connect(mkFilt(oc, "highpass", 4500, 0.5)).connect(g); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + 0.005); g.gain.setTargetAtTime(0, t + 0.02, 1.1); };
+    const riser = (t, d, v, hp) => {
+      const f = mkFilt(oc, hp ? "highpass" : "bandpass", 250, hp ? 0.5 : 1.4), g = G(0, B.fx);
+      noise(t, t + d + 0.1).connect(f).connect(g); f.frequency.setValueAtTime(hp ? 3000 : 250, t); f.frequency.exponentialRampToValueAtTime(hp ? 9000 : 6500, t + d);
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + d - 0.02); g.gain.linearRampToValueAtTime(0, t + d + 0.03);
+    };
+    // pitched voices: detuned saw stacks through a moving lowpass (brass bite, string body), optional tremolo
+    const tone = (to, t, d, f, o) => {
+      const g = G(0, to), lp = mkFilt(oc, "lowpass", o.lp0, o.q || 0.8); let head = g;
+      if (o.trem) { const tg = G(0.55, g), l = oc.createOscillator(), lg = G(0.45, tg.gain); l.frequency.value = o.trem; l.connect(lg); l.start(t); l.stop(t + d + o.r * 5); head = tg; }
+      lp.connect(head); lp.frequency.setValueAtTime(o.lp0, t); lp.frequency.setTargetAtTime(o.lp1, t, o.lpT || 0.25);
+      g.gain.setValueAtTime(0, t); g.gain.setTargetAtTime(o.g, t, o.a); g.gain.setTargetAtTime(0, t + d, o.r);
+      for (const dt of o.det || [-8, 7]) { const s = oc.createOscillator(); s.type = o.type || "sawtooth"; s.frequency.value = f; s.detune.value = dt; s.connect(lp); s.start(t); s.stop(t + d + o.r * 5); }
+    };
+    const brass = (t, d, m, v, bright = 1) => tone(B.brass, t, d, midi(m), { g: v, a: 0.09, r: 0.3, lp0: 280, lp1: 1500 * bright, lpT: 0.28, q: 1.3, det: [-10, 0, 9] });
+    const horn = (t, d, m, v) => { tone(B.brass, t, d, midi(m), { g: v, a: 0.05, r: 0.22, lp0: 600, lp1: 2300, lpT: 0.12, q: 1.6, det: [-7, 6] }); tone(B.brass, t, d, midi(m - 12), { g: v * 0.7, a: 0.06, r: 0.25, lp0: 400, lp1: 1500, lpT: 0.15, det: [-5, 5] }); };
+    const braam = (t, d, m, v) => { tone(B.low, t, d, midi(m), { g: v, a: 0.05, r: 0.9, lp0: 110, lp1: 1100, lpT: 0.5, q: 2.5, det: [-14, -5, 4, 13] }); tone(B.low, t, d, midi(m + 7), { g: v * 0.5, a: 0.08, r: 0.9, lp0: 110, lp1: 800, lpT: 0.6, q: 2, det: [-6, 6] }); };
+    const drone = (t, d, m, v) => { tone(B.low, t, d, midi(m), { g: v, a: 0.5, r: 0.6, lp0: 180, lp1: 420, lpT: 1, det: [-11, 10] }); tone(B.low, t, d, midi(m - 12), { g: v * 0.55, a: 0.5, r: 0.6, type: "sine", lp0: 300, lp1: 300, det: [0] }); };
+    const trem = (t, d, m, v) => tone(B.hi, t, d, midi(m), { g: v, a: 0.6, r: 0.8, lp0: 2600, lp1: 3400, lpT: 1, det: [-6, 5], trem: 11 });
+    const ostinato = (to, cut) => {
+      const g = G(0, to), lp = mkFilt(oc, "lowpass", cut, 1.1); lp.connect(g);
+      const os = [-9, 0, 8].map((d) => { const s = mkOsc(oc, "sawtooth", 147); s.detune.value = d; s.connect(lp); return s; });
+      return (t, m, v) => { os.forEach((s) => s.frequency.setValueAtTime(midi(m), t)); g.gain.setTargetAtTime(v, t, 0.003); g.gain.setTargetAtTime(v * 0.12, t + 0.035, 0.045); };
+    };
+    const osti = ostinato(B.str, 2400), ostiHi = ostinato(B.hi, 3800);
+    // Dm – B♭ – Gm – A, each a bar
+    const CH = [[50, 53, 57, 62], [50, 53, 58, 62], [50, 55, 58, 62], [49, 52, 57, 61]], ROOT = [38, 34, 31, 33], OST = [50, 46, 43, 45];
+    const OPAT = [0, 0, 7, 0, 0, 0, 8, 7, 0, 0, 7, 0, 12, 10, 8, 7];
+    const THEME = [[[0, 1.5, 62], [1.5, 0.5, 64], [2, 2, 65]], [[0, 3, 70], [3, 1, 69]], [[0, 1.5, 67], [1.5, 0.5, 65], [2, 2, 62]], [[0, 2, 64], [2, 2, 61]],
+      [[0, 1.5, 62], [1.5, 0.5, 64], [2, 2, 65]], [[0, 2, 70], [2, 2, 74]], [[0, 2, 74], [2, 1, 72], [3, 1, 70]], [[0, 4, 69]]];
+    const TAIKO = [[0, low, 1], [3, tom, 0.5], [6, tom, 0.6], [8, taiko, 0.9], [10, tom, 0.45], [11, tom, 0.55], [12, taiko, 0.85], [14, tom, 0.6], [15, tom, 0.75]];
+    const SNARE = [[2, 0.2], [3, 0.25], [4, 0.75], [7, 0.2], [10, 0.2], [11, 0.25], [12, 0.8], [14, 0.3], [15, 0.35]];
+    for (let b = b0; b < b1; b++) {
+      const k = b % 4, t = at(b), sec = b < 4 ? 0 : b < 8 ? 1 : b < 16 ? 2 : b < 24 ? 3 : b < 28 ? 4 : 5, full = sec === 2 || sec === 3 || sec === 5;
+      drone(t, BAR, ROOT[k] + 12, sec === 0 ? 0.05 + b * 0.012 : 0.09);
+      if ((sec <= 1 && k % 2 === 0) || sec === 4) braam(t, sec === 4 ? BAR * 0.9 : BAR * 1.8, ROOT[k] + 12, sec === 0 ? 0.09 : 0.12);
+      if (sec <= 1 || sec === 4) trem(t, BAR, CH[k][3] + 12, 0.012 + (sec === 1 ? 0.01 : sec === 4 ? 0.016 : 0) + (b % 4) * 0.002);
+      if (sec >= 1) for (let i = 0; i < 16; i++) {
+        const v = (sec === 1 ? 0.1 + 0.03 * (b - 4) : sec === 4 ? 0.16 : 0.22) * (i % 4 === 0 ? 1 : 0.7);
+        osti(t + i * S16, OST[k] + OPAT[i], v);
+        if (sec === 5) ostiHi(t + i * S16, OST[k] + OPAT[i] + 24, v * 0.35);
+      }
+      if (sec === 0) { low(t, 0.75); if (b === 3) { tom(at(b, 3), 0.5); tom(at(b, 3.5), 0.7); } }
+      else if (sec === 1) TAIKO.forEach(([s, fn, v]) => { if (s % 4 === 0 || (b === 7 && s >= 12)) fn(t + s * S16, v * 0.8); });
+      else if (sec === 4) { low(t, 0.8); taiko(at(b, 2), 0.6); }
+      if (full) {
+        TAIKO.forEach(([s, fn, v]) => fn(t + s * S16, v));
+        SNARE.forEach(([s, v]) => { if (sec !== 2 || s === 4 || s === 12) snare(t + s * S16, v * (sec === 5 ? 1.1 : 0.9)); });
+        CH[k].forEach((m) => brass(t, BAR * 0.97, m, sec === 2 ? 0.026 : sec === 3 ? 0.022 : 0.032, sec === 5 ? 1.4 : 1));
+        brass(t, BAR * 0.97, ROOT[k] + 12, sec === 2 ? 0.03 : 0.04, 0.6);
+      }
+      if (sec === 3 || sec === 5) THEME[sec === 3 ? b - 16 : b - 24].forEach(([x, d, m]) => {
+        horn(at(b, x), d * BAR / 4 - 0.04, m, sec === 5 ? 0.05 : 0.04);
+        if (sec === 5) trem(at(b, x), d * BAR / 4, m + 12, 0.02);
+      });
+    }
+    const ev = (b, fn) => { if (inR(b)) fn(); };
+    [[8, 1], [16, 0.75], [28, 1]].forEach(([b, v]) => ev(b, () => { boom(at(b), v); crash(at(b), 0.22 * v); }));
+    ev(24, () => crash(at(24), 0.12));
+    ev(6, () => riser(at(6), BAR * 2, 0.22)); ev(7, () => { riser(at(7), BAR, 0.12, true); roll(at(7, 2), BAR / 2, 0.1, 0.7); });
+    ev(15, () => roll(at(15, 3), BAR / 4, 0.15, 0.5)); ev(23, () => roll(at(23, 2), BAR / 2, 0.12, 0.6));
+    ev(26, () => riser(at(26), BAR * 2, 0.24)); ev(27, () => roll(at(27), BAR, 0.08, 0.75));
+    ev(30, () => riser(at(30), BAR * 2, 0.16)); ev(31, () => { riser(at(31), BAR, 0.12, true); roll(at(31, 2), BAR / 2, 0.15, 0.75); });
+    return oc.startRendering();
+  }
+  function renderScore() {
+    const CUTS = [0, 4, 8, 12, 16, 20, 24, 28, 32];
+    return Promise.all(CUTS.slice(0, -1).map((b, i) => renderPart(b, CUTS[i + 1]))).then((parts) => {
+      const END = BARS * BAR, L0 = Math.round(INTRO * BAR * SR), L1 = Math.round(END * SR), out = new AudioBuffer({ numberOfChannels: 2, length: L1, sampleRate: SR });
+      for (let c = 0; c < 2; c++) {
+        const d = out.getChannelData(c);
+        parts.forEach((p, i) => {   // overlap-add; anything past the loop end (the last tails) wraps onto the loop start
+          const o = Math.round(CUTS[i] * BAR * SR), src = p.getChannelData(c);
+          for (let j = 0; j < src.length; j++) { const q = o + j; d[q < L1 ? q : L0 + q - L1] += src[j]; }
+        });
+      }
+      let pk = 0;
+      for (let c = 0; c < 2; c++) { const d = out.getChannelData(c); for (let i = 0; i < L1; i++) pk = Math.max(pk, Math.abs(d[i])); }
+      const k = 1.5 / (pk || 1);   // gentle tanh limiter: only the big impacts get squeezed
+      for (let c = 0; c < 2; c++) { const d = out.getChannelData(c); for (let i = 0; i < L1; i++) d[i] = Math.tanh(d[i] * k); }
+      return out;
+    });
+  }
+  AU._renderScore = renderScore;
+  // the player's own track, kept in this browser only
+  const musDB = () => new Promise((res, rej) => { const r = indexedDB.open("rj-music", 1); r.onupgradeneeded = () => r.result.createObjectStore("t"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  const idb = (mode, fn) => musDB().then((db) => new Promise((res, rej) => { const q = fn(db.transaction("t", mode).objectStore("t")); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); }));
+  function loadTrack(M) {
+    M.loading = true;
+    const own = RJ.settings.musicTrack ? idb("readonly", (s) => s.get("track")).then((ab) => ab && AU.ctx.decodeAudioData(ab.slice(0))).catch(() => null) : Promise.resolve(null);
+    own.then((b) => b ? { b, ls: 0, le: b.duration } : (M.score ? M.score : renderScore().then((sb) => (M.score = { b: sb, ls: INTRO * BAR, le: BARS * BAR }))))
+      .then((r) => { M.buf = r.b; M.ls = r.ls; M.le = r.le; M.loading = false; M.pos = 0; AU.music(M.want); })
+      .catch((e) => { M.loading = false; M.failed = true; console.warn("menu music unavailable", e); });
+  }
+  function stopMusic(M) {
+    M.stopT = null;
+    if (!M.src) return;
+    let p = AU.ctx.currentTime - M.t0;
+    if (p >= M.le) p = M.ls + (p - M.ls) % (M.le - M.ls);
+    M.pos = p; try { M.src.stop(); } catch (e) { /* stopped */ } M.src.disconnect(); M.src = null;
+  }
+  /** Menu soundtrack on/off. Fades in, fades out fast when flying starts, and resumes where it left off. */
   AU.music = function (on) {
     if (!AU.ctx) return;
-    const want = on && !RJ.settings.muted && (RJ.settings.musicVol == null ? 0.5 : RJ.settings.musicVol) > 0;
-    if (want && !AU._mus) {
-      const ctx = AU.ctx, M = (AU._mus = { out: mkGain(ctx, 0), voices: [], step: 0 });
-      const lp = mkFilt(ctx, "lowpass", 1100, 0.6), dl = ctx.createDelay(1.5), fb = mkGain(ctx, 0.38), wet = mkGain(ctx, 0.35);
-      dl.delayTime.value = 0.62;
-      M.out.connect(lp); lp.connect(AU.uiBus); lp.connect(dl); dl.connect(fb).connect(dl); dl.connect(wet).connect(AU.uiBus);
-      for (let i = 0; i < 3; i++) {
-        const g = mkGain(ctx, 0); g.connect(M.out);
-        const a = mkOsc(ctx, "sawtooth", 220), b = mkOsc(ctx, "sawtooth", 220); b.detune.value = 9; a.detune.value = -7;
-        a.connect(g); b.connect(g); M.voices.push({ a, b, g });
-      }
-      M.bass = mkOsc(ctx, "sine", 55); M.bassG = mkGain(ctx, 0); M.bass.connect(M.bassG).connect(M.out);
-      const next = () => {
-        const t = ctx.currentTime, ch = CHORDS[M.step++ % CHORDS.length];
-        M.voices.forEach((v, i) => { v.a.frequency.setTargetAtTime(ch[i], t, 0.4); v.b.frequency.setTargetAtTime(ch[i], t, 0.4); v.g.gain.setTargetAtTime(0.05, t, 1.2); });
-        M.bass.frequency.setTargetAtTime(ch[0] / 2, t, 0.3); M.bassG.gain.setTargetAtTime(0.12, t, 0.8);
-      };
-      next(); M.timer = setInterval(next, 6400);
+    const ctx = AU.ctx, vol = RJ.settings.musicVol == null ? 0.5 : RJ.settings.musicVol, want = !!on && !RJ.settings.muted && vol > 0;
+    const M = AU._mus || (AU._mus = { out: mkGain(ctx, 0), pos: 0 });
+    if (!M.wired) { M.out.connect(AU.uiBus); M.wired = true; }
+    M.want = want;
+    if (want && !M.buf && !M.loading && !M.failed) loadTrack(M);
+    if (want && M.buf && !M.src) {
+      if (M.stopT) { clearTimeout(M.stopT); M.stopT = null; }
+      const s = ctx.createBufferSource(), t = ctx.currentTime + 0.03;
+      s.buffer = M.buf; s.loop = true; s.loopStart = M.ls; s.loopEnd = M.le; s.connect(M.out);
+      s.start(t, M.pos); M.src = s; M.t0 = t - M.pos;
+      M.out.gain.cancelScheduledValues(ctx.currentTime); M.out.gain.setValueAtTime(0, ctx.currentTime);
     }
-    if (AU._mus) {
-      const vol = (RJ.settings.musicVol == null ? 0.5 : RJ.settings.musicVol) * 0.5;
-      AU._mus.out.gain.setTargetAtTime(want ? vol : 0, AU.ctx.currentTime, want ? 1.5 : 0.6);
-      if (!want && !AU._mus.stopT) AU._mus.stopT = setTimeout(() => { const M = AU._mus; if (!M) return; clearInterval(M.timer); try { M.out.disconnect(); } catch (e) { /* gone */ } [M.bass, ...M.voices.flatMap((v) => [v.a, v.b])].forEach((o) => { try { o.stop(); } catch (e) { /* stopped */ } }); AU._mus = null; }, 2500);
-      if (want && AU._mus.stopT) { clearTimeout(AU._mus.stopT); AU._mus.stopT = null; }
-    }
+    if (!M.src) return;
+    M.out.gain.setTargetAtTime(want ? vol * 0.7 : 0, ctx.currentTime, want ? (M.pos ? 0.8 : 0.15) : 0.22);
+    if (!want && !M.stopT) M.stopT = setTimeout(() => stopMusic(M), 1400);
+    if (want && M.stopT) { clearTimeout(M.stopT); M.stopT = null; }
+  };
+  /** Settings ▸ Audio: use the player's own track (File), or null for the built-in score. */
+  AU.setMusicTrack = function (file) {
+    const swap = () => {
+      const M = AU._mus;
+      if (M) { if (M.stopT) clearTimeout(M.stopT); M.stopT = 0; if (M.src) { try { M.src.stop(); } catch (e) { /* stopped */ } M.src = null; } M.buf = null; M.pos = 0; M.failed = false; M.loading = false; AU.music(M.want); }
+    };
+    if (!file) { RJ.settings.musicTrack = ""; RJ.saveSettings(); return idb("readwrite", (s) => s.delete("track")).catch(() => null).then(swap); }
+    return file.arrayBuffer().then((ab) => (AU.ctx ? AU.ctx.decodeAudioData(ab.slice(0)) : Promise.resolve()).then(() => idb("readwrite", (s) => s.put(ab, "track"))))
+      .then(() => { RJ.settings.musicTrack = file.name; RJ.saveSettings(); swap(); return true; });
   };
   AU.thunder = () => { burst({ brown: true, f0: 400, f1: 50, dur: 3.5, gain: 0.8, attack: 0.15 }); thump(45, 2.5, 0.4, 0.1); };
   AU.splash = (dist = 0) => burst({ f0: 1800, f1: 300, dur: 1.2, gain: 0.6 * distGain(dist) });
