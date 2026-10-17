@@ -25,9 +25,11 @@
     return speechSynthesis.getVoices().filter((v) => /^en([-_]|$)/i.test(v.lang))
       .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name)).map((v) => ({ name: v.name, lang: v.lang, female: rank(v) < 2 }));
   };
-  function voice() {
+  function voice(male) {
     if (!window.speechSynthesis) return null;
     const vs = speechSynthesis.getVoices();
+    // radio calls (air defence, interceptors): a male English voice, different from Nova's
+    if (male) { const en = vs.filter((v) => /^en([-_]|$)/i.test(v.lang) && !isFemale(v)); return en.find((v) => /male|guy|david|mark|george|daniel|ryan|christopher|eric/i.test(v.name)) || en[0] || null; }
     return (S().compVoice && vs.find((v) => v.name === S().compVoice)) || vs.find((v) => v.name === (C.voiceList()[0] || {}).name) || null;
   }
 
@@ -38,7 +40,8 @@
   const canSpeak = () => !!window.speechSynthesis && typeof SpeechSynthesisUtterance === "function";
   function speakNow(item) {
     current = item;
-    caption(item.text);
+    caption(item.text, item.speaker);
+    if (item.speaker) RJ.audio.beep(1700, 0.05, 0.03); // radio squelch
     if (!canSpeak() || S().muted || !(S().compVol > 0)) { setTimeout(() => done(item), 1200 + item.text.length * 45); return; }
     const parts = item.text.match(/[^.!?]+[.!?]*\s*/g) || [item.text];
     if (RJ.audio.duck) RJ.audio.duck(0.6); // engines dip under her voice, never vanish
@@ -47,9 +50,10 @@
     const next = () => {
       if (current !== item) return;
       if (i >= parts.length) { done(item); return; }
-      const u = new SpeechSynthesisUtterance(parts[i++].trim()), v = voice();
+      const u = new SpeechSynthesisUtterance(parts[i++].trim()), v = voice(item.male);
       if (v) { u.voice = v; u.lang = v.lang; }
-      u.rate = item.pri >= 3 ? 1.08 : 1.0; u.pitch = 0.95;
+      u.rate = item.pri >= 3 ? 1.08 : 1.0; u.pitch = item.male ? 0.8 : 0.95;
+      if (item.speaker) u.rate *= 1.08;
       u.volume = RJ.clamp(S().master * S().compVol, 0, 1);
       u.onend = () => setTimeout(next, 90);
       u.onerror = () => done(item);
@@ -73,11 +77,11 @@
   }
   /** Say a line. Returns false when it was dropped (busy, too soon, player talking, companion off). */
   C.say = function (text, pri = 1, opts = {}) {
-    if (!S().compOn || !text) return false;
+    if ((!S().compOn && !opts.speaker) || !text) return false; // radio calls (opts.speaker) play even with Nova off
     const now = performance.now() / 1000;
     if (C.listening && pri < 3) return false;
     if (pri <= 1 && !opts.reply && now - C.last < GAP[S().compChat || "normal"] * (pri === 0 ? 2 : 1)) return false;
-    const item = { text, pri, followUp: !!opts.followUp };
+    const item = { text, pri, followUp: !!opts.followUp, speaker: opts.speaker || null, male: !!opts.male };
     const busy = current || (window.speechSynthesis && speechSynthesis.speaking);
     if (busy) {
       if (pri >= 3 && (!current || current.pri < 3)) { hush(); speakNow(item); return true; }
@@ -87,10 +91,10 @@
     speakNow(item);
     return true;
   };
-  function caption(text) {
+  function caption(text, speaker) {
     let el = document.getElementById("rj-caption");
     if (!el) { el = document.createElement("div"); el.id = "rj-caption"; document.body.appendChild(el); }
-    el.textContent = `${NAME}: ${text}`; el.classList.add("on");
+    el.textContent = `${speaker ? "📻 " + speaker : NAME}: ${text}`; el.classList.add("on");
     clearTimeout(caption.t); caption.t = setTimeout(() => el.classList.remove("on"), 2500 + text.length * 60);
   }
   /** Event line with its own cooldown (s) so the same thing is never announced twice in a row. */

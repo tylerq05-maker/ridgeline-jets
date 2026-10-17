@@ -46,11 +46,24 @@
     if (RJ.missileFx) C.flares.forEach((f) => RJ.missileFx.flareEnd(f));
     C.flares = [];
     if (C.crowdMesh) C.crowdMesh.visible = false;
+    if (RJ.airspace) RJ.airspace.clear();
     for (const b of C.bullets) b.life = 0;
     C.tracers.count = 0;
   };
   C.add = function (ac) { C.aircraft.push(ac); return ac; };
-  C.enemiesOf = (ac) => C.aircraft.filter((o) => o.alive && o.team !== ac.team);
+  /** Take an aircraft out of the world (Free Flight traffic leaving the area, or a wreck that has burnt out). */
+  C.remove = function (ac) {
+    const i = C.aircraft.indexOf(ac);
+    if (i < 0) return;
+    ac.alive = false; ac.state = "dead";
+    for (const o of C.aircraft) if (o.target === ac) { o.target = null; o.lockT = 0; o.locked = false; }
+    for (const m of C.missiles) if (m.target === ac) m.lost = true;
+    if (ac._srib && RJ.missileFx) RJ.missileFx.smoke(ac, null);
+    ac.dispose(); C.aircraft.splice(i, 1);
+  };
+  /* Neutral aircraft (Free Flight traffic, airshows) are never picked automatically: only an aircraft that is
+   * already hostile is. all = true includes them (the player cycling targets on purpose). */
+  C.enemiesOf = (ac, all) => C.aircraft.filter((o) => o.alive && o.team !== ac.team && (all || !o.neutral));
   C.friendsOf = (ac) => C.aircraft.filter((o) => o.alive && o.team === ac.team && o !== ac);
 
   /* ======================= GUNS ======================= */
@@ -84,7 +97,7 @@
   /** Rear turret (B-52): auto-fires at the nearest enemy behind. */
   function turret(ac, dt) {
     const g = ac.spec.gun;
-    if (!g || !g.turret || !ac.alive) return;
+    if (!g || !g.turret || !ac.alive || ac.neutral) return;
     let best = null, bd = 1300;
     for (const e of C.enemiesOf(ac)) {
       const d = e.pos.distanceTo(ac.pos);
@@ -184,7 +197,7 @@
   }
   /** Pick the enemy closest to the nose (for the player's target cycling). */
   C.cycleTarget = function (ac) {
-    const list = C.enemiesOf(ac).map((e) => {
+    const list = C.enemiesOf(ac, true).map((e) => {
       const d = tv.copy(e.pos).sub(ac.pos); const dist = d.length();
       return { e, ang: Math.acos(RJ.clamp(d.dot(ac.fwd) / dist, -1, 1)), dist };
     }).sort((a, b) => a.ang - b.ang);
@@ -228,6 +241,7 @@
       speed: ac.speed, top: (m.speed || 950), t: 0, burn: 3.2, life: 16, decoyed: null, lost: false, trailT: 0, ign: 0,
       gLimit: m.speed ? 25 : 32, dmg: m.speed ? 95 : 80
     };
+    mesh.position.copy(p); mesh.quaternion.setFromUnitVectors(Z, tv.copy(ac.fwd).negate()); // leaves the rail pointing where the jet points
     if (MF) MF.launch(msl); // per-type turn limit, ignition delay, release puff
     if (m.cone >= 180) {
       // all-aspect defensive launch: eject the missile toward the target so its seeker starts on it
@@ -245,8 +259,18 @@
     for (let i = C.missiles.length - 1; i >= 0; i--) {
       const m = C.missiles[i];
       m.t += dt; m.life -= dt;
-      // motor: accelerate during burn, then coast and bleed speed
-      if (m.t < m.burn) m.speed = Math.min(m.top + m.owner.speed * 0.3, m.speed + 260 * dt);
+      // off the rail / out of the bay: the missile falls clear of the jet for a moment before its motor lights
+      // (missilefx sets m.ign per type), so it visibly separates instead of shooting out at full speed
+      if (m.t < (m.ign || 0)) {
+        m.vel.y -= RJ.G0 * dt; m.vel.multiplyScalar(1 - 0.08 * dt);
+        m.pos.addScaledVector(m.vel, dt); m.speed = m.vel.length();
+        m.mesh.position.copy(m.pos);
+        m.mesh.quaternion.slerp(qq.setFromUnitVectors(Z, tv.copy(m.vel).normalize().negate()), Math.min(1, dt * 3));
+        if (RJ.missileFx && m.type) RJ.missileFx.update(m, dt, 0);
+        continue;
+      }
+      // motor: accelerate during burn (a hard kick in the first second of boost), then coast and bleed speed
+      if (m.t < m.burn) m.speed = Math.min(m.top + m.owner.speed * 0.3, m.speed + (m.t - (m.ign || 0) < 1.2 ? 330 : 200) * dt);
       else m.speed = Math.max(150, m.speed - (40 + m.speed * 0.04) * dt * (0.4 + RJ.rho(m.pos.y)));
       const tgtObj = m.decoyed || m.target;
       let tpos = null, tvel = null;
@@ -435,9 +459,15 @@
     think() {
       const ac = this.ac, sk = this.sk, dtT = sk.react;
       this.phaseT -= dtT;
+      // scripted break (formation split, flank): hold a heading for a moment, terrain permitting
+      if (this.overT > 0) { this.overT -= dtT; this.mode = "break"; this.desired.copy(this.overDir); this.thr = 1; this.ab = true; this.fireWish = false; this.avoidTerrain(); return; }
       // ---------- target selection by role / order ----------
       if (this.role === "wingman" && this.leader && this.leader.alive) this.pickWingTarget();
-      else if (this.role === "fighter" || this.role === "wingman") C.autoTarget(ac); // a wingman without a leader fights on alone
+      else if (this.role === "fighter" || this.role === "wingman") {
+        C.autoTarget(ac); // a wingman without a leader fights on alone
+        // limited sensors (Free Flight interceptors): beyond detection range they search the last known position
+        if (this.detect && ac.target && ac.target.pos.distanceTo(ac.pos) > this.detect && !(ac.lastHitBy === ac.target && ac.time - ac.lastHitAt < 8)) ac.target = null;
+      }
       else if (this.role === "strike" || this.role === "route" || this.role === "runner") ac.target = null;
       const tgt = ac.target && ac.target.alive ? ac.target : null;
       // ---------- threats ----------
@@ -496,7 +526,7 @@
       const ac = this.ac, R = this.mode === "form" ? 32 : 150;
       let best = null, bd = R * R * 4;
       for (const o of C.aircraft) {
-        if (o === ac || !o.alive || o.team !== ac.team) continue;
+        if (o === ac || !o.alive || (o.team !== ac.team && !(ac.neutral && o.isPlayer))) continue; // traffic also gives the player room
         const dx = o.pos.x - ac.pos.x, dy = o.pos.y - ac.pos.y, dz = o.pos.z - ac.pos.z, d2 = dx * dx + dy * dy + dz * dz;
         if (d2 < bd) { bd = d2; best = o; }
       }
@@ -602,6 +632,8 @@
       const F = ac.spec.flight;
       this.thr = this.role === "runner" ? 1 : this.role === "strike" ? 0.9 : 0.78;
       this.ab = this.role === "runner" || ac.speed < F.vstall * 1.6;
+      // cruise speed (Free Flight traffic): airliners hold their cruise instead of a fixed throttle
+      if (this.cruise && this.role !== "runner") { this.thr = RJ.clamp(0.62 + (this.cruise - ac.speed) * 0.025, 0.08, 1); this.ab = ac.speed < this.cruise - 25 && this.cruise > F.vmax * 0.7; }
       if (this.role === "runner") {
         // jink now and then so a straight tail chase isn't free
         this.jinkT -= this.sk.react;
@@ -613,7 +645,7 @@
     formUp(spread) {
       const ac = this.ac, L = this.leader;
       this.mode = "form";
-      const d = L.vis.dims, k = this.formK || 1, back = (30 + d.len * 1.4) * k + spread, out = ((22 + d.span * 1.2) * k + spread * 0.6) * this.side;
+      const d = L.vis.dims, k = this.formK || 1, back = (30 + d.len * 1.4) * k + spread, out = ((22 + d.span * 1.2) * k + spread * 0.6) * this.side * (this.formOut || 1);
       const flatF = tv3.copy(L.fwd).setY(0).normalize(), flatR = V3(-flatF.z, 0, flatF.x);
       const slot = tv.copy(L.pos).addScaledVector(flatF, -back).addScaledVector(flatR, out).addScaledVector(UPV, 6 + spread * 0.2);
       const lead = tv2.copy(slot).addScaledVector(L.vel, 1.6).sub(ac.pos);
@@ -733,12 +765,15 @@
 
   /* ======================= PER-FRAME ======================= */
   C.update = function (dt0) {
-    C.crowd = C.aircraft.length > 16; // big battles switch on the crowd optimisations (LOD, staggered updates)
+    C.crowd = C.aircraft.length > 16 || !!C.forceCrowd; // big battles (and Free Flight traffic) switch on the crowd optimisations (LOD, staggered updates)
     for (const ac of C.aircraft) {
       let dt = dt0;
       if (ac.simFar) { ac._simAcc = (ac._simAcc || 0) + dt0; if (ac._simAcc < dt0 * 1.99) continue; dt = ac._simAcc; ac._simAcc = 0; } // far away: half-rate physics + AI
-      if (ac.pilot) ac.pilot.update(dt);
-      ac.update(dt);
+      if (ac.kin && ac.alive) ac.kin(dt); // tight-formation slot (airshows): placed off the leader instead of flown
+      else {
+        if (ac.pilot) ac.pilot.update(dt);
+        ac.update(dt);
+      }
       if (ac.alive) {
         updateLock(ac, dt);
         if (ac.spec.gun && ac.spec.gun.turret) turret(ac, dt);
@@ -760,7 +795,7 @@
     const A = C.aircraft;
     for (let i = 0; i < A.length; i++) for (let j = i + 1; j < A.length; j++) {
       const a = A[i], b = A[j];
-      if (!a.alive || !b.alive) continue;
+      if (!a.alive || !b.alive || (a.team === b.team && a.air && b.air && a.air.show && a.air.show === b.air.show)) continue; // a display team's choreography never collides with itself
       const r = (a.radius + b.radius) * 0.55;
       if (a.pos.distanceToSquared(b.pos) < r * r) { a.destroy(b, "collision"); b.destroy(a, "collision"); }
     }

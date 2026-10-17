@@ -113,6 +113,8 @@
 
   /* ---------------- free flight setup ---------------- */
   UI.freeSel = { aircraft: RJ.settings.aircraft, activity: "roam", region: "mountains", time: "morning", weather: "scattered", start: "runway", flow: String(RJ.settings.timeFlow != null ? RJ.settings.timeFlow : 26) };
+  const TRAFFIC = [{ id: "off", name: "Off" }, { id: "light", name: "Light" }, { id: "normal", name: "Normal" }, { id: "busy", name: "Busy" }];
+  const RESPONSE = [{ id: "light", name: "Light" }, { id: "standard", name: "Standard" }, { id: "heavy", name: "Heavy" }];
   const FLOWS = [{ id: "0", name: "Frozen" }, { id: "1", name: "Real time" }, { id: "10", name: "10×" }, { id: "26", name: "26× (30 min ≈ 13 h)" }, { id: "60", name: "60×" }];
   UI.renderFree = function () {
     const s = UI.freeSel, a = RJ.AIRCRAFT[s.aircraft];
@@ -133,6 +135,8 @@
     chips($("free-region"), RJ.modes.REGIONS, s.region, (v) => { s.region = v; UI.renderFree(); });
     chips($("free-time"), TIMES().filter((t) => t.id !== "dynamic"), s.time, (v) => { s.time = v; UI.renderFree(); });
     chips($("free-flow"), FLOWS, s.flow, (v) => { s.flow = v; RJ.settings.timeFlow = +v; RJ.saveSettings(); UI.renderFree(); });
+    chips($("free-traffic"), TRAFFIC, RJ.settings.airTraffic || "normal", (v) => { RJ.settings.airTraffic = v; RJ.saveSettings(); UI.renderFree(); });
+    chips($("free-response"), RESPONSE, RJ.settings.wantedScale || "standard", (v) => { RJ.settings.wantedScale = v; RJ.saveSettings(); UI.renderFree(); });
     chips($("free-weather"), WEATHERS(), s.weather, (v) => { s.weather = v; UI.renderFree(); });
   };
 

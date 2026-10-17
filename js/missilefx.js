@@ -13,13 +13,13 @@
    * core/flame: exhaust colours · trail: smoke life (s), size, spacing (m), brightness · boom: warhead size · g: turn limit */
   const TYPES = {
     ir: { name: "heat", len: 2.9, r: 0.064, fins: 0.42, can: true, body: 0xe9e9e4, band: 0xd6a51c, nose: 0x2b3440, core: 0xfff4d8, flame: 0xff8a30,
-      trail: { life: 5.5, s0: 1.0, s1: 7, step: 3, gray: 0.92, alpha: 0.5 }, boom: 0.85, g: 38, glow: 0xffb35a, ball: 0xff6a12 },
+      trail: { life: 9, s0: 1.0, s1: 9, step: 3, gray: 0.92, alpha: 0.52 }, boom: 0.85, g: 38, ign: 0.07, boost: 1.0, glow: 0xffb35a, ball: 0xff6a12 },
     radar: { name: "radar", len: 3.65, r: 0.09, fins: 0.5, mid: true, body: 0xc9ccce, band: 0xd6a51c, nose: 0xb9bcbf, core: 0xfff8e8, flame: 0xffa040,
-      trail: { life: 8, s0: 1.3, s1: 10, step: 3.5, gray: 0.95, alpha: 0.55 }, boom: 1.0, g: 30, glow: 0xffc070, ball: 0xff8a1e },
+      trail: { life: 12, s0: 1.3, s1: 13, step: 3.5, gray: 0.95, alpha: 0.56 }, boom: 1.0, g: 30, ign: 0.2, boost: 1.4, glow: 0xffc070, ball: 0xff8a1e },
     heavy: { name: "heavy", len: 4.0, r: 0.19, fins: 0.9, mid: true, body: 0xdedfdb, band: 0x8a5a2b, nose: 0xc9cbc6, core: 0xffe9c0, flame: 0xff7020,
-      trail: { life: 9, s0: 2.2, s1: 16, step: 4, gray: 0.88, alpha: 0.6 }, boom: 1.6, g: 22, glow: 0xff9a40, ball: 0xff5200 },
+      trail: { life: 14, s0: 2.2, s1: 20, step: 4, gray: 0.88, alpha: 0.62 }, boom: 1.6, g: 22, ign: 0.32, boost: 1.8, glow: 0xff9a40, ball: 0xff5200 },
     exp: { name: "experimental", len: 3.2, r: 0.11, fins: 0.5, body: 0x30343a, band: 0x3ad7ff, nose: 0x1a1d22, core: 0xe8fbff, flame: 0x39c8ff,
-      trail: { life: 3.5, s0: 0.8, s1: 5, step: 3, gray: 0.6, alpha: 0.28 }, boom: 1.25, g: 34, glow: 0x5ad8ff, ball: 0x1f9dff, ion: [0.35, 0.8, 1.0] }
+      trail: { life: 4.5, s0: 0.8, s1: 6, step: 3, gray: 0.6, alpha: 0.28 }, boom: 1.25, g: 34, ign: 0.05, boost: 0.8, glow: 0x5ad8ff, ball: 0x1f9dff, ion: [0.35, 0.8, 1.0] }
   };
   MF.TYPES = TYPES;
   /** Which missile this aircraft fires (mixed loadouts alternate, e.g. "AIM-120 + AIM-9X"). */
@@ -94,8 +94,11 @@
   /* ---------------- launch ---------------- */
   MF.launch = function (msl) {
     const T = TYPES[msl.type];
-    // visuals only: the motor's light-up flash plays a moment after release; guidance and thrust are untouched
-    msl.ign = 0.12; msl.lit = false; msl.prevTail = null; msl.spacing = 0; msl.boom = T.boom;
+    // the motor lights a moment after release (rail missiles almost at once, bay/ejected missiles after falling
+    // clear); combat.js holds thrust and guidance until then, so what you see is what flies
+    msl.ign = T.ign; msl.lit = false; msl.prevTail = null; msl.spacing = 0; msl.boom = T.boom;
+    // every missile slightly different: trail width and life, wobble, roll rate, flicker phase
+    msl.var = 0.85 + Math.random() * 0.35; msl.seed = Math.random() * 100; msl.roll = Math.random() * 6.3; msl.rollW = R(1.6);
     // rail release puff
     for (let i = 0; i < 6; i++) RJ.fx.smoke(msl.pos, tv.copy(msl.vel).multiplyScalar(0.85).add(tv2.set(R(6), R(6), R(6))), 1.2, 0.9, 1.4, 0.35);
   };
@@ -105,15 +108,24 @@
     // ignition: a hot white flash, a burst of flame and a ring of exhaust smoke thrown out behind the motor
     for (let i = 0; i < 10; i++) fx.fireP.spawn(p.x, p.y, p.z, msl.vel.x * 0.6 + R(25), msl.vel.y * 0.6 + R(25), msl.vel.z * 0.6 + R(25), 0.12 + Math.random() * 0.12, 2.5 * T.boom, 9 * T.boom, 1, 0.95, 0.85, 1, 0, 2);
     for (let i = 0; i < 14; i++) { const v = tv.set(R(1), R(1), R(1)).normalize().multiplyScalar(14 + Math.random() * 10).addScaledVector(msl.vel, 0.7); fx.smokeP.spawn(p.x, p.y, p.z, v.x, v.y, v.z, 2.2 + Math.random() * 1.5, 1.5 * T.boom, 9 * T.boom, 0.86, 0.86, 0.88, 0.55, 1, 1.4); }
-    fx.light.position.copy(p); fx.light.color.setHex(T.glow); fx.lightLevel = Math.max(fx.lightLevel, 0.6);
+    // the motor's first blast: a hot, narrow jet of flame and smoke thrown straight back, widening as it slows
+    const back = tv2.copy(msl.vel).normalize();
+    for (let i = 0; i < 16; i++) {
+      const sp = 25 + Math.random() * 70, sx = R(0.18), sy = R(0.18), sz = R(0.18);
+      const vx = msl.vel.x * 0.5 - (back.x + sx) * sp, vy = msl.vel.y * 0.5 - (back.y + sy) * sp, vz = msl.vel.z * 0.5 - (back.z + sz) * sp;
+      fx.smokeP.spawn(p.x, p.y, p.z, vx, vy, vz, 1.6 + Math.random() * 1.6, 1.2 * T.boom, (6 + Math.random() * 6) * T.boom, 0.9, 0.9, 0.92, 0.5, 1.2, 1.2);
+      if (i < 8) fx.fireP.spawn(p.x, p.y, p.z, vx * 0.6, vy * 0.6, vz * 0.6, 0.1 + Math.random() * 0.1, 1.5 * T.boom, 5 * T.boom, 1, 0.75, 0.4, 1, 0, 1.5);
+    }
+    fx.light.position.copy(p); fx.light.color.setHex(T.glow); fx.lightLevel = Math.max(fx.lightLevel, 0.9);
     if (msl.owner && msl.owner.isPlayer && RJ.camKick) RJ.camKick(0.25);
+    if (RJ.audio.missileIgnite) RJ.audio.missileIgnite(msl);
   }
 
   /* ---------------- ribbon trail ----------------
    * A continuous camera-facing smoke ribbon through the points the missile actually flew: it widens and drifts
    * with age, breaks up with noise at the edges, is lit by the sun and sky, and has a white-hot glowing head right
    * behind the motor. It outlives the missile and fades out on its own. */
-  const RIB_N = 220, RIBBONS = [];
+  const RIB_N = 480, RIBBONS = [];
   let ribMat = null;
   function ribbonMaterial() {
     if (ribMat) return ribMat;
@@ -236,23 +248,34 @@
 
   /* ---------------- flight ---------------- */
   const WIND = new THREE.Vector3(0.8, 0, 0.6);
+  const _rq = new THREE.Quaternion(), ZAX = new THREE.Vector3(0, 0, 1);
   MF.update = function (msl, dt, turn) {
     const T = TYPES[msl.type], M = msl.mesh, U = M.userData, burning = msl.t < msl.burn;
     if (!msl.lit && msl.t >= msl.ign) ignite(msl);
-    const on = msl.lit && burning, boost = msl.t < msl.ign + 0.6 ? 1.4 : 1; // brighter while boosting off the rail
+    // boost (first ~1.5 s after ignition): long, white-hot plume and thick smoke; then the sustainer: a shorter,
+    // steadier flame and a thinner trail; the plume wavers with smooth noise instead of jumping every frame
+    const age = msl.t - msl.ign, bst = msl.lit ? RJ.smooth(T.boost + 0.6, T.boost, age) : 0;
+    const on = msl.lit && burning, boost = 1 + 0.45 * bst + (age < 0.25 ? 0.5 : 0);
     const cam = RJ.camera, d = cam ? cam.position.distanceTo(msl.pos) : 500;
+    const sd = msl.seed || 0, tt = msl.t * 23 + sd, wob = 0.5 + 0.25 * Math.sin(tt) + 0.15 * Math.sin(tt * 2.31 + 1.7) + 0.1 * Math.sin(tt * 5.7);
     for (const f of U.flames) {
-      const u = f.mat.uniforms; u.time.value += dt; u.power.value = on ? 1 : 0; u.ab.value = on ? 1 : 0; u.kick.value = on && boost > 1 ? 0.6 : 0;
+      const u = f.mat.uniforms; u.time.value += dt; u.power.value = on ? 1 : 0; u.ab.value = on ? 1 : 0; u.kick.value = on ? 0.25 + 0.5 * bst : 0;
       f.flame.visible = on; f.glow.visible = on;
-      // a long, fat, flickering rocket plume (rocket motors run far hotter than a jet's afterburner)
-      const fw = Math.max(f.r * 2.1, 0.2) * (1 + Math.random() * 0.2);
-      f.flame.scale.set(fw, fw, on ? (2.6 + Math.random() * 0.9 + turn * 1.2) * boost * (T.boom > 1.4 ? 1.4 : 1) : 0.01);
-      f.glow.scale.setScalar(on ? 2.4 : 1);
+      // a tapered rocket plume a little longer than the missile's own fins, never a beam: length follows the motor phase
+      const fw = Math.max(f.r * 2.1, 0.2) * (0.92 + 0.16 * wob) * (1 + 0.25 * bst);
+      f.flame.scale.set(fw, fw, on ? (2.3 + 0.7 * wob + turn * 0.9) * boost * (T.boom > 1.4 ? 1.35 : 1) : 0.01);
+      f.glow.scale.setScalar(on ? 2.0 + 0.8 * bst : 1);
       if (f.core) f.core.visible = on && d < 1500;
-      if (f.halo) f.halo.material.opacity = on ? 0.9 : 0;
+      if (f.halo) f.halo.material.opacity = on ? 0.75 + 0.2 * wob : 0;
     }
     // the glow stays a readable dot at any range: grow it with distance, fade it when the motor burns out
-    if (U.halo) { U.halo.visible = on; U.halo.scale.setScalar(Math.max(T.r * 60 + 3, d * 0.03) * boost * (0.85 + Math.random() * 0.3)); }
+    if (U.halo) { U.halo.visible = on; U.halo.scale.setScalar(Math.max(T.r * 60 + 3, d * 0.03) * boost * (0.88 + 0.24 * wob)); }
+    // a slow roll (and a slight coning wobble just after ignition) so the airframe never looks bolted to a rail
+    msl.roll = (msl.roll || 0) + (msl.rollW || 0) * dt;
+    M.quaternion.multiply(_rq.setFromAxisAngle(ZAX, msl.roll));
+    if (age > 0 && age < 0.6) { const c = 0.03 * (1 - age / 0.6); M.rotateX(Math.sin(tt * 0.9) * c); M.rotateY(Math.cos(tt * 0.8) * c); }
+    // the motor lights the missile body and anything close to it (shares the explosion light; explosions win)
+    if (on && d < 900 && RJ.fx.lightLevel < 0.45 * (1 + bst)) { RJ.fx.light.position.copy(msl.pos); RJ.fx.light.color.setHex(T.glow); RJ.fx.lightLevel = 0.45 * (1 + bst); }
     if (!msl.lit) return;
     const fx = RJ.fx, tail = tv.copy(msl.vel).normalize().multiplyScalar(-T.len * 0.55).add(msl.pos);
     const wx = RJ.world.WEATHER[RJ.world.env.weather] || {}, wind = tv3.copy(WIND).multiplyScalar((wx.wind || 6) * 0.6);
@@ -262,13 +285,14 @@
       // big battles: cap the number of ribbon meshes; distant extra missiles fall back to smoke puffs
       if (!msl.rib && !msl.noRib) { if ((RIBBONS.length - (MF.nCon || 0) > 40 && d > 2500) || (RJ.combat.crowd && d > 7000)) msl.noRib = true; else { msl.rib = newRibbon(T); ribbonPush(msl.rib, tail, wind, 1); } }
       const r = msl.rib, prev = msl.prevTail || tail.clone(), seg = prev.distanceTo(tail);
-      const step = T.trail.step * 1.6;
+      const step = Math.max(T.trail.step * 1.6, msl.speed * 0.011); // fast missiles: wider spacing so the trail stays kilometres long
+      const tw = (msl.var || 1) * (0.8 + 0.45 * bst);
       msl.spacing += seg;
       let n = 0;
       while (msl.spacing >= step && n < 40) {
         msl.spacing -= step; n++;
         const k = seg > 0 ? 1 - msl.spacing / seg : 1, p = tv2.copy(prev).lerp(tail, RJ.clamp(k, 0, 1));
-        if (r) ribbonPush(r, p, wind, 1);
+        if (r) ribbonPush(r, p, wind, tw);
         if (n % 3 === 0 || !r) { const tr = T.trail, gr = tr.gray; fx.smokeP.spawn(p.x + R(0.5), p.y + R(0.5), p.z + R(0.5), wind.x + R(1.5), wind.y + 0.8, wind.z + R(1.5), tr.life * 0.7, tr.s0 * 1.4, tr.s1 * 1.1, gr, gr, gr * 1.03, tr.alpha * 0.5, 0.4, 0.25); }
         if (T.ion && Math.random() < 0.9) { const a = msl.t * 30 + n; fx.fireP.spawn(p.x + Math.cos(a) * 0.9, p.y + Math.sin(a) * 0.9, p.z, R(2), R(2), R(2), 0.6 + Math.random() * 0.4, 1.4, 0.3, T.ion[0], T.ion[1], T.ion[2], 1, 0, 0.5); }
       }
@@ -296,10 +320,28 @@
     else if (h) { h.x = p.x; h.y = p.y; h.z = p.z; h.t = RJ.fx.time || 0; }
   };
 
+  /* ---------------- display smoke (airshows): a long white trail per jet, same ribbon as the contrails ---------------- */
+  const SMOKE_T = { trail: { life: 12, s0: 1.8, s1: 18, step: 9, gray: 0.97, alpha: 0.55 } };
+  MF.smoke = function (ac, p) {
+    let r = ac._srib;
+    if (!p) { if (r) { r.dead = true; ac._srib = null; } return; }
+    if (!r) { r = ac._srib = newRibbon(SMOKE_T, true); ribbonPush(r, p, CWIND, 1); ribbonPush(r, p, CWIND, 1); }
+    const h = r.pts[0], q = r.pts[1];
+    if (q && (p.x - q.x) ** 2 + (p.y - q.y) ** 2 + (p.z - q.z) ** 2 > SMOKE_T.trail.step ** 2) ribbonPush(r, p, CWIND, 1);
+    else if (h) { h.x = p.x; h.y = p.y; h.z = p.z; h.t = RJ.fx.time || 0; }
+  };
+
   /* ---------------- impact ---------------- */
   MF.impact = function (msl, hit) {
-    const T = TYPES[msl.type] || TYPES.radar, s = T.boom * (hit ? 1.25 : 0.9);
-    MF.explosion(msl.pos, s, hit ? hit.vel : msl.vel.clone().multiplyScalar(0.2), T);
+    const T = TYPES[msl.type] || TYPES.radar, s = T.boom * (hit ? 1.25 : 0.9), vel = hit ? hit.vel : msl.vel.clone().multiplyScalar(0.2);
+    MF.explosion(msl.pos, s, vel, T);
+    const cam = RJ.camera, near = !cam || cam.position.distanceTo(msl.pos) < 7000;
+    if (!near) return;
+    // a real 3D fireball and a pressure shell even when the target survives; torn panels fly off it
+    MF.fireball(msl.pos, 6.5 * s, 0.9, vel, 1.1, hit || null);
+    MF.shockRing(msl.pos, 16 * s);
+    if (hit) MF.debris(msl.pos, hit.vel, 3 + Math.round(s * 2), true);
+    else if (msl.pos.y < RJ.world.ground(msl.pos.x, msl.pos.z) + 3) RJ.fx.dust(msl.pos, 0.9 * s);
   };
   /** Layered blast: white flash → expanding fireball → sparks and flaming debris → dark rolling smoke, plus a
    * shockwave (refraction ring + bright shell), a light that lights nearby aircraft and terrain, and camera shake. */

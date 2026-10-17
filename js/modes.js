@@ -171,6 +171,8 @@
       this.player.throttle = onDeck ? 0 : 0.8;
       if (this.carrierStart) this.cat = { state: "hook", t: 0, x: pos.x, z: pos.z, yaw };
       RJ.game.allowBombs = (this.player.spec.bombs || 0) > 0;
+      // living airspace (free roam): AI traffic, airshows, missile combat and the wanted level
+      this.armed = !!(RJ.airspace && RJ.airspace.start(this));
       if (course) {
         const pr = this.player.vis.dims;
         this.ringR = Math.max(26, pr.span * 0.75 + 14);
@@ -258,6 +260,7 @@
       this.sessionT += dt;
       if (pl.state === "flying") this.tdSink = Math.max(0, -pl.vel.y);
       this.carrierOps(dt);
+      if (this.armed) RJ.airspace.update(dt, pl);
       if (pl.alive) {
         if (pl.agl < 60 && pl.speed > 100) this.lowTime += dt;
         M.trackChallenges(pl, this);
@@ -373,9 +376,12 @@
       if (pl.mach > 0.85 && pl.mach < 1) return "Approaching the sound barrier. Keep accelerating to break Mach 1.";
       if (this.o.activity === "lowlevel") return "Stay below 60 m above the ground. Trees and ridgelines are solid.";
       if (RJ.game.allowBombs && pl.bombs > 0) return `Hold ${RJ.keyLabel(RJ.settings.keys.guns)} to drop bombs. The circle marks the impact point.`;
+      const wl = this.armed ? RJ.airspace.wanted.level : 0;
+      if (wl) return RJ.airspace.wanted.contact ? `Wanted ${"★".repeat(wl)}: military jets are hunting you. Fight, or break contact (get far away and stop shooting) to lose them.` : `Searching for you ${"★".repeat(wl)}. Stay out of sight and the stars will fade.`;
+      if (this.armed) return `Live airspace: ${RJ.keyLabel(RJ.settings.keys.target)} picks the aircraft nearest your nose, ${RJ.keyLabel(RJ.settings.keys.missile)} fires a missile once locked. Attacking traffic brings the military.`;
       return "Explore. Climb for speed records or dive into the valleys.";
     }
-    dispose() { (this.ringMeshes || []).forEach((m) => RJ.scene.remove(m)); }
+    dispose() { (this.ringMeshes || []).forEach((m) => RJ.scene.remove(m)); if (RJ.airspace) RJ.airspace.stop(); }
   }
   M.FreeFlight = FreeFlight;
 

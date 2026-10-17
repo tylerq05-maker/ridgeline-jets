@@ -184,6 +184,13 @@ h2.title { font-family: var(--font-display); font-weight: 400; font-size: clamp(
 #btn-talk[data-state="error"] { opacity: .55; }
 @keyframes rj-pulse { 50% { box-shadow: 0 0 0 6px rgba(255,90,79,.25); } }
 #rj-caption { position: fixed; left: 50%; bottom: 17%; transform: translate(-50%, 8px); z-index: 30; max-width: min(640px, calc(100vw - 32px)); padding: 9px 18px; border-radius: 4px; background: rgba(10,15,21,.62); border: 1px solid rgba(141,255,176,.25); color: #dff8e7; font-family: var(--font-mono); font-size: 15px; letter-spacing: .04em; text-align: center; opacity: 0; pointer-events: none; transition: opacity .6s, transform .6s; }
+#wanted { position: fixed; top: 62px; right: 18px; z-index: 6; display: flex; gap: 3px; pointer-events: none; font-size: 26px; line-height: 1; filter: drop-shadow(0 1px 2px rgba(0,0,0,.8)); }
+#wanted[hidden] { display: none; }
+#wanted span { color: rgba(255,255,255,.18); -webkit-text-stroke: 1.5px rgba(0,0,0,.65); transition: color .25s, transform .25s; }
+#wanted span.on { color: #f4f4f4; }
+#wanted.up span.on { color: #ffd34d; transform: scale(1.15); }
+#wanted.blink span.on { color: rgba(255,255,255,.35); }
+@media (max-width: 700px) { #wanted { top: 54px; right: 10px; font-size: 20px; } }
 #rj-caption.on { opacity: 1; transform: translate(-50%, 0); }
 .mdcode { font-family: var(--font-mono); font-size: 11px; line-height: 1.35; resize: vertical; word-break: break-all; margin: 4px 0 6px; }
 .md-h { margin-top: 18px; }
@@ -536,6 +543,12 @@ body.is-touch #lever { top: 22%; }
       <div class="chips" id="free-flow"></div>
     </section>
     <section class="group">
+      <h3>Living airspace <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">· AI traffic, airshows and the wanted level (free roam)</span></h3>
+      <div class="chips" id="free-traffic"></div>
+      <h3 style="margin-top:14px">Military response <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">· how many jets each wanted star sends</span></h3>
+      <div class="chips" id="free-response"></div>
+    </section>
+    <section class="group">
       <h3>Weather</h3>
       <div class="chips" id="free-weather"></div>
     </section>
@@ -841,6 +854,7 @@ body.is-touch #lever { top: 22%; }
 <script src="js/flight.js"></script>
 <script src="js/combat.js"></script>
 <script src="js/missilefx.js"></script>
+<script src="js/airspace.js"></script>
 <script src="js/hud.js"></script>
 <script src="js/modes.js"></script>
 <script src="js/missions.js"></script>

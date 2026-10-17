@@ -143,13 +143,14 @@
     // contacts
     for (const o of s.others || []) {
       if (o === pl || !o.alive) continue;
-      const enemy = o.team !== pl.team;
+      if (o.neutral && o.form) continue; // an airshow formation gets one bracket, on its leader
+      const neutral = !!o.neutral, enemy = o.team !== pl.team && !neutral;
       const d = o.pos.distanceTo(pl.pos);
-      if (RJ.combat.crowd && d > (enemy ? 6000 : 2500)) continue; // big battles: bracket the nearby fight, not all 100 jets
+      if (RJ.combat.crowd && d > (enemy ? 9000 : neutral ? 4000 : 2500)) continue; // big battles: bracket the nearby fight, not all 100 jets
       const p = proj(o.pos, cam);
       if (!p.on) continue;
       if (o === pl.target) continue;
-      x.strokeStyle = enemy ? RED : BLUE; x.fillStyle = x.strokeStyle;
+      x.strokeStyle = enemy ? RED : neutral ? "rgba(225,232,240,0.75)" : BLUE; x.fillStyle = x.strokeStyle;
       const r = RJ.clamp(4000 / d, 6, 16);
       x.beginPath();
       x.moveTo(p.x - r, p.y - r + 4); x.lineTo(p.x - r, p.y - r); x.lineTo(p.x - r + 4, p.y - r);
@@ -405,7 +406,7 @@
       else x.fillRect(ox + px - size, oy + py - size, size * 2, size * 2);
       x.globalAlpha = 1;
     };
-    for (const o of s.others || []) { if (o === pl || !o.alive) continue; plot(o.pos, o.team === pl.team ? BLUE : RED, o === pl.target ? 4 : 3, o.team === pl.team ? "sq" : "tri"); }
+    for (const o of s.others || []) { if (o === pl || !o.alive) continue; plot(o.pos, o.neutral ? "#c9d1da" : o.team === pl.team ? BLUE : RED, o === pl.target ? 4 : o.neutral ? 2 : 3, o.team === pl.team || o.neutral ? "sq" : "tri"); }
     for (const m of pl.incoming) plot(m.pos, "#ffffff", 2, "sq");
     if (RJ.atlas && RJ.atlas.built) for (const mk of RJ.atlas.markers()) {
       const d = Math.hypot(mk.pos.x - pl.pos.x, mk.pos.z - pl.pos.z);

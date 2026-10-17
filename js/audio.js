@@ -356,6 +356,7 @@
     if (AU.cancelGreeting) AU.cancelGreeting();
     if (AU.engine) { AU.engine.stop(); AU.engine = null; }
     if (AU.pool) for (const s of AU.pool) { s.ac = null; s.v.silence(); }
+    if (AU.mv) for (const v of AU.mv) { P(v.g.gain, 0, 0.1); P(v.rg.gain, 0, 0.1); v.m = null; }
     AU.setGun(false); AU.tone(null); AU.warn(null);
     const E = AU.env;
     if (E) for (const k of ["windLo", "windHi", "whistle", "roll", "cabin", "fans"]) P(E[k].g.gain, 0, 0.15);
@@ -447,6 +448,60 @@
       slot.v.apply(po, { N: n, ab: o.alive && po.ab ? o.abLevel || 0 : 0, thr: o.throttle || 0, gain: _h.gain, air: _h.air, front: _h.front, pan: _h.pan, dop: st.dop, interior: false });
     }
     if (write) environment(pl, inCockpit, camV, p, N);
+    missileVoices(cam, camV, dt, write);
+  };
+
+  /* ---------------- missiles: motor roar on the two nearest burning missiles (distance-filtered, panned,
+   * Doppler-shifted), a crack when a motor lights, and a tearing whoosh when one passes close by ---------------- */
+  const _mr = new THREE.Vector3(), _mq = new THREE.Vector3();
+  function panOf(pos, cam) { _mr.subVectors(pos, cam.position); const d = _mr.length() || 1; _mq.set(1, 0, 0).applyQuaternion(cam.quaternion); return RJ.clamp(_mr.dot(_mq) / d, -1, 1) * 0.85; }
+  function missileVoice() {
+    const ctx = AU.ctx, src = ctx.createBufferSource(); src.buffer = AU.white; src.loop = true;
+    const bp = mkFilt(ctx, "bandpass", 900, 0.7), lp = mkFilt(ctx, "lowpass", 4000, 0.5), g = mkGain(ctx, 0);
+    const pn = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
+    src.connect(bp).connect(lp).connect(g); if (pn) g.connect(pn).connect(AU.sfxBus); else g.connect(AU.sfxBus);
+    const rum = mkOsc(ctx, "sawtooth", 46), rg = mkGain(ctx, 0); rum.connect(mkFilt(ctx, "lowpass", 160, 0.7)).connect(rg).connect(pn || AU.sfxBus);
+    src.start(); return { src, bp, lp, g, pn, rum, rg, m: null };
+  }
+  function missileVoices(cam, camV, dt, write) {
+    const C = RJ.combat; if (!C || !AU.white) return;
+    AU.mv = AU.mv || [missileVoice(), missileVoice()];
+    const live = [];
+    for (const m of C.missiles) {
+      const d = m.pos.distanceTo(cam.position);
+      // close pass: the whoosh plays as the distance stops shrinking
+      if (m._ad != null && d > m._ad && m._ad < 160 && !m._fly) { m._fly = true; AU.missileFlyby(m._ad, panOf(m.pos, cam)); if (m._ad < 45 && RJ.camKick) RJ.camKick(0.25); }
+      m._ad = d;
+      if (m.lit && m.t < m.burn && d < 3500) live.push({ m, d });
+    }
+    live.sort((a, b) => a.d - b.d);
+    if (!write) return;
+    AU.mv.forEach((v, i) => {
+      const c = live[i];
+      if (!c) { P(v.g.gain, 0, 0.12); P(v.rg.gain, 0, 0.12); v.m = null; return; }
+      const m = c.m, d = c.d, k = 1 / (1 + d / 140), muf = AU._inPit ? 0.4 : 1;
+      _mr.subVectors(cam.position, m.pos).normalize();
+      const sp = RJ.soundSpeed ? RJ.soundSpeed(m.pos.y) : 340, dop = RJ.clamp((sp - camV.dot(_mr)) / Math.max(60, sp - m.vel.dot(_mr)), 0.5, 2);
+      P(v.g.gain, 0.42 * k * muf, 0.06); P(v.rg.gain, 0.16 * k * muf, 0.06);
+      P(v.bp.frequency, (700 + 500 * (m.var || 1)) * dop, 0.05);
+      P(v.lp.frequency, Math.max(500, 9000 / (1 + d / 600)) * (AU._inPit ? 0.15 : 1), 0.1);
+      v.src.playbackRate.setTargetAtTime(RJ.clamp(dop, 0.6, 1.6), AU.ctx.currentTime, 0.05);
+      if (v.pn) P(v.pn.pan, panOf(m.pos, cam), 0.05);
+      v.m = m;
+    });
+  }
+  AU.missileIgnite = function (msl) {
+    if (!AU.ctx || !RJ.camera) return;
+    const cam = RJ.camera, d = msl.pos.distanceTo(cam.position), g = 1 / (1 + d / 200);
+    if (g < 0.03 || (msl.owner && msl.owner.isPlayer && d < 80)) return; // the player's own launch has its own cue
+    const delay = Math.min(2.5, d / 340), pan = panOf(msl.pos, cam);
+    burst({ f0: 3200 / (1 + d / 1500), f1: 260, dur: 1.3, gain: 0.55 * g, attack: 0.008, pan, delay });
+    burst({ brown: true, f0: 700, f1: 90, dur: 1.1, gain: 0.45 * g, pan, delay });
+  };
+  AU.missileFlyby = function (d, pan) {
+    const g = RJ.clamp(1.3 / (1 + d / 40), 0.08, 1) * (AU._inPit ? 0.5 : 1);
+    burst({ f0: 5200, f1: 380, dur: 0.9, gain: 0.55 * g, attack: 0.05, pan, type: "bandpass", q: 0.8 });
+    burst({ brown: true, f0: 900, f1: 120, dur: 1.2, gain: 0.5 * g, attack: 0.04, pan });
   };
 
   function environment(pl, inCockpit, camV, p, N) {
@@ -611,7 +666,12 @@
     burst({ brown: true, f0: 1200, f1: 60, dur: 1.6 * Math.sqrt(big), gain: Math.min(1.2, 0.9 * g), delay });
     thump(70, 0.9, Math.min(0.9, 0.7 * g), delay);
   };
-  AU.missileLaunch = () => { burst({ f0: 3500, f1: 400, dur: 2.2, gain: 0.45, attack: 0.02 }); burst({ brown: true, f0: 600, f1: 120, dur: 1.5, gain: 0.5 }); };
+  AU.missileLaunch = () => {
+    // release clunk, then the motor's crack and a roar that tears away into the distance
+    thump(160, 0.12, 0.35); burst({ f0: 1800, dur: 0.06, gain: 0.25, type: "bandpass", q: 4 });
+    burst({ f0: 4200, f1: 400, dur: 2.4, gain: 0.5, attack: 0.015, delay: 0.07 }); burst({ brown: true, f0: 650, f1: 90, dur: 1.8, gain: 0.6, delay: 0.07 });
+    thump(55, 0.6, 0.45, 0.07);
+  };
   AU.flare = () => { burst({ f0: 2500, f1: 800, dur: 0.25, gain: 0.25, type: "bandpass", q: 1 }); };
   AU.hit = () => { burst({ f0: 2200, dur: 0.12, gain: 0.35, type: "bandpass", q: 3 }); thump(140, 0.15, 0.3); };
   AU.hitMarker = () => { burst({ f0: 4200, dur: 0.05, gain: 0.12, type: "bandpass", q: 6, bus: AU.uiBus }); };

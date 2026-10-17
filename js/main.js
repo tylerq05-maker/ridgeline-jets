@@ -270,6 +270,15 @@
         if (k > 0.02) P.heat.push([(s.x + 1) / 2, (s.y + 1) / 2, Math.max(rad, 0.01), k]);
       }
     }
+    // rocket motors close to the camera shimmer the air behind them too
+    for (const m of RJ.combat.missiles) {
+      if (P.heat.length >= 4 || !m.lit || m.t > m.burn) continue;
+      const dist = m.pos.distanceTo(camera.position);
+      if (dist > 350) continue;
+      const wp = tv.copy(m.vel).normalize().multiplyScalar(-4).add(m.pos), s = tv2.copy(wp).project(camera);
+      if (s.z > 1 || Math.abs(s.x) > 1.1 || Math.abs(s.y) > 1.1) continue;
+      P.heat.push([(s.x + 1) / 2, (s.y + 1) / 2, Math.max((2.5 / dist) / (2 * tanH), 0.008), RJ.clamp(60 / dist, 0.1, 0.9)]);
+    }
     // sun on screen for shafts and lens flare (fades near the frame edge and when the sun is low or gone)
     const W = RJ.world, sd = W.sunDir;
     P.sun = null;
@@ -590,7 +599,7 @@
       if (I.action("hyper")) { if (pl.spec.flight.model === "space") RJ.vehicles.toggleHyper(pl); else RJ.ui.flash("HYPERSONIC: STAR WARS CRAFT ONLY", null, 0.9); }
       if (I.action("autopilot")) RJ.nav.toggleAuto(pl);
       if (I.action("gear")) { pl.toggleGear(); if (!pl.spec.flight.model) RJ.ui.flash(pl.gearDown ? "GEAR DOWN" : "GEAR UP", null, 0.8); }
-      if (mode.kind === "fight") {
+      if (mode.kind === "fight" || mode.armed) { // Free Flight with living airspace: missiles and targeting work too
         if (mode.command) for (const [k, o] of [["wingAttack", "attack"], ["wingCover", "cover"], ["wingForm", "form"], ["wingDefend", "defend"]]) if (I.action(k)) mode.command(o);
         if (I.action("target")) RJ.combat.cycleTarget(pl);
         if (!pl.target || !pl.target.alive) RJ.combat.autoTarget(pl);
