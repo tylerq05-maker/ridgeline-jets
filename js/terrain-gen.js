@@ -98,19 +98,19 @@
     // Mount Everest: summit position (m) and the radius of the Himalayan range around it
     const EVX = 52000, EVZ = -48000, EVR = 46000;
     // Real elevation for the Everest region (js/dem-everest.js): [outer 94 km @ 120 m, inner 32 km @ 40 m], set by world.js
-    let DEM = null;
-    function setDEM(g) { DEM = g && g.length ? g : null; }
+    let DEM = null, SFD = null;
+    function setDEM(g, sf) { DEM = g && g.length ? g : null; SFD = sf && sf.length ? sf : null; }
     const cr = (a, b, c, d, t) => b + 0.5 * t * (c - a + t * (2 * a - 5 * b + 4 * c - d + t * (3 * (b - c) + d - a)));
     const DS = [0, 0]; // slope (rise/run) of the last demGrid sample
     /** Catmull-Rom sample of one DEM grid at an offset (m) from the summit; NaN outside it. */
     function demGrid(G, ox, oz) {
-      const fx = (ox + G.half) / G.cell, fz = (oz + G.half) / G.cell, i = Math.floor(fx), j = Math.floor(fz), n = G.n;
+      const fx = (ox - (G.ox || 0) + G.half) / G.cell, fz = (oz - (G.oz || 0) + G.half) / G.cell, i = Math.floor(fx), j = Math.floor(fz), n = G.n;
       if (i < 1 || j < 1 || i > n - 3 || j > n - 3) return NaN;
       const tx = fx - i, tz = fz - j, d = G.data, r = [0, 0, 0, 0];
       for (let k = 0; k < 4; k++) { const o = (j - 1 + k) * n + i - 1; r[k] = cr(d[o], d[o + 1], d[o + 2], d[o + 3], tx); }
       const o = j * n + i;
       DS[0] = (d[o + 1] - d[o] + d[o + n + 1] - d[o + n]) * 0.125 / G.cell; DS[1] = (d[o + n] - d[o] + d[o + n + 1] - d[o + 1]) * 0.125 / G.cell;
-      return cr(r[0], r[1], r[2], r[3], tz) * 0.25;
+      return cr(r[0], r[1], r[2], r[3], tz) * 0.25 - (G.off || 0);
     }
     /** Real terrain height around Everest plus sub-cell rock detail; NaN outside the data. */
     function demHeight(x, z, X, Z) {
@@ -222,6 +222,50 @@
     const CP_A = [0.4848, 0.8746], CP_C = [0.8746, -0.4848];
     NY.inCentralPark = (e, n) => { const al = e * CP_A[0] + n * CP_A[1], ac = e * CP_C[0] + n * CP_C[1]; return al > 25 * 80.4 - 4 && al < 76 * 80.4 + 4 && ac > -846 && ac < 6; };
     NY.inProspect = (e, n) => { const [pe, pn] = NY.toLocal(40.6602, -73.9690); const a = (e - pe) / 900, b = (n - pn) / 1150; return a * a + b * b < 1; };
+    /* ---------------- San Francisco Bay (real topography + bathymetry, js/dem-sf.js) ---------------- */
+    const SF = { x: -72000, z: 104000, R: 23000 };
+    /** Finest available SF grid at a world point (each finer grid feathers into the coarser one); NaN outside. */
+    function sfHeight(x, z) {
+      const ox = x - SF.x, oz = z - SF.z;
+      let h = demGrid(SFD[0], ox, oz);
+      if (h !== h) return NaN;
+      for (let k = 1; k < SFD.length; k++) {
+        const G = SFD[k], e = Math.max(Math.abs(ox - G.ox), Math.abs(oz - G.oz));
+        if (e > G.half - G.cell * 2) continue;
+        const hk = demGrid(G, ox, oz);
+        if (hk === hk) h = lerp(h, hk, smooth(G.half - G.cell * 2, G.half - G.cell * 12, e));
+      }
+      return h;
+    }
+    /** City / park / headland masks from real coordinates (lat, lon). */
+    function applySF(o, x, z) {
+      const dS = Math.hypot(x - SF.x, z - SF.z);
+      if (!SFD || dS >= SF.R) return;
+      const hs = sfHeight(x, z); if (hs !== hs) return;
+      const m = smooth(SF.R, SF.R - 4000, dS);
+      // beyond the data's edge the land slopes away into the procedural sea
+      const hh = m < 1 ? Math.min(hs, lerp(-60, hs, m)) : hs;
+      o.h = lerp(o.h, hh, m);
+      o.land = lerp(o.land, smooth(-0.5, 1.0, hh), m);
+      if (m > 0.05) o.wl = -1e9;
+      o.mtn *= 1 - m; o.canyon *= 1 - m; o.snowZ *= 1 - m; o.ash *= 1 - m; o.him *= 1 - m;
+      const lat = 37.815 + (SF.z - z) / 111000, lon = -122.44 + (x - SF.x) / 87979.5;
+      let urban = 0, forest = 0, dry = 0.3;
+      if (hh > 1.5) {
+        const sfCity = lat < 37.811 && lon > -122.515 && lon < -122.355 && lat > 37.70;
+        const presidio = lat > 37.787 && lat < 37.812 && lon > -122.485 && lon < -122.447;
+        const ggPark = lat > 37.764 && lat < 37.774 && lon > -122.511 && lon < -122.453;
+        if (sfCity && !presidio && !ggPark && hh < 230) urban = 1;
+        if (presidio || ggPark) forest = 0.75;
+        if (lon > -122.335 && hh < 90) urban = Math.max(urban, 0.9);                         // Oakland, Berkeley, Alameda
+        if (lat > 37.849 && lat < 37.868 && lon > -122.49 && lon < -122.474 && hh < 70) urban = 0.7; // Sausalito
+        if (lat > 37.85 && lat < 37.875 && lon > -122.445 && lon < -122.415) forest = 0.65;   // Angel Island
+        if (lat > 37.815 && lon < -122.455) dry = 0.75;                                       // Marin Headlands: golden grass
+      }
+      o.urban = Math.max(o.urban * (1 - m), urban * m);
+      o.forest = lerp(o.forest, forest, m); o.dry = lerp(o.dry, dry, m);
+      o.sf = m;
+    }
     function applyNYC(o, x, z) {
       const dn = Math.hypot(x - NY.cx, z - NY.cz);
       if (dn >= NY.R + 48000) return;
@@ -479,8 +523,9 @@
         if (m > 0) { h = lerp(h, AB.elev, m); if (m > 0.2) wl = -1e9; }
       }
       const o = { h, land, mtn: Math.max(mtn, him), dry: dry * (1 - him) * (1 - lush) * (1 - snowZ), canyon, cv, wl,
-        forest: Math.max(forest * (1 - him) * (1 - ash), lush * 0.75, snowZ * smooth(1500, 700, h) * 0.8), lakeSite: 0, him, glac, snowZ, ash, urban: 0, nyc: 0 };
+        forest: Math.max(forest * (1 - him) * (1 - ash), lush * 0.75, snowZ * smooth(1500, 700, h) * 0.8), lakeSite: 0, him, glac, snowZ, ash, urban: 0, nyc: 0, sf: 0 };
       applyNYC(o, x, z);
+      applySF(o, x, z);
       if (SITES.length) applySites(o, x, z);
       return o;
     }
@@ -556,7 +601,7 @@
       }
       // riverbanks, beaches, seabed
       if (f.wl > -1e8 && h - f.wl < 8) mix3(out, out, C.bank, smooth(8, 1, h - f.wl) * 0.8);
-      if (h < 22) mix3(out, out, f.nyc > 0.5 ? C.riprap : C.sand, smooth(22, 5, h) * (1 - f.dry * 0.3)); // NYC: bulkheads and riprap, not beaches
+      if (h < 22) mix3(out, out, f.nyc > 0.5 || (f.sf > 0.5 && f.urban > 0.3) ? C.riprap : C.sand, smooth(22, 5, h) * (1 - f.dry * 0.3)); // NYC: bulkheads and riprap, not beaches
       if (h < 1.5) mix3(out, out, C.wet, smooth(1.5, -1, h) * 0.6);
       if (h < -2) mix3(out, out, C.seabed, smooth(-2, -30, h));
       if (f.urban > 0.01) { mix3(T1, C.urbanA, C.urbanB, clamp(0.5 + v2 * 0.7, 0, 1)); mix3(out, out, T1, f.urban); }
@@ -784,7 +829,7 @@
       return { far: true, ring: req.ring || 1, cx: req.cx, cz: req.cz, pos, nor, col, index, reqId: req.reqId };
     }
 
-    return { everest: { x: EVX, z: EVZ, h: 8848.86, r: EVR, lat: 27.98806, lon: 86.92528, mN: 110900, mE: 98300.6 }, setDEM, zones: ZONES, nyc: NY, fields, height, setAirbase, airbaseMask, setCastle, castleMask, setSites, siteMask, clearMask, buildChunk, buildFar, smooth, fbm, N1, N2, N3, mulberry32 };
+    return { everest: { x: EVX, z: EVZ, h: 8848.86, r: EVR, lat: 27.98806, lon: 86.92528, mN: 110900, mE: 98300.6 }, sfZone: SF, sfHeight: (x, z) => (SFD ? sfHeight(x, z) : NaN), setDEM, zones: ZONES, nyc: NY, fields, height, setAirbase, airbaseMask, setCastle, castleMask, setSites, siteMask, clearMask, buildChunk, buildFar, smooth, fbm, N1, N2, N3, mulberry32 };
   }
   root.makeTerrainGen = makeTerrainGen;
 })(window.RJ = window.RJ || {});

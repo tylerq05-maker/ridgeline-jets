@@ -13,7 +13,16 @@
       return D.grids.map((g) => { const b = atob(g.b64), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return { n: g.n, half: g.half, cell: g.cell, data: new Uint16Array(u.buffer) }; });
     } catch (e) { console.warn("Everest elevation data unreadable; using the procedural range.", e); return null; }
   })();
-  if (W.dem) { gen.setDEM(W.dem); RJ.DEM_EVEREST = null; }
+  // San Francisco Bay (js/dem-sf.js): same encoding plus each grid's offset from the zone centre
+  W.demSF = (() => {
+    const D = RJ.DEM_SF; if (!D) return null;
+    try {
+      return D.grids.map((g) => { const b = atob(g.b64), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return { n: g.n, half: g.half, cell: g.cell, ox: g.ox, oz: g.oz, off: g.off, data: new Uint16Array(u.buffer) }; });
+    } catch (e) { console.warn("San Francisco elevation data unreadable.", e); return null; }
+  })();
+  if (W.demSF) W.sfGeo = { lat: RJ.DEM_SF.lat, lon: RJ.DEM_SF.lon, mN: RJ.DEM_SF.mN, mE: RJ.DEM_SF.mE };
+  RJ.DEM_SF = null;
+  if (W.dem || W.demSF) { gen.setDEM(W.dem, W.demSF); RJ.DEM_EVEREST = null; }
   W.everest = gen.everest;
   W.fields = (x, z) => gen.fields(x, z);
   W.heightFn = (x, z) => gen.height(x, z);
@@ -151,6 +160,22 @@
     if (W.env) W.setEnvironment(W.env);
   };
 
+  /* ======================= GIANT SHADOW CASTERS ======================= */
+  // Structures far larger than the sun's shadow map (the Ye Monument) cast onto the terrain through a few capsules
+  // ray-tested per pixel toward the sun, with a penumbra that widens with distance (the sun's 0.53° disc).
+  W.giant = { a: { value: [] }, b: { value: [] }, n: { value: 0 }, on: { value: 0 }, sun: { value: new THREE.Vector3(0, 1, 0) } };
+  for (let i = 0; i < 6; i++) { W.giant.a.value.push(new THREE.Vector4()); W.giant.b.value.push(new THREE.Vector4()); }
+  const GIANT_SHADOW = [
+    "if (rjGOn > 0.5) { float gsh = 1.0; vec3 ro = vWP, rd = normalize(rjGSun);",
+    "  for (int i = 0; i < 6; i++) { if (float(i) >= rjGN) break;",
+    "    vec3 pa = rjGA[i].xyz, ba = rjGB[i].xyz - pa, w0 = ro - pa; float r = rjGA[i].w;",
+    "    float b = dot(rd, ba), c = dot(ba, ba), d = dot(rd, w0), e = dot(ba, w0), den = max(c - b * b, 1e-3);",
+    "    float sg = clamp((e - b * d) / den, 0.0, 1.0); vec3 q = pa + ba * sg; float t = dot(q - ro, rd);",
+    "    if (t > 0.0) { float dist = length(ro + rd * t - q); float pen = 0.0047 * t + 4.0; gsh = min(gsh, smoothstep(r - pen, r + pen, dist)); } }",
+    "  gsh = mix(1.0, gsh, smoothstep(-0.02, 0.06, rjGSun.y));",
+    "  reflectedLight.directDiffuse *= gsh; reflectedLight.directSpecular *= gsh; }"
+  ].join("\n");
+
   /* ======================= TERRAIN MATERIALS ======================= */
   function initTerrainMaterials() {
     // Physically based terrain: baked sun visibility + AO, procedural micro detail, bump, cloud shadows
@@ -198,7 +223,9 @@
           "  rjB.xz += vec2(rjVN(vec2(vWP.x * 0.05 + vWP.z * 0.02, vWP.z * 0.35)) - rjVN(vec2(vWP.x * 0.05 + vWP.z * 0.02 + 0.2, vWP.z * 0.35))) * 1.4 * rjSnowV * rjFade;",
           "  normal = normalize(normal + (viewMatrix * vec4(rjB, 0.0)).xyz); }"
         ].join("\n"))
-        .replace("#include <lights_fragment_end>", "#include <lights_fragment_end>\nreflectedLight.directDiffuse *= vShade.x; reflectedLight.directSpecular *= vShade.x; reflectedLight.indirectDiffuse *= vShade.y;");
+        .replace("#include <lights_fragment_end>", "#include <lights_fragment_end>\nreflectedLight.directDiffuse *= vShade.x; reflectedLight.directSpecular *= vShade.x; reflectedLight.indirectDiffuse *= vShade.y;\n" + GIANT_SHADOW);
+      Object.assign(shader.uniforms, { rjGA: W.giant.a, rjGB: W.giant.b, rjGN: W.giant.n, rjGOn: W.giant.on, rjGSun: W.giant.sun });
+      shader.fragmentShader = shader.fragmentShader.replace("#include <common>", "#include <common>\nuniform vec4 rjGA[6]; uniform vec4 rjGB[6]; uniform float rjGN; uniform float rjGOn; uniform vec3 rjGSun;");
       W.addCloudShadows(shader, "vWP");
     };
     // Low quality: cheap Lambert with baked shading folded into the albedo
@@ -267,7 +294,7 @@
         "var makeTerrainGen = " + RJ.makeTerrainGen.toString() + ";",
         "var gen = makeTerrainGen();",
         "self.onmessage = function (e) {",
-        "  var r = e.data; if (r.type === 'dem') { gen.setDEM(r.grids); return; }",
+        "  var r = e.data; if (r.type === 'dem') { gen.setDEM(r.grids, r.sf); return; }",
         "  gen.setAirbase(r.ab); gen.setSites(r.sites || []);",
         "  if (r.type === 'far') { var fo = gen.buildFar(r); self.postMessage(fo, [fo.pos.buffer, fo.nor.buffer, fo.col.buffer, fo.index.buffer]); return; }",
         "  var o = gen.buildChunk(r); o.reqId = r.reqId;",
@@ -280,7 +307,7 @@
       const n = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 4) - 1));
       for (let i = 0; i < n; i++) {
         const slot = { w: new Worker(url), busy: 0 };
-        if (W.dem) slot.w.postMessage({ type: "dem", grids: W.dem });
+        if (W.dem || W.demSF) slot.w.postMessage({ type: "dem", grids: W.dem, sf: W.demSF });
         slot.w.onmessage = (e) => { slot.busy = Math.max(0, slot.busy - 1); if (e.data.far) applyFar(e.data); else onChunkData(e.data); };
         slot.w.onerror = (e) => { console.warn("Terrain worker failed; building on the main thread instead.", e.message || e); workersFailed(); };
         W.workers.push(slot);
@@ -556,6 +583,8 @@
   };
   W.findRegion = function (type) {
     if (type === "nyc" && RJ.nyc) { const s = RJ.nyc.spawn(); return { x: s.x, z: s.z, yaw: s.yaw, alt: s.alt }; }
+    if (type === "sf" && RJ.sf) return RJ.sf.spawn();
+    if (type === "ye" && RJ.ye && RJ.ye.spawn()) return RJ.ye.spawn();
     if (regionCache[type]) return regionCache[type];
     const test = REGION_TEST[type] || REGION_TEST.mountains;
     const step = type === "canyon" ? 600 : 1500;
