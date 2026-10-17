@@ -206,7 +206,10 @@
   B.everest = function () {
     const E = W().everest, grp = new THREE.Group();
     // base camp ~5,360 m on gentle ground south-west of the summit
-    const bc = flatSpot(E.x, E.z, 8000, 13000, 5000, 5700, (x, z) => Math.abs(Math.atan2(z - E.z, x - E.x) - 2.3) * 0.02) || { x: E.x - 9000, z: E.z + 6000, h: G(E.x - 9000, E.z + 6000) };
+    // real South Base Camp (28.0043 N, 86.8571 E, Khumbu Glacier) when the real elevation data is loaded
+    const real = W().dem && E.mE, bx = real ? E.x + (86.8571 - E.lon) * E.mE : 0, bz = real ? E.z - (28.0043 - E.lat) * E.mN + 40 : 0;
+    const bc = (real && (flatSpot(bx, bz, 0, 700, 5000, 5700) || { x: bx, z: bz, h: G(bx, bz) })) ||
+      flatSpot(E.x, E.z, 8000, 13000, 5000, 5700, (x, z) => Math.abs(Math.atan2(z - E.z, x - E.x) - 2.3) * 0.02) || { x: E.x - 9000, z: E.z + 6000, h: G(E.x - 9000, E.z + 6000) };
     const tents = [], cols = [0xe8581c, 0xf2c230, 0x2d6fd6, 0xd8402f, 0x3f9b4a];
     const r = rng(8848);
     const tentG = new THREE.ConeGeometry(2.4, 2.3, 4); tentG.rotateY(Math.PI / 4); tentG.translate(0, 1.15, 0);

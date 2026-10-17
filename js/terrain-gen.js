@@ -97,6 +97,34 @@
     }
     // Mount Everest: summit position (m) and the radius of the Himalayan range around it
     const EVX = 52000, EVZ = -48000, EVR = 46000;
+    // Real elevation for the Everest region (js/dem-everest.js): [outer 94 km @ 120 m, inner 32 km @ 40 m], set by world.js
+    let DEM = null;
+    function setDEM(g) { DEM = g && g.length ? g : null; }
+    const cr = (a, b, c, d, t) => b + 0.5 * t * (c - a + t * (2 * a - 5 * b + 4 * c - d + t * (3 * (b - c) + d - a)));
+    const DS = [0, 0]; // slope (rise/run) of the last demGrid sample
+    /** Catmull-Rom sample of one DEM grid at an offset (m) from the summit; NaN outside it. */
+    function demGrid(G, ox, oz) {
+      const fx = (ox + G.half) / G.cell, fz = (oz + G.half) / G.cell, i = Math.floor(fx), j = Math.floor(fz), n = G.n;
+      if (i < 1 || j < 1 || i > n - 3 || j > n - 3) return NaN;
+      const tx = fx - i, tz = fz - j, d = G.data, r = [0, 0, 0, 0];
+      for (let k = 0; k < 4; k++) { const o = (j - 1 + k) * n + i - 1; r[k] = cr(d[o], d[o + 1], d[o + 2], d[o + 3], tx); }
+      const o = j * n + i;
+      DS[0] = (d[o + 1] - d[o] + d[o + n + 1] - d[o + n]) * 0.125 / G.cell; DS[1] = (d[o + n] - d[o] + d[o + n + 1] - d[o + 1]) * 0.125 / G.cell;
+      return cr(r[0], r[1], r[2], r[3], tz) * 0.25;
+    }
+    /** Real terrain height around Everest plus sub-cell rock detail; NaN outside the data. */
+    function demHeight(x, z, X, Z) {
+      const ox = x - EVX, oz = z - EVZ, ho = demGrid(DEM[0], ox, oz);
+      if (ho !== ho) return NaN;
+      let sl = Math.hypot(DS[0], DS[1]), h = ho;
+      const e = Math.max(Math.abs(ox), Math.abs(oz)), wi = DEM[1] ? smooth(15600, 13800, e) : 0;
+      if (wi > 0) { const hi = demGrid(DEM[1], ox, oz); if (hi === hi) { h = lerp(ho, hi, wi); sl = lerp(sl, Math.hypot(DS[0], DS[1]), wi); } }
+      // detail the grid can't hold: ribs and gullies on steep faces (none on the summit itself)
+      const top = smooth(150, 700, Math.hypot(ox, oz)), steep = 0.35 + Math.min(sl, 1.6);
+      h += (ridged(N1, X / 0.13 + 7, Z / 0.13 - 3, 2) - 0.32) * 11 * steep * top;
+      h += (ridged(N3, X / 0.38, Z / 0.38, 2) - 0.32) * 26 * steep * (1 - wi) * top;
+      return h;
+    }
     // Fixed realms (identical on every machine): terrain shaped for the fantasy landmarks
     const ZONES = {
       fantasy: { x: -60000, z: 24000, r: 25000 },   // green plains, a great mountain wall, the fortress city's hill
@@ -196,7 +224,21 @@
     NY.inProspect = (e, n) => { const [pe, pn] = NY.toLocal(40.6602, -73.9690); const a = (e - pe) / 900, b = (n - pn) / 1150; return a * a + b * b < 1; };
     function applyNYC(o, x, z) {
       const dn = Math.hypot(x - NY.cx, z - NY.cz);
-      if (dn >= NY.R) return;
+      if (dn >= NY.R + 48000) return;
+      if (dn > NY.R - 3500) {
+        // beyond the mapped city: the real metro area is a low coastal plain (NJ, Westchester, Long Island), not
+        // mountains — flatten the procedural land into gentle wooded suburbs so no peaks rise behind the skyline
+        const Rw = ZONES.redwood, Jd = ZONES.jade;
+        const mp = smooth(NY.R + 48000, NY.R + 6000, dn) * (1 - smooth(Rw.r * 1.35, Rw.r, zd(Rw, x, z))) * (1 - smooth(Jd.r * 1.4, Jd.r, zd(Jd, x, z))) * (AB ? smooth(4000, 10000, Math.hypot(x - AB.x, z - AB.z)) : 1);
+        if (mp > 0 && o.h > 0) {
+          const plain = 8 + fbm(N2, x / 5200 + 3, z / 5200, 3) * 45 + 40 + Math.pow(ridged(N1, x / 9000, z / 9000, 2), 2) * 90;
+          o.h = lerp(o.h, Math.max(4, Math.min(o.h, plain)), mp);
+          o.mtn *= 1 - mp; o.dry *= 1 - mp; o.canyon *= 1 - mp; o.snowZ *= 1 - mp;
+          o.forest = lerp(o.forest, 0.55 + 0.3 * N3(x / 2500, z / 2500), mp);
+          o.urban = Math.max(o.urban, mp * smooth(0.05, 0.45, N2(x / 3200 - 9, z / 3200 + 4)) * 0.55);
+        }
+        if (dn >= NY.R) return;
+      }
       const m = smooth(NY.R, NY.R - 3500, dn);
       const e = x - NY.ex, n = NY.ez - z, s = nySdfLocal(e, n);
       let hl = 4;
@@ -298,32 +340,42 @@
       if (dE < EVR) {
         him = smooth(EVR, EVR * 0.82, dE);
         land = Math.max(land, smooth(EVR, EVR * 0.9, dE));
-        // foothills climb for ~30 km into a high plateau with big ridged ranges (6–7.5 km peaks),
-        // cut by deep glacial valleys
-        const foot = smooth(EVR * 0.97, EVR * 0.33, dE);
-        const base = lerp(350 + fbm(N3, X / 6, Z / 6, 3) * 250, 3900 + fbm(N2, X / 16 + 5, Z / 16 - 3, 3) * 700, foot);
-        const rr = ridged(N3, X / 17 + 11, Z / 17 - 4, 4);
-        let hh = base + Math.pow(rr, 1.6) * 3500 * (0.3 + 0.7 * foot) + ridged(N1, X / 3.5, Z / 3.5, 3) * 220 * rr;
-        const gv = Math.abs(N1(X / 13 + 40, Z / 13 + 40) + 0.12 * N2(X / 4 + 9, Z / 4 - 7));
-        const valley = 1 - smooth(0, 0.62, gv); // broad U-shaped glacial valleys, kilometres across
-        hh -= valley * valley * 2000;
-        glac = valley * smooth(3600, 5200, hh + valley * valley * 2400);
-        hh = Math.min(hh, 8350);
-        // Everest: three-faced pyramid with ridges; exactly 8,848.86 m at the summit
-        const ang = Math.atan2(hz, hx);
-        // triangular footprint: three broad faces meeting in sharp ridges (NE, SE and W ridges)
-        const de = dE / (1 + 0.3 * Math.cos(3 * (ang - 0.35)));
-        const ridge = Math.pow(Math.max(0, Math.cos(3 * (ang - 0.35))), 14) * 420 * Math.exp(-de / 3200);
-        let ev = 8848.86 - 4300 * (1 - Math.exp(-de / 3600)) - smooth(7000, 19000, de) * 6000 + ridge * smooth(0, 400, de);
-        // erosion gullies and rock buttresses on the faces; none at the summit itself
-        // gullies run straight down the fall line (noise stretched along the radius)
-        ev -= ridged(N2, ang * 5 + 3.1, de / 1300, 2) * 200 * smooth(700, 2800, de) * (1 - smooth(9000, 16000, de));
-        // blend the range's texture into the massif instead of letting peaks spike through it
-        ev = Math.max(ev, lerp(ev, hh, smooth(3500, 9000, de)));
-        // Lhotse (8,516 m) and Nuptse (7,861 m) on the south ridge
-        const pk = (px, pz, top, k) => { const d = Math.hypot(x - EVX - px, z - EVZ - pz); return top - k * (1 - Math.exp(-d / 2600)) - smooth(5000, 14000, d) * 6000 - ridged(N3, X / 0.8, Z / 0.8, 2) * 90 * smooth(100, 900, d); };
-        const sub = Math.max(pk(300, 3200, 8516, 3600), pk(-2400, 2700, 7861, 3000));
-        hh = Math.max(hh, ev, sub);
+        // real elevation data replaces the procedural massif, fading into the foothills at the edge of the data
+        const hd = DEM ? demHeight(x, z, X, Z) : NaN, wd = hd === hd ? smooth(45500, 36000, dE) : 0;
+        let hh = hd;
+        if (wd < 0.999) {
+          // foothills climb for ~30 km into a high plateau with big ridged ranges (6–7.5 km peaks),
+          // cut by deep glacial valleys
+          const foot = smooth(EVR * 0.97, EVR * 0.33, dE);
+          const base = lerp(350 + fbm(N3, X / 6, Z / 6, 3) * 250, 3900 + fbm(N2, X / 16 + 5, Z / 16 - 3, 3) * 700, foot);
+          const rr = ridged(N3, X / 17 + 11, Z / 17 - 4, 4);
+          hh = base + Math.pow(rr, 1.6) * 3500 * (0.3 + 0.7 * foot) + ridged(N1, X / 3.5, Z / 3.5, 3) * 220 * rr;
+          const gv = Math.abs(N1(X / 13 + 40, Z / 13 + 40) + 0.12 * N2(X / 4 + 9, Z / 4 - 7));
+          const valley = 1 - smooth(0, 0.62, gv); // broad U-shaped glacial valleys, kilometres across
+          hh -= valley * valley * 2000;
+          glac = valley * smooth(3600, 5200, hh + valley * valley * 2400);
+          hh = Math.min(hh, 8350);
+          // Everest: three-faced pyramid with ridges; exactly 8,848.86 m at the summit
+          const ang = Math.atan2(hz, hx);
+          // triangular footprint: three broad faces meeting in sharp ridges (NE, SE and W ridges)
+          const de = dE / (1 + 0.3 * Math.cos(3 * (ang - 0.35)));
+          const ridge = Math.pow(Math.max(0, Math.cos(3 * (ang - 0.35))), 14) * 420 * Math.exp(-de / 3200);
+          let ev = 8848.86 - 4300 * (1 - Math.exp(-de / 3600)) - smooth(7000, 19000, de) * 6000 + ridge * smooth(0, 400, de);
+          // erosion gullies and rock buttresses on the faces; none at the summit itself
+          // gullies run straight down the fall line (noise stretched along the radius)
+          ev -= ridged(N2, ang * 5 + 3.1, de / 1300, 2) * 200 * smooth(700, 2800, de) * (1 - smooth(9000, 16000, de));
+          // blend the range's texture into the massif instead of letting peaks spike through it
+          ev = Math.max(ev, lerp(ev, hh, smooth(3500, 9000, de)));
+          // Lhotse (8,516 m) and Nuptse (7,861 m) on the south ridge
+          const pk = (px, pz, top, k) => { const d = Math.hypot(x - EVX - px, z - EVZ - pz); return top - k * (1 - Math.exp(-d / 2600)) - smooth(5000, 14000, d) * 6000 - ridged(N3, X / 0.8, Z / 0.8, 2) * 90 * smooth(100, 900, d); };
+          const sub = Math.max(pk(300, 3200, 8516, 3600), pk(-2400, 2700, 7861, 3000));
+          hh = Math.max(hh, ev, sub);
+          if (wd > 0) hh = lerp(hh, hd, wd);
+        }
+        if (wd > 0) {
+          // glaciers: gentle valley floors above ~4,700 m (debris-covered lower down)
+          glac = Math.max(glac * (1 - wd), wd * smooth(4600, 5100, hd) * (1 - smooth(0.12, 0.3, Math.hypot(DS[0], DS[1]))));
+        }
         h = lerp(h, hh, him);
         if (him > 0.2) wl = -1e9;
       }
@@ -440,10 +492,10 @@
       grassA: [0.33, 0.47, 0.20], grassB: [0.22, 0.36, 0.15], meadow: [0.44, 0.51, 0.25],
       forest: [0.11, 0.22, 0.10], forestB: [0.16, 0.27, 0.12], dryGrass: [0.60, 0.54, 0.33],
       rock: [0.46, 0.45, 0.43], rockB: [0.33, 0.32, 0.32], rockWarm: [0.52, 0.46, 0.39],
-      snow: [0.94, 0.96, 0.99], desertA: [0.82, 0.60, 0.40], desertB: [0.68, 0.40, 0.24],
+      snow: [0.86, 0.89, 0.93], desertA: [0.82, 0.60, 0.40], desertB: [0.68, 0.40, 0.24],
       strataA: [0.76, 0.50, 0.32], strataB: [0.55, 0.30, 0.18], strataC: [0.85, 0.71, 0.53],
       alpine: [0.40, 0.43, 0.30], bank: [0.40, 0.37, 0.29], tarmac: [0.30, 0.31, 0.30],
-      ice: [0.74, 0.84, 0.92], moraine: [0.42, 0.40, 0.38], darkRock: [0.21, 0.20, 0.21], tibet: [0.55, 0.50, 0.42],
+      ice: [0.74, 0.84, 0.92], moraine: [0.42, 0.40, 0.38], darkRock: [0.21, 0.20, 0.21], tibet: [0.55, 0.50, 0.42], yellowBand: [0.62, 0.53, 0.36],
       urbanA: [0.40, 0.40, 0.39], urbanB: [0.47, 0.45, 0.42], riprap: [0.36, 0.35, 0.33]
     };
     const mix3 = (o, a, b, t) => { o[0] = a[0] + (b[0] - a[0]) * t; o[1] = a[1] + (b[1] - a[1]) * t; o[2] = a[2] + (b[2] - a[2]) * t; return o; };
@@ -469,7 +521,7 @@
       mix3(out, out, T3, rockT);
       // snow: settles on gentler slopes above a noisy snowline
       const sl = 2250 + v * 280 - f.dry * 400;
-      const snow = smooth(sl, sl + 300, h) * (1 - smooth(0.45, 0.7, slope));
+      const snow = smooth(sl, sl + 300, h) * (1 - smooth(0.45, 0.7, slope)) * (1 - f.him);
       mix3(out, out, C.snow, snow);
       if (f.snowZ > 0.01) {
         // the White Mountains: snow from ~800 m, frozen lakes white-blue
@@ -480,12 +532,25 @@
       if (f.ash > 0.01) mix3(out, out, C.darkRock, f.ash * 0.85);
       if (f.him > 0.01) {
         // Himalaya: dry brown foothills, banded dark rock on steep faces, glacier ice in the valleys
-        mix3(out, out, C.tibet, f.him * (1 - smooth(3600, 4600, h)) * 0.7);
-        const face = smooth(0.3, 0.55, slope);
-        mix3(T3, C.darkRock, C.rockWarm, 0.5 + 0.5 * Math.sin(h * 0.018 + v * 3.0));
-        mix3(out, out, T3, face * f.him * 0.9);
+        // Nepal (south): juniper/rhododendron scrub and terraces below ~4,000 m; Tibet (north, rain shadow): bare ochre
+        const north = smooth(-4000, -16000, z - EVZ);
+        mix3(T2, C.moraine, C.alpine, smooth(4600, 3900, h) * (0.55 + 0.25 * v2));
+        mix3(T2, T2, C.forest, smooth(3700, 3100, h) * (1 - north) * 0.8);
+        mix3(T2, T2, C.tibet, Math.max(north, smooth(0.25, 0.5, slope) * 0.5));
+        mix3(out, out, T2, f.him * (1 - smooth(4800, 5600, h)) * 0.92);
+        const face = smooth(0.32, 0.6, slope);
+        // banded gneiss and granite on the walls; Everest's Yellow Band (marble, ~8,200–8,500 m) and the dark summit limestone
+        mix3(T3, C.darkRock, C.rockWarm, 0.5 + 0.5 * Math.sin(h * 0.018 + v * 3.0 + N1(x / 900, z / 900) * 2.0));
+        const yb = smooth(8150, 8250, h) * (1 - smooth(8480, 8560, h)) * smooth(9000, 4000, Math.hypot(x - EVX, z - EVZ));
+        mix3(T3, T3, C.yellowBand, yb * 0.85);
+        mix3(out, out, T3, Math.max(face, smooth(5400, 6000, h) * 0.6) * f.him * 0.95);
+        // snow: a high, dry snowline (≈5,300 m south, 5,900 m north); it clings to steeper slopes the higher it goes
+        const sl = lerp(5300, 5900, north) + v * 250, lim = 0.17 + smooth(5500, 8000, h) * 0.08 + v2 * 0.06;
+        const sn = smooth(sl, sl + 350, h) * (1 - smooth(lim, lim + 0.14, slope)) * (0.75 + 0.25 * smooth(-0.3, 0.4, v2));
+        mix3(out, out, C.snow, sn * f.him);
         if (f.glac > 0.01) {
-          mix3(T2, C.ice, C.moraine, smooth(0.35, 0.75, N3(x / 140, z / 700)) * 0.6);
+          // clean blue-white ice up high, grey rubble (debris-covered tongue) lower down, with medial moraine stripes
+          mix3(T2, C.ice, C.moraine, Math.max(smooth(0.35, 0.75, N3(x / 140, z / 700)) * 0.6, smooth(5300, 4800, h) * 0.85));
           mix3(out, out, T2, f.glac * (1 - face));
         }
       }
@@ -719,7 +784,7 @@
       return { far: true, ring: req.ring || 1, cx: req.cx, cz: req.cz, pos, nor, col, index, reqId: req.reqId };
     }
 
-    return { everest: { x: EVX, z: EVZ, h: 8848.86, r: EVR }, zones: ZONES, nyc: NY, fields, height, setAirbase, airbaseMask, setCastle, castleMask, setSites, siteMask, clearMask, buildChunk, buildFar, smooth, fbm, N1, N2, N3, mulberry32 };
+    return { everest: { x: EVX, z: EVZ, h: 8848.86, r: EVR, lat: 27.98806, lon: 86.92528, mN: 110900, mE: 98300.6 }, setDEM, zones: ZONES, nyc: NY, fields, height, setAirbase, airbaseMask, setCastle, castleMask, setSites, siteMask, clearMask, buildChunk, buildFar, smooth, fbm, N1, N2, N3, mulberry32 };
   }
   root.makeTerrainGen = makeTerrainGen;
 })(window.RJ = window.RJ || {});

@@ -583,7 +583,7 @@
     const mergeG = (list) => { const g = RJ.castle.util.merge(list.map((x) => x.toNonIndexed ? x.clone() : x)); return g; };
     // canopy and trunk as one instanced geometry with vertex colours
     const cols = [];
-    const t2 = trunk.toNonIndexed(), c2 = crown.toNonIndexed();
+    const t2 = trunk.index ? trunk.toNonIndexed() : trunk.clone(), c2 = crown.index ? crown.toNonIndexed() : crown.clone();
     for (let i = 0; i < t2.attributes.position.count; i++) cols.push(0.3, 0.24, 0.18);
     const cs = 4.6; c2.scale(cs, cs * 0.85, cs); c2.translate(0, 2.2, 0);
     for (let i = 0; i < c2.attributes.position.count; i++) cols.push(1, 1, 1);

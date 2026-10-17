@@ -172,7 +172,7 @@
   const treeTpl = (() => { let g = null; return () => {
     if (g) return g;
     const trunk = new THREE.CylinderGeometry(0.15, 0.22, 3.2, 4, 1, true).toNonIndexed(); trunk.translate(0, 1.6, 0);
-    const crown = new THREE.IcosahedronGeometry(2.6, 0).toNonIndexed(); crown.scale(1, 1.15, 1); crown.translate(0, 4.6, 0);
+    const crown = new THREE.IcosahedronGeometry(2.6, 0); // polyhedra are already non-indexed crown.scale(1, 1.15, 1); crown.translate(0, 4.6, 0);
     const P = new Float32Array((trunk.attributes.position.count + crown.attributes.position.count) * 3), col = [];
     P.set(trunk.attributes.position.array); P.set(crown.attributes.position.array, trunk.attributes.position.count * 3);
     for (let i = 0; i < trunk.attributes.position.count; i++) col.push(0.32, 0.26, 0.2);

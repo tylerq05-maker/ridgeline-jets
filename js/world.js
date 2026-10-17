@@ -6,6 +6,14 @@
   W.CH = 2000; // chunk size (m)
   const gen = RJ.makeTerrainGen();
   W.gen = gen;
+  // real Everest elevation (js/dem-everest.js): decoded once, shared with the terrain workers
+  W.dem = (() => {
+    const D = RJ.DEM_EVEREST; if (!D) return null;
+    try {
+      return D.grids.map((g) => { const b = atob(g.b64), u = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return { n: g.n, half: g.half, cell: g.cell, data: new Uint16Array(u.buffer) }; });
+    } catch (e) { console.warn("Everest elevation data unreadable; using the procedural range.", e); return null; }
+  })();
+  if (W.dem) { gen.setDEM(W.dem); RJ.DEM_EVEREST = null; }
   W.everest = gen.everest;
   W.fields = (x, z) => gen.fields(x, z);
   W.heightFn = (x, z) => gen.height(x, z);
@@ -167,7 +175,19 @@
           "diffuseColor.rgb *= mix(1.0, 0.93 + 0.1 * rjStrata, smoothstep(0.5, 0.85, rjSteep) * rjFade);",
           // rain-washed vertical streaks down cliff faces
           "float rjCl = rjVN(vec2((vWP.x + vWP.z) * 0.06, vWP.y * 0.01)) * 0.7 + rjVN(vec2((vWP.x - vWP.z) * 0.21, vWP.y * 0.03)) * 0.3;",
-          "diffuseColor.rgb *= mix(1.0, 0.86 + 0.24 * rjCl, smoothstep(0.45, 0.8, rjSteep) * (0.5 + 0.5 * rjFade));"
+          "diffuseColor.rgb *= mix(1.0, 0.86 + 0.24 * rjCl, smoothstep(0.45, 0.8, rjSteep) * (0.5 + 0.5 * rjFade));",
+          // snowfields: rock buttresses and outcrops break through wherever the slope steepens (per pixel, so detail
+          // survives far beyond the mesh resolution), and wind-packed snow gets a faint cold tone
+          "float rjSnowV = smoothstep(0.68, 0.8, min(diffuseColor.r, min(diffuseColor.g, diffuseColor.b)));",
+          "if (rjSnowV > 0.01) {",
+          "  float rjS1 = rjFbm(vWP.xz * 0.0024), rjS2 = rjVN(vWP.xz * 0.019 + 5.0), rjS3 = rjVN(vWP.xz * 0.12);",
+          "  float rjSt = rjSteep + (rjS1 - 0.5) * 0.38 + (rjS2 - 0.5) * 0.2 + (rjS3 - 0.5) * 0.12 * rjFade;",
+          "  float rjRk = smoothstep(0.22, 0.31, rjSt);",
+          "  vec3 rjRc = vec3(0.23, 0.22, 0.215) * (0.72 + 0.55 * rjS2) * (0.88 + 0.24 * rjStrata);",
+          "  diffuseColor.rgb = mix(diffuseColor.rgb, rjRc, rjSnowV * rjRk);",
+          "  rjSnowV *= 1.0 - rjRk;",
+          "  diffuseColor.rgb *= mix(vec3(1.0), vec3(0.97, 0.99, 1.03) * (0.95 + 0.05 * rjS3), rjSnowV);",
+          "}"
         ].join("\n"))
         .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor - smoothstep(0.85, 0.95, diffuseColor.b) * 0.18, 0.55, 1.0);")
         .replace("#include <normal_fragment_maps>", [
@@ -175,6 +195,7 @@
           "{ vec2 rjQ = vWP.xz * 0.09; float b0 = rjVN(rjQ), bx = rjVN(rjQ + vec2(0.15, 0.0)), bz = rjVN(rjQ + vec2(0.0, 0.15));",
           "  vec2 rjQ2 = vWP.xz * 0.6; float c0 = rjVN(rjQ2), cx = rjVN(rjQ2 + vec2(0.15, 0.0)), cz = rjVN(rjQ2 + vec2(0.0, 0.15));",
           "  vec3 rjB = vec3((b0 - bx) * 1.6 + (c0 - cx) * 0.5, 0.0, (b0 - bz) * 1.6 + (c0 - cz) * 0.5) * rjFade;",
+          "  rjB.xz += vec2(rjVN(vec2(vWP.x * 0.05 + vWP.z * 0.02, vWP.z * 0.35)) - rjVN(vec2(vWP.x * 0.05 + vWP.z * 0.02 + 0.2, vWP.z * 0.35))) * 1.4 * rjSnowV * rjFade;",
           "  normal = normalize(normal + (viewMatrix * vec4(rjB, 0.0)).xyz); }"
         ].join("\n"))
         .replace("#include <lights_fragment_end>", "#include <lights_fragment_end>\nreflectedLight.directDiffuse *= vShade.x; reflectedLight.directSpecular *= vShade.x; reflectedLight.indirectDiffuse *= vShade.y;");
@@ -246,7 +267,8 @@
         "var makeTerrainGen = " + RJ.makeTerrainGen.toString() + ";",
         "var gen = makeTerrainGen();",
         "self.onmessage = function (e) {",
-        "  var r = e.data; gen.setAirbase(r.ab); gen.setSites(r.sites || []);",
+        "  var r = e.data; if (r.type === 'dem') { gen.setDEM(r.grids); return; }",
+        "  gen.setAirbase(r.ab); gen.setSites(r.sites || []);",
         "  if (r.type === 'far') { var fo = gen.buildFar(r); self.postMessage(fo, [fo.pos.buffer, fo.nor.buffer, fo.col.buffer, fo.index.buffer]); return; }",
         "  var o = gen.buildChunk(r); o.reqId = r.reqId;",
         "  var tr = [o.pos.buffer, o.nor.buffer, o.col.buffer, o.shade.buffer, o.index.buffer, o.heights.buffer, o.treeData.buffer, o.rockData.buffer, o.falls.buffer];",
@@ -258,6 +280,7 @@
       const n = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 4) - 1));
       for (let i = 0; i < n; i++) {
         const slot = { w: new Worker(url), busy: 0 };
+        if (W.dem) slot.w.postMessage({ type: "dem", grids: W.dem });
         slot.w.onmessage = (e) => { slot.busy = Math.max(0, slot.busy - 1); if (e.data.far) applyFar(e.data); else onChunkData(e.data); };
         slot.w.onerror = (e) => { console.warn("Terrain worker failed; building on the main thread instead.", e.message || e); workersFailed(); };
         W.workers.push(slot);
@@ -356,15 +379,24 @@
       const con = [], brd = [];
       for (let i = 0; i < d.treeData.length; i += 6) (d.treeData[i + 4] < 0.5 ? con : brd).push(d.treeData[i], d.treeData[i + 1], d.treeData[i + 2], d.treeData[i + 3], d.treeData[i + 5]);
       const fillTree = (im, i, L, o) => {
-        _s.set(L[o + 3], L[o + 3] * (0.85 + L[o + 4] * 0.4), L[o + 3]);
+        // non-uniform scale gives each instance its own silhouette: slender spruce, squat pine, tall broadleaf
+        const r7 = (L[o + 4] * 7.13) % 1, r13 = (L[o + 4] * 13.7) % 1, wS = L[o + 3] * (0.72 + r7 * 0.55);
+        _s.set(wS, L[o + 3] * (0.8 + r13 * 0.65), wS * (0.9 + r13 * 0.2));
         _q.setFromAxisAngle(RJ.V3(0, 1, 0), L[o + 4] * 6.28);
         _m4.compose(_p.set(L[o] - d.cx * W.CH, L[o + 1], L[o + 2] - d.cz * W.CH), _q, _s);
         im.setMatrixAt(i, _m4);
         const r = L[o + 4];
-        im.setColorAt(i, _c.setRGB(0.10 + r * 0.07, 0.21 + r * 0.09, 0.09 + r * 0.04));
+        const k = (r * 23.1) % 1; // blue-black spruce ↔ yellow-green pine
+        im.setColorAt(i, _c.setRGB(0.08 + r * 0.08 + k * 0.05, 0.17 + r * 0.1 + k * 0.05, 0.10 + r * 0.03 - k * 0.03));
+      };
+      const leafCol = (r) => {
+        const k = (r * 31.7) % 1;
+        if (k > 0.93) return _c.setRGB(0.42 + r * 0.2, 0.30 + r * 0.06, 0.08);   // early-turning maple / birch gold
+        if (k > 0.75) return _c.setRGB(0.26 + r * 0.1, 0.34 + r * 0.08, 0.11);   // olive
+        return _c.setRGB(0.15 + r * 0.12, 0.27 + r * 0.12, 0.10 + r * 0.04);
       };
       addInstanced(W.conifer, W.treeMat, con, 5, fillTree);
-      addInstanced(W.broadleaf, W.treeMat, brd, 5, (im, i, L, o) => { fillTree(im, i, L, o); const r = L[o + 4]; im.setColorAt(i, _c.setRGB(0.18 + r * 0.12, 0.30 + r * 0.1, 0.12 + r * 0.03)); });
+      addInstanced(W.broadleaf, W.treeMat, brd, 5, (im, i, L, o) => { fillTree(im, i, L, o); im.setColorAt(i, leafCol(L[o + 4])); });
     }
     if (d.rockData && d.rockData.length) {
       addInstanced(W.rockGeo, W.rockMat, Array.from(d.rockData), 5, (im, i, L, o) => {
@@ -1122,11 +1154,14 @@
         "uniform sampler2D reflTex; uniform float useRefl; uniform float reflY; uniform float rain;",
         "varying vec3 vW; varying vec2 vInfo; varying vec4 vRefl;",
         "#include <fog_pars_fragment>",
-        "vec2 wave(vec2 p, vec2 d, float k, float a, float s){ float ph = dot(p, d) * k + time * s; return d * (a * k * cos(ph)); }",
+        // each wave octave fades out once its wavelength nears the pixel footprint (no moiré rings far away)
+        "float rjFp = 0.0;",
+        "vec2 wave(vec2 p, vec2 d, float k, float a, float s){ float ph = dot(p, d) * k + time * s; return d * (a * k * cos(ph)) * (1.0 - smoothstep(0.35, 1.2, k * rjFp)); }",
         "vec3 skyCol(vec3 d){ float h = max(d.y, 0.0); vec3 c = mix(skyHor, skyTop, pow(h, 0.5)); float s = max(dot(d, sunDir), 0.0); c += sunCol * (pow(s, 8.0) * 0.25 + pow(s, 80.0) * 0.6); return c; }",
         "void main(){",
         "  vec3 V = cameraPosition - vW; float dist = length(V); V /= dist;",
         "  float att = 1.0 / (1.0 + dist / 2200.0);",
+        "  rjFp = dist * 0.0013 / max(0.08, abs(V.y));", // metres per pixel, stretched at grazing angles
         "  vec2 p = vW.xz; vec2 g = vec2(0.0);",
         "  g += wave(p, vec2(0.80, 0.60), 0.018, 2.4, 0.85);",
         "  g += wave(p, vec2(-0.55, 0.83), 0.031, 1.2, 1.1);",
