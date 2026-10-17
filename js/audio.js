@@ -876,34 +876,46 @@
     if (SC.box) SC.box.remove();
     Object.assign(SC, { box: null, w: null, ready: false, playing: false, vol: 0, target: 0, timer: 0 });
   }
+  const scSay = (t) => { if (SC.box) SC.box.querySelector(".sc-st").textContent = t || ""; };
   function scFail(why) {
     console.warn("SoundCloud menu music unavailable:", why);
-    scDrop(); AU._scFail = true;
+    const box = SC.box; SC.box = null; scDrop(); AU._scFail = why;
+    if (box) {   // leave the reason on screen for a few seconds
+      const f = box.querySelector("iframe"); if (f) f.remove();
+      box.hidden = false; box.querySelector(".sc-st").textContent = AU.scWhy() + " Playing the built-in score instead.";
+      setTimeout(() => box.remove(), 10000);
+    }
     if (AU._mus) AU.music(AU._mus.want);   // fall back to the built-in score
   }
+  AU.scWhy = () => ({ api: "Couldn't reach SoundCloud (no internet, or this page blocks it: use the game website).", load: "SoundCloud didn't load this track. Use the full soundcloud.com link of a single track.", track: "SoundCloud won't play this track here (the uploader may have turned off embedding)." })[AU._scFail] || "";
   function scLoad() {
     const box = (SC.box = document.createElement("div"));
-    box.id = "sc-mini"; box.hidden = true;
-    box.innerHTML = `<div class="sc-lb">♪ Menu music · SoundCloud</div>`;
+    box.id = "sc-mini";
+    box.innerHTML = `<div class="sc-lb">♪ MENU MUSIC · SOUNDCLOUD</div><div class="sc-st">Loading SoundCloud…</div>`;
     const f = document.createElement("iframe");
-    f.title = "SoundCloud player"; f.allow = "autoplay"; f.scrolling = "no"; f.frameBorder = "no"; f.width = "100%"; f.height = "20";
+    f.title = "SoundCloud player"; f.allow = "autoplay; encrypted-media"; f.scrolling = "no"; f.frameBorder = "no"; f.width = "100%"; f.height = "120";
     f.src = "https://w.soundcloud.com/player/?url=" + encodeURIComponent(RJ.settings.musicSC) + "&auto_play=false&hide_related=true&show_comments=false&show_reposts=false&show_teaser=false&visual=false&color=%23f0b429";
     box.appendChild(f); document.body.appendChild(box);
-    SC.wait = setTimeout(() => { if (!SC.ready) scFail("player did not load"); }, 15000);
+    SC.wait = setTimeout(() => { if (!SC.ready) scFail("load"); }, 20000);
     const hook = () => {
       const E = window.SC.Widget.Events, w = (SC.w = window.SC.Widget(f));
-      w.bind(E.READY, () => { SC.ready = true; clearTimeout(SC.wait); w.setVolume(0); scApply(); });
+      w.bind(E.READY, () => { SC.ready = true; clearTimeout(SC.wait); scSay(""); w.setVolume(0); scApply(); });
+      w.bind(E.PLAY, () => scSay(""));
       w.bind(E.FINISH, () => { if (SC.target > 0) { w.seekTo(0); w.play(); } });   // loop
-      w.bind(E.ERROR, () => scFail("track error"));
+      w.bind(E.ERROR, () => scFail("track"));
     };
     if (window.SC && window.SC.Widget) return hook();
     const s = document.createElement("script");
-    s.src = "https://w.soundcloud.com/player/api.js"; s.onload = hook; s.onerror = () => scFail("api blocked");
+    s.src = "https://w.soundcloud.com/player/api.js"; s.onload = hook; s.onerror = () => scFail("api");
     document.head.appendChild(s);
   }
   function scApply() {
+    if (SC.box) SC.box.hidden = !(SC.target > 0) && (!SC.ready || !SC.playing);
     if (!SC.ready) return;
-    if (SC.target > 0) { SC.box.hidden = false; if (!SC.playing) { SC.w.play(); SC.playing = true; } }
+    if (SC.target > 0 && !SC.playing) {
+      SC.w.play(); SC.playing = true;
+      setTimeout(() => { if (SC.w && SC.target > 0) SC.w.isPaused((p) => { if (p) scSay("Press ▶ on the player to start the music."); }); }, 2500);   // browser blocked autoplay
+    }
     clearInterval(SC.timer);
     SC.timer = setInterval(() => {   // ~1 s fades
       SC.vol += Math.max(-9, Math.min(6, SC.target - SC.vol));
