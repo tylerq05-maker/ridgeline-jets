@@ -314,6 +314,10 @@ input[type="range"] { width: 180px; accent-color: var(--hazard); }
 @keyframes blink { 50% { opacity: .35; } }
 .objective { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); transform: translateX(-50%); font-size: 13px; background: rgba(10,15,21,.6); padding: 6px 12px; border-radius: 4px; max-width: calc(100% - 32px); text-align: center; transition: opacity .6s; }
 #vignette { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(0,0,0,0) 35%, rgba(0,0,0,.95) 100%); }
+#sc-mini { position: fixed; right: 12px; bottom: 12px; z-index: 60; width: min(300px, calc(100vw - 24px)); padding: 6px 8px 8px; background: rgba(8,12,18,.72); border: 1px solid rgba(255,255,255,.14); border-radius: 8px; backdrop-filter: blur(6px); }
+#sc-mini[hidden] { display: none; }
+#sc-mini .sc-lb { font-family: var(--font-mono); font-size: 10px; letter-spacing: .12em; color: rgba(255,255,255,.7); margin-bottom: 4px; }
+#sc-mini iframe { display: block; border: 0; }
 #pip { position: fixed; z-index: 4; pointer-events: none; border: 1px solid rgba(255,255,255,.55); box-shadow: 0 6px 24px rgba(0,0,0,.45); border-radius: 3px; }
 #pip span { position: absolute; left: 8px; top: 6px; font-family: var(--font-mono); font-size: 11px; letter-spacing: .12em; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.8); }
 #dmgflash { position: fixed; inset: 0; z-index: 3; pointer-events: none; opacity: 0; background: radial-gradient(ellipse at center, rgba(255,40,20,0) 40%, rgba(255,40,20,.55) 100%); transition: opacity .25s; }

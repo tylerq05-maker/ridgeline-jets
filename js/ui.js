@@ -377,6 +377,11 @@
       h += row("Menu music", "Cinematic military score on the menus and in the hangar. It fades out when you take off; flying has no music.", range("musicVol", 0, 1, 0.05));
       h += row("Menu soundtrack", RJ.settings.musicTrack ? "Playing your track: " + RJ.settings.musicTrack + " (stored in this browser only)" : "\"Scramble\", Jet City's original score. You can use your own music file (one you have the rights to) instead.",
         `<label class="ghost small" style="cursor:pointer">Use my own track<input type="file" accept="audio/*" id="mus-file" hidden></label>${RJ.settings.musicTrack ? ` <button class="ghost small" id="mus-reset">Back to original score</button>` : ""} <span class="hint" id="mus-out"></span>`);
+      const scSt = RJ.audio.scStatus ? RJ.audio.scStatus() : "";
+      h += row("Play from SoundCloud", scSt === "fail" ? "Couldn't play that link (it may block embedding, or SoundCloud is unreachable), so the menus use the track above. Check the link and save again." :
+        RJ.settings.musicSC ? "Plays in SoundCloud's own player in the corner of the menus, and pauses while you fly. Needs internet. If it doesn't start, press play on that player." :
+        "Paste a soundcloud.com track link (the full address from your browser). It streams in SoundCloud's player on the menus; nothing is downloaded.",
+        `<span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;max-width:380px"><input class="txt" id="sc-url" style="width:230px;flex:0 1 auto" placeholder="https://soundcloud.com/artist/track" value="${esc(RJ.settings.musicSC || "")}"><button class="ghost small" id="sc-save" style="flex:0 0 auto;width:auto">Save</button>${RJ.settings.musicSC ? `<button class="ghost small" id="sc-clear" style="flex:0 0 auto;width:auto">Remove</button>` : ""}</span>`);
       h += row("Weapons and effects", null, range("sfxVol", 0, 1, 0.05));
       h += row("Nova (flight companion)", "Greets you in Free Flight, talks during flights and answers anything you ask. Hold " + RJ.keyLabel(RJ.settings.keys.talk) + " or tap 🎙 to talk.", toggle("compOn"));
       h += row("Nova's volume", null, range("compVol", 0, 1, 0.05));
@@ -417,6 +422,13 @@
       const mf = $("mus-file"), mr = $("mus-reset");
       if (mf) mf.addEventListener("change", () => { const f = mf.files && mf.files[0]; if (!f) return; $("mus-out").textContent = "Loading…"; RJ.audio.setMusicTrack(f).then(UI.renderSettings, () => { $("mus-out").textContent = "That file can't be played. Try an MP3, M4A, OGG or WAV."; }); });
       if (mr) mr.addEventListener("click", () => RJ.audio.setMusicTrack(null).then(UI.renderSettings));
+      const su = $("sc-url");
+      $("sc-save").addEventListener("click", () => {
+        const u = su.value.trim();
+        if (u && !/^https:\/\/(www\.|m\.|on\.)?soundcloud\.com\/\S+/i.test(u)) { su.value = ""; su.placeholder = "That isn't a soundcloud.com link"; return; }
+        RJ.audio.setMusicSC(u); UI.renderSettings();
+      });
+      if ($("sc-clear")) $("sc-clear").addEventListener("click", () => { RJ.audio.setMusicSC(""); UI.renderSettings(); });
     }
   };
   function applySetting(key) {

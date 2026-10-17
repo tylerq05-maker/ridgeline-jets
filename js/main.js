@@ -798,7 +798,7 @@
       else if (st === "hangar") HV.render(dt);
       else if (st === "menu") menuFrame(dt);
     } catch (e) { console.error(e); }
-    const musKey = st + (RJ.audio.ctx ? "+" : "") + (RJ.settings.muted ? "m" : "") + RJ.settings.musicVol;
+    const musKey = st + (RJ.audio.ctx ? "+" : "") + (RJ.settings.muted ? "m" : "") + RJ.settings.musicVol + "|" + RJ.settings.master + "|" + (RJ.settings.musicSC || "");
     if (RJ.audio.music && musKey !== RJ._lastSt) { RJ.audio.music(st === "menu" || st === "hangar"); RJ._lastSt = musKey; }
     RJ.ui.tick(dt);
     RJ.input.endFrame();

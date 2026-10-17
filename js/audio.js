@@ -840,6 +840,11 @@
     const M = AU._mus || (AU._mus = { out: mkGain(ctx, 0), pos: 0 });
     if (!M.wired) { M.out.connect(AU.uiBus); M.wired = true; }
     M.want = want;
+    if (RJ.settings.musicSC && !AU._scFail) {   // a SoundCloud link plays in SoundCloud's own player; the score stays silent
+      if (M.src) { M.out.gain.setTargetAtTime(0, ctx.currentTime, 0.1); if (!M.stopT) M.stopT = setTimeout(() => stopMusic(M), 500); }
+      return scMusic(want, vol);
+    }
+    if (SC.box) scDrop();
     if (want && !M.buf && !M.loading && !M.failed) loadTrack(M);
     if (want && M.buf && !M.src) {
       if (M.stopT) { clearTimeout(M.stopT); M.stopT = null; }
@@ -863,6 +868,65 @@
     return file.arrayBuffer().then((ab) => (AU.ctx ? AU.ctx.decodeAudioData(ab.slice(0)) : Promise.resolve()).then(() => idb("readwrite", (s) => s.put(ab, "track"))))
       .then(() => { RJ.settings.musicTrack = file.name; RJ.saveSettings(); swap(); return true; });
   };
+  /* SoundCloud: the official embed player (Widget API), shown small in the corner of the menus. Nothing is downloaded;
+     the track streams from SoundCloud. Volume fades through the widget, then it pauses and hides while flying. */
+  const SC = { box: null, w: null, ready: false, playing: false, vol: 0, target: 0, timer: 0 };
+  function scDrop() {
+    clearInterval(SC.timer); clearTimeout(SC.wait);
+    if (SC.box) SC.box.remove();
+    Object.assign(SC, { box: null, w: null, ready: false, playing: false, vol: 0, target: 0, timer: 0 });
+  }
+  function scFail(why) {
+    console.warn("SoundCloud menu music unavailable:", why);
+    scDrop(); AU._scFail = true;
+    if (AU._mus) AU.music(AU._mus.want);   // fall back to the built-in score
+  }
+  function scLoad() {
+    const box = (SC.box = document.createElement("div"));
+    box.id = "sc-mini"; box.hidden = true;
+    box.innerHTML = `<div class="sc-lb">♪ Menu music · SoundCloud</div>`;
+    const f = document.createElement("iframe");
+    f.title = "SoundCloud player"; f.allow = "autoplay"; f.scrolling = "no"; f.frameBorder = "no"; f.width = "100%"; f.height = "20";
+    f.src = "https://w.soundcloud.com/player/?url=" + encodeURIComponent(RJ.settings.musicSC) + "&auto_play=false&hide_related=true&show_comments=false&show_reposts=false&show_teaser=false&visual=false&color=%23f0b429";
+    box.appendChild(f); document.body.appendChild(box);
+    SC.wait = setTimeout(() => { if (!SC.ready) scFail("player did not load"); }, 15000);
+    const hook = () => {
+      const E = window.SC.Widget.Events, w = (SC.w = window.SC.Widget(f));
+      w.bind(E.READY, () => { SC.ready = true; clearTimeout(SC.wait); w.setVolume(0); scApply(); });
+      w.bind(E.FINISH, () => { if (SC.target > 0) { w.seekTo(0); w.play(); } });   // loop
+      w.bind(E.ERROR, () => scFail("track error"));
+    };
+    if (window.SC && window.SC.Widget) return hook();
+    const s = document.createElement("script");
+    s.src = "https://w.soundcloud.com/player/api.js"; s.onload = hook; s.onerror = () => scFail("api blocked");
+    document.head.appendChild(s);
+  }
+  function scApply() {
+    if (!SC.ready) return;
+    if (SC.target > 0) { SC.box.hidden = false; if (!SC.playing) { SC.w.play(); SC.playing = true; } }
+    clearInterval(SC.timer);
+    SC.timer = setInterval(() => {   // ~1 s fades
+      SC.vol += Math.max(-9, Math.min(6, SC.target - SC.vol));
+      SC.w.setVolume(Math.round(SC.vol));
+      if (Math.abs(SC.vol - SC.target) < 0.5) {
+        clearInterval(SC.timer);
+        if (SC.target === 0) { SC.w.pause(); SC.playing = false; SC.box.hidden = true; }
+      }
+    }, 100);
+  }
+  function scMusic(want, vol) {
+    const master = RJ.settings.master == null ? 1 : RJ.settings.master;
+    SC.target = want ? Math.max(1, Math.round(vol * master * 100)) : 0;
+    if (want && !SC.box) scLoad();
+    scApply();
+  }
+  /** Settings ▸ Audio: play a SoundCloud link on the menus ("" turns it off). */
+  AU.setMusicSC = function (url) {
+    RJ.settings.musicSC = url; RJ.saveSettings();
+    AU._scFail = false; scDrop();
+    if (AU._mus) AU.music(AU._mus.want);
+  };
+  AU.scStatus = () => !RJ.settings.musicSC ? "" : AU._scFail ? "fail" : SC.ready ? "ok" : "wait";
   AU.thunder = () => { burst({ brown: true, f0: 400, f1: 50, dur: 3.5, gain: 0.8, attack: 0.15 }); thump(45, 2.5, 0.4, 0.1); };
   AU.splash = (dist = 0) => burst({ f0: 1800, f1: 300, dur: 1.2, gain: 0.6 * distGain(dist) });
   AU.bombWhistle = () => {
