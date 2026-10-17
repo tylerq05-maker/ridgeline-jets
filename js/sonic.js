@@ -23,7 +23,7 @@
     S.baseMat = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: true,
       uniforms: Object.assign(THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {
-        time: { value: 0 }, opacity: { value: 0 }, erosion: { value: 0.4 }, seed: { value: 0 }, ends: { value: 1 }, shock: { value: -1 }, top: { value: 0 },
+        time: { value: 0 }, opacity: { value: 0 }, erosion: { value: 0.4 }, seed: { value: 0 }, ends: { value: 1 }, shock: { value: -1 }, top: { value: 0 }, radial: { value: 0 },
         freq: { value: new THREE.Vector2(36, 3) }, flow: { value: 1.5 },
         sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunCol: { value: new THREE.Color(1, 1, 1) }, shadeCol: { value: new THREE.Color(0.6, 0.65, 0.72) }
       }]), RJ.world.atmoUniforms()),
@@ -36,7 +36,7 @@
         "}"
       ].join("\n"),
       fragmentShader: [
-        "uniform float time; uniform float opacity; uniform float erosion; uniform float seed; uniform float ends; uniform vec2 freq; uniform float flow; uniform float shock; uniform float top;",
+        "uniform float time; uniform float opacity; uniform float erosion; uniform float seed; uniform float ends; uniform vec2 freq; uniform float flow; uniform float shock; uniform float top; uniform float radial;",
         "uniform vec3 sunDir; uniform vec3 sunCol; uniform vec3 shadeCol;",
         "varying vec2 vUv; varying vec3 vNW; varying vec3 vWP; varying vec3 vOP;",
         N,
@@ -44,7 +44,7 @@
         "void main(){",
         "  vec2 p = vec2(vUv.x * freq.x, vUv.y * freq.y) + seed;",
         "  float n = rjFbm(p + vec2(time * 0.35, -time * flow));",
-        "  float dens = smoothstep(erosion - 0.12, erosion + 0.38, n);",
+        "  float dens = mix(smoothstep(erosion - 0.12, erosion + 0.38, n), 0.55 + 0.6 * smoothstep(erosion - 0.3, erosion + 0.3, n) * (0.6 + 0.4 * (1.0 - vUv.y)), radial);",
         "  float e = mix(1.0, sin(clamp(vUv.y, 0.0, 1.0) * 3.14159), ends);",
         // a sharp front at the shock (slightly ragged), fading out aft as the air recompresses and the drops evaporate
         "  if (shock > -0.5) { float sf = shock + (n - 0.5) * 0.05; e = smoothstep(sf - 0.015, sf + 0.03, vUv.y) * (1.0 - smoothstep(sf + 0.12, sf + 0.55, vUv.y)) * (0.6 + 0.4 * smoothstep(1.0, 0.6, vUv.y)); }",
@@ -53,15 +53,22 @@
         // never a clean ring: the wide rear rim evaporates completely and the cloud is patchy around the airframe
         "  e *= 1.0 - smoothstep(0.7, 0.96, vUv.y);",
         "  float ang = atan(vOP.y, vOP.x); e *= mix(1.0, 0.25 + 0.9 * rjVN(vec2(ang * 1.6 + seed, time * 0.25)), top);",
+        // vapor cone (the reference look): uv.y runs from the apex at the fuselage out to the flared rim. Densest
+        // close to the airframe, feathering into wisps toward a ragged, uneven rim; streaks radiate along the flow
+        "  if (radial > 0.5) { float y = vUv.y, rim = 0.72 + 0.22 * rjVN(vec2(vUv.x * 7.0 + seed, time * 0.3));",
+        "    float core = smoothstep(0.0, 0.06, y) * (1.0 - smoothstep(rim - 0.42, rim, y));",
+        "    e = core * (0.45 + 0.95 * pow(1.0 - y, 1.5)) * (0.75 + 0.25 * rjVN(vec2(ang * 0.9 + seed * 2.0, time * 0.2))); }",
         "  vec3 V = normalize(cameraPosition - vWP); vec3 Nn = normalize(vNW);",
         "  float fres = abs(dot(Nn, V));",
         // thin sheet: edge-on it reads dense, face-on it is a translucent streaky veil
         // a soft veil: only slightly denser where seen edge-on, so the silhouette never draws a bright outline
-        "  float a = dens * e * mix(0.72, 0.62, fres) * opacity;",
+        "  float a = dens * e * mix(mix(0.72, 0.62, fres), mix(1.15, 0.5, fres), radial) * opacity;",
         "  if (a < 0.003) discard;",
         "  float lit = abs(dot(Nn, sunDir));",
         "  float fwd = pow(max(dot(-V, sunDir), 0.0), 6.0);",
         "  vec3 col = mix(shadeCol, sunCol, 0.45 + 0.55 * lit) + sunCol * fwd * 1.5 + sunCol * n * 0.12;",
+        // vapor cone: real condensation reads against the sky by its grey-blue shaded side and a slightly darker rim
+        "  if (radial > 0.5) col = mix(shadeCol * vec3(0.78, 0.82, 0.9), sunCol * 0.97, 0.3 + 0.55 * lit) * (0.8 + 0.2 * (1.0 - vUv.y)) * (0.9 + 0.14 * n) + sunCol * fwd * 0.6;",
         "  gl_FragColor = vec4(col, a);",
         "#include <fog_fragment>",
         "}"
@@ -71,7 +78,13 @@
     const prof = [[0.30, -0.6], [0.55, -0.42], [0.78, -0.2], [0.95, 0.1], [1.05, 0.45], [1.1, 0.8], [1.12, 1.0]];
     S.coneGeo = new THREE.LatheGeometry(prof.map(([r, z]) => new THREE.Vector2(r, z)), 48);
     S.coneGeo.rotateX(Math.PI / 2);
+    // the Prandtl–Glauert vapor cone: apex on the airframe, flaring aft to roughly the jet's own size (r, z)
+    const vp = [[0.05, -0.02], [0.16, 0.02], [0.32, 0.08], [0.5, 0.17], [0.66, 0.29], [0.8, 0.44], [0.91, 0.62], [0.98, 0.81], [1.02, 1.0]];
+    S.vcGeo = new THREE.LatheGeometry(vp.map(([r, z]) => new THREE.Vector2(r, z)), 72);
+    S.vcGeo.rotateX(Math.PI / 2);
   };
+  /** Cloud size from the airframe: about one wingspan across each way, a third of the fuselage deep. */
+  const vcSize = (d) => [Math.max(d.span * 1.1, d.len * 0.72, 5), Math.max(d.len * 0.45, 4)];
 
   function makeMat(o) {
     const m = S.baseMat.clone();
@@ -110,13 +123,13 @@
   function coneFor(ac) {
     if (ac._cone) return ac._cone;
     const d = ac.vis.dims;
-    const R = Math.max(d.span * 0.4, d.len * 0.15, 2.2), L = d.len * 0.62;
-    // the cloud spans the aft two thirds of the airframe; the shader opens it from the shock position
-    const g = new THREE.Group(); g.position.set(0, 0, d.minZ + d.len * 0.3); g.visible = false;
-    for (const [k, fx] of [[1, 13], [0.84, 9]]) {
-      const m = new THREE.Mesh(S.coneGeo, makeMat({ fx, fy: 1.6, flow: 2.6, ends: 1 }));
-      m.scale.set(R * k, R * k * 0.92, L); m.renderOrder = 10; m.frustumCulled = false; m.layers.set(RJ.LATE);
-      m.material.uniforms.top.value = 1;
+    const [R, L] = vcSize(d);
+    // three nested layers a little apart give the sheet thickness and soft depth; apex near the wing
+    const g = new THREE.Group(); g.position.set(0, 0, d.minZ + d.len * 0.48); g.visible = false; g.userData = { R, L, z0: d.minZ + d.len * 0.48, len: d.len };
+    for (const [k, dz, fx] of [[1, 0, 9], [0.9, 0.09, 7], [0.8, 0.18, 6]]) {
+      const m = new THREE.Mesh(S.vcGeo, makeMat({ fx, fy: 2.2, flow: -1.4, ends: 1 }));
+      m.scale.set(R * k, R * k * 1.04, L * (1 - dz)); m.position.z = dz * L; m.renderOrder = 10; m.frustumCulled = false; m.layers.set(RJ.LATE);
+      m.material.uniforms.radial.value = 1; m.material.uniforms.top.value = 0.25;
       g.add(m);
     }
     ac.mesh.add(g);
@@ -131,14 +144,14 @@
     const W = RJ.world, d = ac.vis.dims;
     const hum = S.humidity(ac);
     const vis = RJ.clamp(hum, 0.22, 1);
-    const R0 = Math.max(d.span * 0.42, d.len * 0.17, 2.4), L0 = d.len * 0.36;
-    const center = ac.mesh.localToWorld(tv.set(0, 0, d.minZ + d.len * 0.42)).clone();
+    const [R0, L0] = vcSize(d);
+    const center = ac.mesh.localToWorld(tv.set(0, 0, d.minZ + d.len * 0.48)).clone();
     const ev = { t: 0, ac, center, q: ac.q.clone(), vel: ac.vel.clone(), R0, L0, vis, meshes: [] };
     const add = (geo, o) => { const m = new THREE.Mesh(geo, makeMat(o)); m.position.copy(center); m.quaternion.copy(ev.q); m.frustumCulled = false; m.renderOrder = 10; m.layers.set(RJ.LATE); S.scene.add(m); ev.meshes.push(m); return m; };
     // the cloud at its peak detaches into the air mass: two layers that stretch aft, erode and evaporate
-    ev.shell = add(S.coneGeo, { fx: 13, fy: 1.6, flow: 0.7, ends: 1 });
-    ev.inner = add(S.coneGeo, { fx: 9, fy: 1.3, flow: 0.5, ends: 1 });
-    for (const mm of [ev.shell, ev.inner]) { mm.material.uniforms.top.value = 1; mm.material.uniforms.shock.value = 0.55; }
+    ev.shell = add(S.vcGeo, { fx: 9, fy: 2.2, flow: -0.8, ends: 1 });
+    ev.inner = add(S.vcGeo, { fx: 7, fy: 2.0, flow: -0.6, ends: 1 });
+    for (const mm of [ev.shell, ev.inner]) { mm.material.uniforms.top.value = 0.25; mm.material.uniforms.radial.value = 1; }
     S.events.push(ev);
     // sunlit particle burst + lingering wisps
     const near = W.cloudNear || 0;
@@ -167,18 +180,19 @@
       if (tr > 0.01) {
         const hum = S.humidity(ac);
         // sparse air (high, cold, dry) gives a faint veil; humid low air a dense, bright cloud
-        const a = tr * (0.12 + hum * 0.95);
+        const a = tr * (0.32 + hum * 0.78);
         const cone = coneFor(ac);
         cone.visible = a > 0.015;
-        const sh = shockAt(m);
-        for (const mm of cone.children) {
+        const ud = cone.userData, grow = 0.55 + 0.45 * RJ.smooth(0.92, 1.0, m), aft = RJ.smooth(1.0, 1.08, m);
+        cone.scale.set(grow, grow, 1 + aft * 0.6);
+        cone.position.z = ud.z0 + aft * ud.len * 0.35;                       // the shock walks aft past Mach 1
+        cone.children.forEach((mm, i) => {
           const U = mm.material.uniforms;
-          U.time.value += dt * (1 + (m - 0.9) * 4);
-          U.opacity.value = a * (mm === cone.children[0] ? 1.25 : 0.8);
-          U.erosion.value = 0.52 - a * 0.22;
-          U.shock.value = sh;
+          U.time.value += dt * (1 + (m - 0.9) * 3);
+          U.opacity.value = a * [1.45, 1.0, 0.7][i];
+          U.erosion.value = 0.5 - a * 0.2;
           if ((U._syncT = (U._syncT || 0) + dt) > 1) { U._syncT = 0; syncLight(mm.material); }
-        }
+        });
       } else if (ac._cone) ac._cone.visible = false;
     }
     for (let i = S.events.length - 1; i >= 0; i--) {
@@ -188,15 +202,15 @@
       // the vapor belongs to the air mass: it barely follows the jet and drifts to a stop
       const drift = Math.exp(-t * 1.8) * 0.16;
       for (const mm of ev.meshes) { mm.position.addScaledVector(ev.vel, drift * dt); mm.material.uniforms.time.value += dt; }
-      const R = ev.R0, L = ev.L0 * 1.7, v = ev.vis;
-      // left behind in the air: it widens a little, stretches aft as the flow relaxes, and evaporates from the edges
-      const sr = 1 + 0.55 * (1 - Math.exp(-t * 2.2)), sl = 1 + 2.4 * (1 - Math.exp(-t * 1.6));
-      ev.shell.scale.set(R * sr, R * sr * 0.92, L * sl);
-      ev.inner.scale.set(R * sr * 0.8, R * sr * 0.74, L * sl * 0.9);
-      const fade = Math.exp(-t * 1.5) * RJ.smooth(0, 0.06, t);
-      ev.shell.material.uniforms.opacity.value = v * 0.8 * fade;
-      ev.inner.material.uniforms.opacity.value = v * 0.5 * fade;
-      for (const mm of [ev.shell, ev.inner]) { const U = mm.material.uniforms; U.erosion.value = 0.34 + t * 0.32; U.shock.value = 0.55 - Math.min(0.45, t * 0.25); }
+      const R = ev.R0, L = ev.L0, v = ev.vis;
+      // left behind in the air: it billows a little wider, stretches aft as the flow relaxes, and evaporates
+      const sr = 1 + 0.35 * (1 - Math.exp(-t * 2.2)), sl = 1 + 2.0 * (1 - Math.exp(-t * 1.6));
+      ev.shell.scale.set(R * sr, R * sr * 1.04, L * sl);
+      ev.inner.scale.set(R * sr * 0.86, R * sr * 0.9, L * sl * 0.85);
+      const fade = Math.exp(-t * 1.4) * RJ.smooth(0, 0.05, t);
+      ev.shell.material.uniforms.opacity.value = v * 0.85 * fade;
+      ev.inner.material.uniforms.opacity.value = v * 0.55 * fade;
+      for (const mm of [ev.shell, ev.inner]) mm.material.uniforms.erosion.value = 0.4 + t * 0.35;
       if (t > 3.4) {
         for (const mm of ev.meshes) { S.scene.remove(mm); mm.material.dispose(); }
         S.events.splice(i, 1);
