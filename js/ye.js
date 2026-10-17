@@ -12,9 +12,9 @@
   const G = (x, z) => RJ.world.gen.height(x, z);
   const U = () => RJ.castle.util;
   const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = V3(), _p = V3(), _c = new THREE.Color();
-  const K = 1300;                 // metres per human-metre: a 1.85 m figure becomes ~2.4 km
+  const K = 1650;                 // metres per human-metre: a 1.85 m figure becomes ~3.05 km
   const PED = 290;                // pedestal height (m)
-  YE.DEF = { id: "ye", name: "The Ye Monument", sub: "Kanye West in bronze: 2.4 km tall on a 290 m pedestal", icon: "tower", r: 16000, xp: 700 };
+  YE.DEF = { id: "ye", name: "The Ye Monument", sub: "Kanye West in bronze: 3 km tall, ringed by 15 album monuments", icon: "tower", r: 16000, xp: 700 };
   if (RJ.atlas && RJ.atlas.DEFS && !RJ.atlas.DEFS.some((d) => d.id === "ye")) RJ.atlas.DEFS.push(YE.DEF);
 
   /* ======================= site ======================= */
@@ -77,7 +77,7 @@
 
   /** The head: a deformed sphere in normalised coordinates (x right, y up, z forward), then scaled to size. */
   function head() {
-    const geo = new THREE.SphereGeometry(1, 160, 120), P = geo.attributes.position, col = new Float32Array(P.count * 3);
+    const geo = new THREE.SphereGeometry(1, 224, 168), P = geo.attributes.position, col = new Float32Array(P.count * 3);
     const SX = 0.079, SY = 0.118, SZ = 0.1;
     for (let i = 0; i < P.count; i++) {
       let x = P.getX(i), y = P.getY(i), z = P.getZ(i);
@@ -103,6 +103,11 @@
       z += 0.11 * gs(y, -0.37, 0.045) * gs(x, 0, 0.27) * front;
       z -= 0.055 * gs(y, -0.43, 0.016) * gs(x, 0, 0.25) * front;
       z += 0.1 * gs(y, -0.5, 0.045) * gs(x, 0, 0.23) * front;
+      // carved irises and pupils (classical statue eyes), philtrum, nasolabial folds, fuller cheeks
+      for (const ex of [0.33, -0.33]) { const re = Math.hypot(x - ex, y - 0.072); z -= (0.014 * gs(re, 0.055, 0.01) + 0.022 * gs(re, 0, 0.018)) * front; }
+      z -= 0.014 * gs(x, 0, 0.03) * gs(y, -0.31, 0.03) * front;
+      for (const sx of [1, -1]) { const t = RJ.clamp((y + 0.22) / -0.24, 0, 1), fx = sx * (0.21 + 0.1 * t), fy = -0.22 - 0.24 * t; z -= 0.03 * gs(Math.hypot(x - fx, y - fy), 0, 0.03) * front * (y < -0.18 && y > -0.5 ? 1 : 0); }
+      x += Math.sign(x) * 0.03 * gs(y, -0.25, 0.15) * sm(0, 0.5, z);
       // cheekbones
       const cb = gs(y, -0.02, 0.12) * gs(ax, 0.6, 0.15) * sm(-0.2, 0.4, z); x += Math.sign(x) * 0.05 * cb; z += 0.03 * cb;
       // hair (close buzz cut) and a short boxed beard joined by sideburns
@@ -159,6 +164,11 @@
     add(loft(jr, 64), 0.9);
     // zip placket down the front
     const zp = new THREE.BoxGeometry(0.012, 0.6, 0.012); zp.translate(0, 1.15, 0.178); add(zp, 0.7);
+    // patch pockets, hem band, zip pull and the hood's drawstrings
+    for (const s2 of [-1, 1]) { const pk = new THREE.BoxGeometry(0.11, 0.1, 0.03); pk.translate(s2 * 0.12, 0.96, 0.178); add(pk, 0.8); }
+    { const hb = new THREE.TorusGeometry(1, 0.035, 12, 64); hb.rotateX(Math.PI / 2); hb.scale(0.235, 1, 0.168); hb.translate(0, 0.845, 0.005); add(hb, 0.78); }
+    { const zp2 = new THREE.BoxGeometry(0.018, 0.035, 0.01); zp2.translate(0.008, 1.44, 0.186); add(zp2, 1.15); }
+    for (const s2 of [-1, 1]) { const ds = new THREE.CylinderGeometry(0.004, 0.004, 0.13, 6); ds.translate(s2 * 0.035, 1.42, 0.19); add(ds, 1.1); const tip = new THREE.SphereGeometry(0.008, 8, 6); tip.translate(s2 * 0.035, 1.355, 0.19); add(tip, 1.15); }
     // bunched hood and high collar around the neck
     add(new THREE.TorusGeometry(0.105, 0.062, 20, 48).rotateX(Math.PI / 2).translate(0, 1.525, 0.0), 0.86);
     { const h = new THREE.SphereGeometry(1, 32, 20); h.scale(0.15, 0.08, 0.08); h.translate(0, 1.52, -0.11); add(h, 0.86); }
@@ -188,6 +198,13 @@
       sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec3 vYW; varying vec3 vYN; uniform vec3 rjSpotP[4]; uniform vec3 rjSpotD[4]; uniform float rjNight;\nfloat ynH(vec2 p){ return fract(sin(dot(mod(p, 311.0), vec2(12.99, 78.23))) * 43758.5); }")
         // patina: green-grey weathering collects in hollows and streaks down from ledges; the polish survives on ridges
         .replace("#include <color_fragment>", "#include <color_fragment>\nfloat pat = smoothstep(0.35, 0.9, ynH(floor(vYW.xz * 0.02)) * 0.5 + 0.5 * (1.0 - abs(vYN.y))) * 0.35;\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.32, 0.42, 0.36) * dot(diffuseColor.rgb, vec3(0.5)), pat * (1.0 - vColor.r * 0.5));")
+        .replace("#include <normal_fragment_maps>", [
+          "#include <normal_fragment_maps>",
+          "{ float hm = 1.0 - smoothstep(0.42, 0.8, vColor.r), fm = smoothstep(0.7, 0.86, vColor.r) * (1.0 - smoothstep(0.93, 0.99, vColor.r));",
+          "  vec3 q = vYW * 0.55; float n0 = ynH(floor(q.xy) + floor(q.z) * 7.0), n1 = ynH(floor(q.xy + vec2(0.5, 0.0)) + floor(q.z) * 7.0), n2 = ynH(floor(q.yz + vec2(0.0, 0.5)) + 3.0);",
+          "  vec3 bw = vec3(n0 - n1, n0 - n2, n1 - n2) * (hm * 0.5 + fm * 0.12);",
+          "  normal = normalize(normal + (viewMatrix * vec4(bw, 0.0)).xyz); }"
+        ].join("\n"))
         .replace("#include <metalnessmap_fragment>", "#include <metalnessmap_fragment>\nroughnessFactor = mix(0.9, roughnessFactor, smoothstep(0.45, 0.85, vColor.r)); metalnessFactor *= mix(0.55, 1.0, smoothstep(0.45, 0.85, vColor.r));")
         .replace("#include <emissivemap_fragment>", [
           "#include <emissivemap_fragment>",
@@ -231,6 +248,8 @@
     for (let k = 0; k < 18; k++) at(GR, new THREE.BoxGeometry(420 - k * 6, 7.2, 30), 0, 22 + k * 7.2 - 3.6, 600 + 260 - k * 15);   // grand stair to the base
     // lamp standards around the plaza (scale reference: about the size of a street lamp to a person on the plaza)
     for (let k = 0; k < 24; k++) { const a = (k / 24) * TAU, x = Math.cos(a) * 880, z = Math.sin(a) * 880; at(DK, new THREE.CylinderGeometry(1.2, 1.6, 30, 8), x, 35, z); LT.push(x, 51, z); }
+    // twin reflecting pools flanking the grand stair, mirror-dark
+    for (const sx of [-1, 1]) { const pool = new THREE.Mesh(new THREE.BoxGeometry(200, 1, 300), new THREE.MeshStandardMaterial({ color: 0x0c1418, roughness: 0.03, metalness: 0.95 })); pool.position.set(sx * 420, 20.4, 760); pool.receiveShadow = true; grp.add(pool); at(GD, new THREE.BoxGeometry(212, 2, 312), sx * 420, 20.2, 760); }
     const pm = (list, mat) => { const m = new THREE.Mesh(U().merge(list), mat); m.castShadow = true; m.receiveShadow = true; grp.add(m); return m; };
     pm(GR, std(0xb7b0a4, 0.85)); pm(DK, std(0x2e2b2a, 0.55, 0.2)); pm(GD, std(0xc9a24a, 0.3, 1.0));
     // "YE" in gilded letters, 70 m tall, on all four faces of the base
@@ -315,6 +334,12 @@
       update: (dt, cam) => update(lmk, dt, cam)
     };
     YE.lm = lmk;
+    if (RJ.yeAlbums) {
+      try { RJ.yeAlbums.build(lmk); } catch (e) { console.warn("Album monuments failed", e); }
+      const sol = lmk.solidAt, ht = lmk.heightAt;
+      lmk.solidAt = (p) => sol(p) || RJ.yeAlbums.solidAt(p);
+      lmk.heightAt = (x, z) => Math.max(ht(x, z), RJ.yeAlbums.heightAt(x, z));
+    }
     return lmk;
   };
 
@@ -331,6 +356,7 @@
     for (const b of lm.beams) b.material.opacity = nk * 0.09;
     lm.warnMat.color.setRGB((lm.t % 1.5) < 0.25 ? 4 : 0.15, 0.05, 0.03);
     lm.lampMat.color.setRGB(1.5, 1.2, 0.8).multiplyScalar(0.1 + nk * 1.6);
+    if (RJ.yeAlbums) RJ.yeAlbums.update(dt, cam, lm.t, nk);
   }
 
   /** Free Flight start: 9 km out at shoulder height, facing the statue. */

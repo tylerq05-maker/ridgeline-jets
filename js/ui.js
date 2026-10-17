@@ -340,7 +340,7 @@
   };
 
   /* ---------------- settings ---------------- */
-  const SET_TABS = [["graphics", "Graphics"], ["audio", "Audio"], ["controls", "Controls"], ["camera", "Camera & HUD"], ["progress", "Progression"]];
+  const SET_TABS = [["graphics", "Graphics"], ["audio", "Audio"], ["controls", "Controls"], ["camera", "Camera & HUD"], ["albums", "Album art"], ["progress", "Progression"]];
   UI.setTab = "graphics";
   function row(label, hint, control) { return `<div class="setrow"><span class="lb">${esc(label)}${hint ? `<span class="hint">${esc(hint)}</span>` : ""}</span>${control}</div>`; }
   function chipCtl(key, items) { return `<div class="chips">${items.map(([v, n]) => `<button class="chip" data-set="${key}" data-val="${v}" aria-pressed="${String(RJ.settings[key]) === String(v)}">${esc(n)}</button>`).join("")}</div>`; }
@@ -401,11 +401,14 @@
       h += row("Show HUD", null, toggle("hud"));
       h += row("Challenge ghosts", `Your best run flown as a translucent jet (${RJ.keyLabel(RJ.settings.keys.ghost)} toggles in flight)`, toggle("ghosts"));
       h += row("HUD color", null, chipCtl("hudColor", [["green", "Green"], ["amber", "Amber"], ["white", "White"]]));
+    } else if (t === "albums") {
+      h += RJ.yeAlbums ? RJ.yeAlbums.settingsHTML(row, esc) : "";
     } else {
       h += row("Aircraft", "All 22 aircraft are unlocked. XP still earns ranks and challenges are still tracked.", "");
       h += `<div class="setrow"><span class="lb">Reset progress<span class="hint">Clears XP, challenges, records and stats.</span></span><button class="ghost small" id="prog-reset">${UI._confirmReset ? "Tap again to reset" : "Reset progress"}</button></div>`;
     }
     $("set-body").innerHTML = h;
+    if (t === "albums" && RJ.yeAlbums) RJ.yeAlbums.bindUI($("set-body"), UI.renderSettings);
   };
   function applySetting(key) {
     RJ.saveSettings();
