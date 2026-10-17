@@ -451,6 +451,7 @@
     if (P.airbase) sites.push(Object.assign({ type: "pad", kind: "airbase", fall: 480 }, P.airbase));
     if (P.lake) sites.push({ type: "lake", kind: "lake", x: P.lake.x, z: P.lake.z, r: P.lake.r, fall: P.lake.r * 0.7, level: P.lake.level, depth: 38, noClear: true });
     if (RJ.realms) RJ.realms.plan(gen, P, A.home, sites);
+    if (RJ.cannon) RJ.cannon.plan(gen, A.home, sites);
     W.castle = castle;
     W.setSites(sites);
     if (W.castleGroup) { W.scene.remove(W.castleGroup); RJ.castle.dispose(W.castleGroup); }
@@ -474,6 +475,7 @@
     if (P.carrier && RJ.carrier) tryB("carrier", (s) => { const g = RJ.carrier.build(s); return { group: g, s, heightAt: RJ.carrier.heightAt, marker: V3(s.x, 80, s.z), deck: true }; }, P.carrier);
     tryB("summit", buildSummit, P.summit);
     if (RJ.realms) RJ.realms.build(add);
+    if (RJ.cannon && RJ.cannon.site) tryB("cannon", () => RJ.cannon.build(), RJ.cannon.site);
     if (RJ.nyc) {
       // New York builds lazily: the first time the camera comes within 45 km (or a flight starts there)
       const [cx, cz] = RJ.nyc.esbWorld();

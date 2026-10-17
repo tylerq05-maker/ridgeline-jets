@@ -160,7 +160,7 @@
     if (camera.position.y < gy) camera.position.y = gy;
     // shake: kicks (boom, blasts, hits) + continuous (afterburner, guns, G, transonic buffet, low-level turbulence)
     if (RJ.settings.shake && f.alive) {
-      let s = cam.shake + cam.base + (f.isPlayer ? RJ.camFx.shake : 0) + f.abLevel * 0.05 + (f.firing ? 0.12 : 0) + Math.max(0, Math.abs(f.g) - 5) * 0.02;
+      let s = cam.shake + cam.base + (f.isPlayer ? RJ.camFx.shake : 0) + (RJ.cannon ? RJ.cannon.shake * 0.6 : 0) + f.abLevel * 0.05 + (f.firing ? 0.12 : 0) + Math.max(0, Math.abs(f.g) - 5) * 0.02;
       if (mode === "cinematic" || mode === "boom") s *= 0.25;
       if (s > 0.001) {
         const k = s * (mode === "cockpit" ? 0.0045 : 0.008);
@@ -211,9 +211,14 @@
     if (mode === "full") { cam.temp = { t: 2.8, dur: 2.8, side }; cam.blend = 1; return; }
     PIP.t = PIP.dur = 3.4; PIP.side = side; PIP.target = ac;
   }
+  /** A scripted inset shot (e.g. the Grand Cannon firing): fn(camera, progress 0..1) places the camera. */
+  RJ.pipShot = function (fn, dur) {
+    if (RJ.settings.boomCam === "off" || (PIP.t > 0.5 && PIP.target)) return false;
+    PIP.t = PIP.dur = dur; PIP.shot = fn; PIP.target = null; return true;
+  };
   function renderPip(dt) {
     const el = $("pip");
-    if (PIP.t <= 0 || !PIP.target) { if (!el.hidden) el.hidden = true; return; }
+    if (PIP.t <= 0 || (!PIP.target && !PIP.shot)) { PIP.shot = null; if (!el.hidden) el.hidden = true; return; }
     PIP.t -= dt;
     const W = innerWidth, H = innerHeight;
     const w = Math.round(Math.min(380, W * 0.34)), h = Math.round(w * 9 / 16);
@@ -222,11 +227,13 @@
     el.style.left = x + "px"; el.style.top = top + "px"; el.style.width = w + "px"; el.style.height = h + "px";
     el.style.opacity = RJ.clamp(PIP.t / 0.4, 0, 1);
     const f = PIP.target;
-    orbitShot(f, 1 - PIP.t / PIP.dur, PIP.side, PIP.cam.position);
-    PIP.cam.lookAt(_ob.copy(f.pos).addScaledVector(f.fwd, -f.vis.dims.len * 0.6));
+    if (f) {
+      orbitShot(f, 1 - PIP.t / PIP.dur, PIP.side, PIP.cam.position);
+      PIP.cam.lookAt(_ob.copy(f.pos).addScaledVector(f.fwd, -f.vis.dims.len * 0.6));
+    } else PIP.shot(PIP.cam, 1 - PIP.t / PIP.dur);
     PIP.cam.fov = 46;
     PIP.cam.aspect = w / h; PIP.cam.far = camera.far; PIP.cam.updateProjectionMatrix();
-    const hidden = !f.mesh.visible;
+    const hidden = f && !f.mesh.visible;
     if (hidden) f.mesh.visible = true;
     renderer.setRenderTarget(null);
     renderer.setViewport(x, H - top - h, w, h); renderer.setScissor(x, H - top - h, w, h);
@@ -276,6 +283,7 @@
         P.sun = [(sp.x + 1) / 2, (sp.y + 1) / 2, k, c.r, c.g, c.b, 0.55 * (1 - (wx.dark || 0)), camMode === "cockpit" ? 0.6 : 1.0];
       }
     }
+    if (RJ.cannon) RJ.cannon.screenFx(P, camera);
     P.shocks = RJ.sonic.screenShocks(camera);
     P.flash = Math.max(0, P.flash - dt * 2.2);
     P.chroma = RJ.damp(P.chroma, 0, 4, dt);

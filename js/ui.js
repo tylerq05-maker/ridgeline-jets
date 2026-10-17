@@ -50,6 +50,7 @@
   /* ---------------- landmark icons and the discovery card ---------------- */
   UI.ICONS = {
     castle: "M4 21V9l3 2V6l3 2V4h4v4l3-2v5l3-2v12zM10 21v-5h4v5",
+    cannon: "M3 21h18M5 21v-4h14v4M8 17v-4h8v4M10 13l9-9 2 2-9 9M19 4l2-2",
     dam: "M3 6h18M4 6c1 8 2 12 4 15h8c2-3 3-7 4-15M9 6v15M15 6v15",
     arch: "M3 21V12a9 9 0 0118 0v9h-5v-8a4 4 0 00-8 0v8z",
     light: "M10 21l1-12h2l1 12zM9 9h6M10 6h4v3h-4zM12 3v3M3 5l5 2M21 5l-5 2",
