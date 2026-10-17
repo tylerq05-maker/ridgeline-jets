@@ -25,7 +25,7 @@
     light: { agl: [500, 1400], spd: 0.75, civ: true, call: ["Cessna", "Mustang", "November"] },
     heli: { agl: [320, 750], kin: 62, mil: true, call: ["Dustoff", "Saber"] },
     oddity: { agl: [260, 650], kin: 58, civ: true, call: ["Skylark", "Jetson"] },
-    fighter: { agl: [1300, 6500], spd: 0.46, mil: true, call: ["Viper", "Eagle", "Hornet", "Lancer", "Ghost"] },
+    fighter: { alt: [4500, 11000], spd: 0.46, mil: true, call: ["Viper", "Eagle", "Hornet", "Lancer", "Ghost"] },
     bomber: { alt: [6500, 11500], spd: 0.72, mil: true, call: ["Doom", "Spirit", "Bone"] },
     recon: { alt: [15500, 22000], spd: 0.62, mil: true, call: ["Aspen", "Blackbird"] },
     space: { agl: [700, 2600], kin: 380, civ: true, call: ["Rogue", "Gold"] }
@@ -59,7 +59,7 @@
   const cruiseOf = (id, kind) => { const s = RJ.AIRCRAFT[id], K = KIND[kind]; return K.kin ? K.kin * (s.flight.model === "space" ? 1 : s.flight.model === "car" || s.flight.model === "bike" ? 0.9 : 1) : Math.min(900, Math.max(s.flight.vstall * 1.7, s.flight.vmax * K.spd)); };
 
   /* ======================= settings ======================= */
-  A.DENSITY = { off: 0, light: 7, normal: 12, busy: 18 };
+  A.DENSITY = { off: 0, light: 3, normal: 6, busy: 9 };   // full-physics military events; the civil traffic is the background layer below
   A.WANTED_COUNTS = [0, 1, 2, 3, 4, 6];            // default fighters per star level (5 stars: the six-ship F-22 arrowhead)
   A.RESPONSE = { light: 0.6, standard: 1, heavy: 1.5 };
   const density = () => A.DENSITY[RJ.settings.airTraffic || "normal"] || 0;
@@ -83,7 +83,7 @@
   /** A route that enters from the spawn point, passes the player's area off to one side, and leaves far beyond. */
   function crossing(pl, kind, opt) {
     opt = opt || {};
-    const K = KIND[kind], fwd = flat(pl.vel.lengthSq() > 1 ? pl.vel : pl.fwd).clone();
+    const K0 = KIND[kind], K = opt.agl ? Object.assign({}, K0, { alt: null, agl: opt.agl }) : K0, fwd = flat(pl.vel.lengthSq() > 1 ? pl.vel : pl.fwd).clone();
     const fast = pl.speed > 380;
     const brg = opt.brg != null ? opt.brg : (Math.random() < (fast ? 0.85 : 0.62) ? rand(-1, 1) * (fast ? 70 : 110) : rand(110, 250)) * DEG;
     const D = opt.dist || (K.agl && K.agl[1] < 1500 ? rand(4500, 7500) : rand(7500, 12500));
@@ -344,7 +344,6 @@
 
   /* ======================= events ======================= */
   const EVENTS = [
-    { id: "airliner", w: 5 }, { id: "business", w: 1.1 }, { id: "light", w: 2.4 }, { id: "heli", w: 0.9 },
     { id: "patrol", w: 2.6 }, { id: "single", w: 1.6 }, { id: "pair", w: 1.3, cd: 40 }, { id: "fastpass", w: 0.8, cd: 75 },
     { id: "bomber", w: 0.9, cd: 30 }, { id: "recon", w: 0.5, cd: 60 }, { id: "space", w: 0.35, cd: 200 }, { id: "oddity", w: 0.35, cd: 150 }
   ];
@@ -353,7 +352,7 @@
     switch (e.id) {
       case "airliner": case "business": case "light": case "heli": case "recon": case "space": case "oddity":
         return spawnSingle(pl, e.id, { mil: e.id === "heli" || e.id === "recon" });
-      case "single": return spawnSingle(pl, "fighter", { dynamic: true, mil: true });
+      case "single": return spawnSingle(pl, "fighter", Math.random() < 0.2 ? { dynamic: true, mil: true, agl: [350, 900] } : { dynamic: true, mil: true }); // now and then a low-level training run
       case "patrol": return spawnGroup(pl, "fighter", 2 + Math.floor(Math.random() * 3), { climbs: Math.random() < 0.5 });
       case "pair": { // two fighters side by side, crossing close to the player's path
         const g = spawnGroup(pl, "fighter", 2, { lateral: rand(500, 1200), y: pl.pos.y + rand(-300, 500), spread: 0.55 });
@@ -431,10 +430,11 @@
   }
   function react(ac, kind) {
     const info = ac.air;
+    detachGhost(ac);
     if (info.show) { info.show.scatter(); radio("ba", "BLUE ANGEL 1", ["Blue Angels taking fire! Knock it off, knock it off! Break and head for home!", "Boss here, we're under attack. Show's over, everybody out!"], 60); return; }
     if (info.resp) return;
     if (info.mil && info.grp) { for (const m of info.grp.members) if (m.alive && m.pos.distanceTo(ac.pos) < 12000) enlist(m); radio("pat", info.callsign.toUpperCase(), ["Taking fire! Weapons free, engage the bandit!", "We're being engaged! Flight, turn in and fight!"], 30); return; }
-    if (info.mil && !ac.kr) { enlist(ac); radio("pat1", info.callsign.toUpperCase(), ["I'm hit! Engaging the shooter!", "Bandit on me! Fighting back!"], 30); return; }
+    if (info.mil && !ac.kr && !ac.spec.flight.model) { enlist(ac); radio("pat1", info.callsign.toUpperCase(), ["I'm hit! Engaging the shooter!", "Bandit on me! Fighting back!"], 30); return; }
     // civilians (and anything flown on a kinematic path) run for it
     if (!info.fled) {
       info.fled = true;
@@ -448,7 +448,7 @@
   function enlist(ac, skill) {
     const info = ac.air;
     if (info.resp && !info.leaving) return;
-    release(ac); ac.kr = null;
+    detachGhost(ac); release(ac); ac.kr = null;
     ac.team = "red"; ac.neutral = false; info.resp = true; info.leaving = false;
     const p = pilotFor(ac, skill || (W.level >= 4 ? "ace" : "veteran"), { role: "fighter", objective: W.lastKnown.clone() });
     p.detect = 9000;
@@ -536,6 +536,246 @@
     for (let i = 0; i < 5; i++) s[i].className = i < l ? "on" : "";
   }
 
+
+  /* ======================= background traffic: flights on real routes ======================= *
+   * The bulk of the sky. Dozens of flights fly between the cities, airfields and far-off gateways (long-haul
+   * traffic crossing the map), on airways with semicircular flight levels, climbing out of and descending into
+   * the airports. Each is a light kinematic point (no flight model), drawn as one instanced silhouette layer (split
+   * between the main and the far-horizon pass so they show out to the haze) plus a glint / nav-light dot, with
+   * contrails at cruise height. Within ~4.5 km a flight becomes a full aircraft (real model, targetable,
+   * shootable) that keeps flying its route; far again, it returns to the light layer. */
+  const GK = {
+    airliner: { w: 50, ids: ["b738", "b738", "e175", "a380"], fl: [300, 400], semi: true, spd: 236, as: "airliner", civ: true, call: ["Skyline", "Transpac", "Atlas", "Coastal", "Polar", "Meridian", "Northstar", "Sunward"] },
+    cargo: { w: 8, ids: ["c17"], fl: [280, 360], spd: 225, as: "airliner", mil: true, call: ["Reach", "Moose"] },
+    bizjet: { w: 10, ids: ["g650"], fl: [410, 450], spd: 250, as: "business", civ: true, call: ["Exec", "Gulf", "Citation"] },
+    ga: { w: 11, pool: "light", agl: [450, 2400], spd: 0.7, as: "light", civ: true, local: true, call: ["Cessna", "November", "Mustang"] },
+    military: { w: 12, pool: "milx", fl: [160, 380], spd: 0.5, as: "fighter", mil: true, pair: 0.5, call: ["Viper", "Eagle", "Hornet", "Doom", "Bone"] },
+    recon: { w: 1.2, pool: "recon", fl: [560, 720], spd: 0.6, as: "recon", mil: true, call: ["Aspen", "Blackbird"] },
+    heli: { w: 4, pool: "heli", agl: [250, 650], spd: 62, as: "heli", mil: true, local: true, city: true, call: ["Saber", "Dustoff", "Newscopter"] }
+  };
+  const AIRLINES = [["skyline", "Skyline Air", 0xf3f5f7, 0x1d5fae, 0xd6302f], ["polar", "Polar Atlantic", 0xf6f6f6, 0x0d2a5c, 0x27a6d9], ["sunward", "Sunward", 0xffffff, 0xf08a1c, 0xd8342a],
+    ["meridian", "Meridian", 0xe9ecef, 0x2a3d4e, 0xb78a2a], ["northstar", "Northstar", 0xf2f4f6, 0x5b2a86, 0xf2c12e], ["coastal", "Coastal", 0xfafafa, 0x18908a, 0x0e4d6b]];
+  for (const [k, n, b, t, a] of AIRLINES) RJ.PAINTS["al_" + k] = { name: "Airline: " + n, body: b, trim: t, accent: a, hidden: true };
+  A.DENSITY_BG = { off: 0, light: 50, normal: 85, busy: 130 };  // flights within ~32 km (×1.4 near New York and San Francisco)
+  const G = (A.ghosts = []);
+  let HUBS = null;
+  function hubs() {
+    if (HUBS) return HUBS;
+    const out = [];
+    // the two big airports; everything else is en-route traffic between gateways beyond the map and airway fixes
+    // across it, so away from the cities flights are at cruise levels, not on approach to every small region
+    // each city has several airports around it (arrivals and departures spread out instead of converging on one point)
+    const reg = (id, ap) => { const r = RJ.world.findRegion(id); if (r) for (const [dx, dz, w] of ap) out.push({ id, x: r.x + dx, z: r.z + dz, w, air: true, e: H(r.x + dx, r.z + dz), city: true }); };
+    reg("nyc", [[14000, 9000, 2.6], [-15000, 4000, 2.2], [3000, -13000, 1.8]]); reg("sf", [[6000, 14000, 2.8], [-12000, -6000, 2]]);
+    for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2 + 0.2; out.push({ id: "gw" + i, x: -25000 + Math.cos(a) * 260000, z: 45000 + Math.sin(a) * 260000, w: 2.2, air: false, e: 0 }); }
+    for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + 0.6; out.push({ id: "fix" + i, x: -25000 + Math.cos(a) * 70000, z: 45000 + Math.sin(a) * 70000, w: 1.4, air: false, e: 0 }); }
+    return (HUBS = out);
+  }
+  function segDist(px, pz, a, b) {
+    const dx = b.x - a.x, dz = b.z - a.z, L = dx * dx + dz * dz;
+    const t = RJ.clamp(((px - a.x) * dx + (pz - a.z) * dz) / L, 0, 1);
+    return Math.hypot(a.x + dx * t - px, a.z + dz * t - pz);
+  }
+  /** An airway passing near the player: a pair of hubs, weighted by size and closeness. */
+  function pickLane(P) {
+    const Hs = hubs(), c = []; let sum = 0;
+    for (const a of Hs) for (const b of Hs) {
+      if (a === b) continue;
+      const d = segDist(P.x, P.z, a, b); if (d > 20000) continue;
+      const w = a.w * b.w / (1 + d / 6000); c.push({ a, b, w }); sum += w;
+    }
+    let r = Math.random() * sum;
+    for (const x of c) { r -= x.w; if (r <= 0) return x; }
+    return c[0] || null;
+  }
+  const nearCity = (P) => hubs().some((h) => h.city && Math.hypot(h.x - P.x, h.z - P.z) < 45000);
+  function pickKind(P) {
+    const city = nearCity(P);
+    let s = 0; for (const k in GK) s += GK[k].city && !city ? 0 : GK[k].w;
+    let r = Math.random() * s;
+    for (const k in GK) { if (GK[k].city && !city) continue; r -= GK[k].w; if (r <= 0) return k; }
+    return "airliner";
+  }
+  function ghostPool(K) { const R = roster(); return K.ids || (K.pool === "milx" ? R.fighter.concat(R.bomber) : R[K.pool]); }
+  function spawnGhost(P, initial) {
+    const kind = pickKind(P), K = GK[kind], id = pickId(K.as === "fighter" ? "fighter" : K.as, ghostPool(K)), spec = RJ.AIRCRAFT[id];
+    const g = { uid: (A.gid = (A.gid || 0) + 1), kind, K, id, spec, len: Math.max(spec.dims ? spec.dims.len : 0, 12), pos: V3(), dir: V3(), yaw: 0, pitch: 0, bank: 0, t: 0, a: null, b: null, ac: null, fx: 0 };
+    g.span = 1; g.len = (spec.len || 0) || ({ a380: 73, b738: 39.5, e175: 31.7, c17: 53, g650: 30, c172: 8.3, p51: 9.8 }[id] || 18);
+    g.call = `${RJ.pick(K.call)} ${++callN % 900 + 100}`;
+    g.livery = kind === "airliner" ? "al_" + RJ.pick(AIRLINES)[0] : null;
+    if (K.local) {
+      // local flying (light aircraft, helicopters over the cities): a heading across the area, low
+      const brg = Math.random() * Math.PI * 2, D = initial ? rand(1500, 14000) : rand(8000, 14000);
+      g.pos.set(P.x + Math.sin(brg) * D, 0, P.z + Math.cos(brg) * D);
+      g.dir.set(P.x - g.pos.x, 0, P.z - g.pos.z).normalize().applyAxisAngle(UP, rand(-0.7, 0.7));
+      g.agl = rand(K.agl[0], K.agl[1]);
+      g.pos.y = H(g.pos.x, g.pos.z) + g.agl;
+      g.spd = K.spd < 5 ? spec.flight.vmax * K.spd : K.spd;
+      g.turnT = rand(20, 50);
+    } else {
+      let L = pickLane(P);
+      if (!L) { const d = V3(1, 0, 0).applyAxisAngle(UP, Math.random() * 6.3); L = { a: { x: P.x - d.x * 150000, z: P.z - d.z * 150000, air: false, e: 0 }, b: { x: P.x + d.x * 150000, z: P.z + d.z * 150000, air: false, e: 0 } }; }
+      g.a = L.a; g.b = L.b;
+      g.dir.set(L.b.x - L.a.x, 0, L.b.z - L.a.z).normalize();
+      const side = V3(-g.dir.z, 0, g.dir.x), len = Math.hypot(L.b.x - L.a.x, L.b.z - L.a.z);
+      // closest point of the airway to the player, then back along it (not yet passed) or anywhere near (first fill)
+      const t0 = RJ.clamp(((P.x - L.a.x) * g.dir.x + (P.z - L.a.z) * g.dir.z), 0, len);
+      const t = RJ.clamp(t0 + (initial ? rand(-26000, 26000) : -rand(20000, 30000)), 0, len - 3000);
+      g.off = rand(-2600, 2600);
+      g.pos.set(L.a.x + g.dir.x * t + side.x * g.off, 0, L.a.z + g.dir.z * t + side.z * g.off);
+      // cruise level: semicircular rule (east odd, west even thousands) for the airways
+      const hdg = (Math.atan2(g.dir.x, -g.dir.z) / DEG + 360) % 360;
+      if (K.semi) { const lv = []; for (let f = K.fl[0]; f <= K.fl[1]; f += 10) if (((f / 10) % 2 === 1) === (hdg < 180)) lv.push(f); g.fl = RJ.pick(lv.length ? lv : [350]); }
+      else g.fl = Math.round(rand(K.fl[0], K.fl[1]) / 10) * 10;
+      g.cruise = g.fl * 30.48;
+      g.cspd = K.spd < 5 ? Math.min(spec.flight.vmax * K.spd, 700) : K.spd;
+      g.pos.y = ghostAlt(g);
+    }
+    g.yaw = Math.atan2(-g.dir.x, -g.dir.z);
+    G.push(g);
+    if (K.pair && Math.random() < K.pair && !K.local) {  // military: a two-ship, 300 m line abreast
+      const w = Object.assign({}, g, { pos: g.pos.clone().addScaledVector(V3(-g.dir.z, 0, g.dir.x), 300), dir: g.dir.clone(), ac: null, call: g.call.replace(/\d+$/, (m) => +m + 1), _crib: null });
+      w.pos.y = g.pos.y + 30; w.off = (g.off || 0) + 300; G.push(w);
+    }
+    return g;
+  }
+  /** Altitude a route flight wants here: cruise level, capped by the climb-out / approach slopes near airports. */
+  function ghostAlt(g) {
+    const p = g.pos;
+    let y = g.cruise;
+    // (slopes compressed a little for the size of the map: cruise level ~90 km out on departure, top of descent ~140 km)
+    if (g.a && g.a.air) y = Math.min(y, g.a.e + 350 + Math.hypot(p.x - g.a.x, p.z - g.a.z) * 0.12);   // climb-out
+    if (g.b && g.b.air) y = Math.min(y, g.b.e + 250 + Math.hypot(p.x - g.b.x, p.z - g.b.z) * 0.075);  // descent and approach
+    return Math.max(y, H(p.x, p.z) + 450, H(p.x + g.dir.x * 4000, p.z + g.dir.z * 4000) + 450);
+  }
+  function stepGhost(g, dt) {
+    const K = g.K;
+    g.t += dt; g.tyT = (g.tyT || 0) - dt;
+    const fresh = g.tyT <= 0; if (fresh) g.tyT = 0.5 + Math.random() * 0.2; // terrain and profile lookups twice a second, not every step
+    let ty = g.ty;
+    if (K.local) {
+      g.turnT -= dt;
+      if (g.turnT <= 0) { g.turnT = rand(25, 60); g.want = g.dir.clone().applyAxisAngle(UP, rand(-1, 1)); }
+      if (g.want) { const yw = Math.atan2(-g.want.x, -g.want.z); let d = yw - g.yaw; d = Math.atan2(Math.sin(d), Math.cos(d)); const r = RJ.clamp(d, -0.12 * dt, 0.12 * dt); g.yaw += r; g.bank = RJ.damp(g.bank, RJ.clamp(r / dt * 3, -0.5, 0.5), 2, dt); g.dir.set(-Math.sin(g.yaw), 0, -Math.cos(g.yaw)); }
+      if (fresh || ty == null) ty = g.ty = Math.max(H(g.pos.x, g.pos.z), H(g.pos.x + g.dir.x * 1500, g.pos.z + g.dir.z * 1500)) + g.agl;
+    } else {
+      if (fresh || ty == null) ty = g.ty = ghostAlt(g);
+      g.bank = RJ.damp(g.bank, 0, 1, dt);
+      // approach / climb-out speeds low down, cruise speed up high
+      const k = RJ.clamp((g.pos.y - (g.b && g.b.air ? g.b.e : 0) - 300) / 7000, 0, 1);
+      g.spd = 80 + (g.cspd - 80) * Math.pow(k, 0.6);
+    }
+    const vy = RJ.clamp((ty - g.pos.y) * 0.08, -13, 13);           // ~2,500 ft/min climbs and descents
+    g.pos.x += g.dir.x * g.spd * dt; g.pos.z += g.dir.z * g.spd * dt; g.pos.y += vy * dt;
+    g.vy = vy; g.pitch = Math.atan2(vy, g.spd);
+    // contrails at cruise height (jets only)
+    g.fx -= dt;
+    if (g.fx <= 0 && !g.ac) {
+      g.fx = 0.12;
+      const jet = g.spec.flight.eng !== "prop" && !g.spec.flight.model;
+      if (jet && g.pos.y > 7800 && g.pos.y < 20000) RJ.missileFx.contrail(g, tv.copy(g.dir).multiplyScalar(-g.len * 0.55).add(g.pos));
+      else if (g._crib) RJ.missileFx.contrail(g, null);
+    }
+  }
+  function ghostDone(g) { return g.b && g.b.air && Math.hypot(g.pos.x - g.b.x, g.pos.z - g.b.z) < 2500 && g.pos.y < g.b.e + 500; }
+  function dropGhost(i) { const g = G[i]; if (g._crib) RJ.missileFx.contrail(g, null); G.splice(i, 1); }
+  /** Within ~4.5 km: the full aircraft takes over the flight (same route, real model, targetable). */
+  function promote(g) {
+    const ac = make(g.id, "traffic", g.pos, g.yaw, g.spd, { kind: g.K.as, livery: g.livery, callsign: g.call, mil: !!g.K.mil });
+    ac.air.ghost = g; g.ac = ac;
+    if (g._crib) { ac._crib = g._crib; g._crib = null; }
+    ac.kin = (dt) => {
+      ac.pos.copy(g.pos); te.set(g.pitch, g.yaw, g.bank); ac.q.setFromEuler(te); ac.updateBasis();
+      ac.vel.set(g.dir.x * g.spd, g.vy || 0, g.dir.z * g.spd); ac.speed = ac.vel.length();
+      ac.throttle = 0.72; ac.time += dt; ac.agl = ac.pos.y - H(ac.pos.x, ac.pos.z); ac.mach = ac.speed / RJ.soundSpeed(ac.pos.y);
+      ac.lockedByT = Math.max(0, ac.lockedByT - dt);
+      if (RJ.vehicles && ac.vs) RJ.vehicles.animate(ac, dt);
+      ac.syncMesh();
+    };
+    return ac;
+  }
+  function demote(g) {
+    const ac = g.ac; g.ac = null;
+    if (ac._crib) { g._crib = ac._crib; ac._crib = null; }
+    const i = A.list.indexOf(ac); if (i >= 0) A.list.splice(i, 1);
+    RJ.combat.remove(ac);
+  }
+  /** Attacked or enlisted: the aircraft leaves its route for good (flies on its own from here). */
+  function detachGhost(ac) {
+    const g = ac.air && ac.air.ghost; if (!g) return;
+    ac.air.ghost = null; ac.kin = null;
+    const i = G.indexOf(g); if (i >= 0) G.splice(i, 1);
+    if (ac.spec.flight.model) kinRoute(ac, [ac.pos.clone().addScaledVector(ac.fwd, 20000)], g.spd, "heli");
+  }
+  function ghostTick(pl, step) {
+    const P = pl.pos, want = A.DENSITY_BG[RJ.settings.airTraffic || "normal"] * (nearCity(P) ? 1.4 : 1);
+    let promoted = 0, made = 0;
+    for (let i = G.length - 1; i >= 0; i--) {
+      const g = G[i];
+      if (g.ac && !g.ac.alive) { g.ac = null; dropGhost(i); continue; }
+      const d = Math.hypot(g.pos.x - P.x, g.pos.z - P.z, g.pos.y - P.y);
+      if (g.ac) {
+        promoted++;
+        const keep = pl.target === g.ac ? 14000 : 6500;
+        if (d > keep) demote(g);
+        continue;
+      }
+      if (d > 32000 || (ghostDone(g) && d > 4000)) { dropGhost(i); continue; }
+      if (d < 4500 && promoted < 30 && made < 6) { promote(g); promoted++; made++; } // a few per tick: no hitch
+    }
+    // keep the population up: fill fast when the area is empty (start, new location), then trickle in at the edges
+    const n = G.length, k = n < want * 0.6 ? 10 : n < want ? 3 : 0;
+    for (let i = 0; i < k; i++) spawnGhost(P, n < want * 0.6);
+  }
+  let GM = null;
+  const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = V3(), _c = new THREE.Color();
+  function ghostLayer() {
+    if (GM) return GM;
+    const geo = RJ.combat.impostorGeo(), mat = new THREE.MeshLambertMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    const inst = (layer) => { const m = new THREE.InstancedMesh(geo, mat, 300); m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); m.frustumCulled = false; m.count = 0; m.layers.set(layer); RJ.scene.add(m); return m; };
+    const pts = (layer) => {
+      const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(900), 3)); g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(900), 3));
+      const p = new THREE.Points(g, new THREE.PointsMaterial({ size: 2.6, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false, fog: false }));
+      p.frustumCulled = false; p.layers.set(layer); p.renderOrder = 5; RJ.scene.add(p); return p;
+    };
+    GM = { near: inst(0), far: inst(RJ.world.BACK), pn: pts(0), pf: pts(RJ.world.BACK) };
+    return GM;
+  }
+  function dropLayer() { if (!GM) return; for (const k in GM) { RJ.scene.remove(GM[k]); } GM = null; }
+  const KCOL = { airliner: 0xeef1f4, cargo: 0x7d858c, bizjet: 0xf6f6f6, ga: 0xf2efe8, military: 0x8a929b, recon: 0x2a2d31, heli: 0x5d6553 };
+  /** Draw the light layer (once per rendered frame). */
+  A.draw = function (cam) {
+    if (!A.on) return;
+    const L = ghostLayer(), cp = cam.position, night = RJ.world.night || RJ.world.sunElev < -2;
+    let nn = 0, nf = 0, pn = 0, pf = 0;
+    const PN = L.pn.geometry.attributes, PF = L.pf.geometry.attributes, blink = (A.t % 1.3) < 0.08;
+    for (const g of G) {
+      if (g.ac) continue;
+      const d = g.pos.distanceTo(cp); if (d > 60000) continue;
+      const far = d > 14000;
+      const s = g.len * Math.max(1, d / 3200);              // grows with range so a distant airliner is a readable speck, not a lost pixel
+      te.set(g.pitch, g.yaw, g.bank); _q.setFromEuler(te);
+      _m4.compose(g.pos, _q, _s.set(s, s, s));
+      const m = far ? L.far : L.near, i = far ? nf++ : nn++;
+      m.setMatrixAt(i, _m4); m.setColorAt(i, _c.setHex(KCOL[g.kind] || 0xdddddd));
+      // the dot: a sun glint by day, nav lights and strobes by night
+      const A_ = far ? PF : PN, j = far ? pf++ : pn++;
+      A_.position.array.set([g.pos.x, g.pos.y, g.pos.z], j * 3);
+      if (night) _c.setRGB(blink ? 1 : 0.9, blink ? 1 : 0.15, blink ? 1 : 0.12); else _c.setRGB(0.93, 0.94, 0.96);
+      A_.color.array.set([_c.r, _c.g, _c.b], j * 3);
+    }
+    for (const [m, n] of [[L.near, nn], [L.far, nf]]) { m.count = n; m.instanceMatrix.needsUpdate = true; if (m.instanceColor) m.instanceColor.needsUpdate = true; }
+    for (const [p, n] of [[L.pn, pn], [L.pf, pf]]) { p.geometry.setDrawRange(0, n); p.geometry.attributes.position.needsUpdate = true; p.geometry.attributes.color.needsUpdate = true; }
+  };
+  /** HUD: small markers on distant traffic so it can be spotted (nearest first). */
+  A.markers = function (pl, max = 10) {
+    if (!A.on) return [];
+    const out = [];
+    for (const g of G) { if (g.ac) continue; const d = g.pos.distanceTo(pl.pos); if (d < 26000) out.push({ g, d }); }
+    out.sort((a, b) => a.d - b.d);
+    return out.slice(0, max).map(({ g, d }) => ({ pos: g.pos, d, label: `${g.spec.short} ${g.pos.y > 5500 ? "FL" + Math.round(g.pos.y * 3.281 / 1000) * 10 : RJ.fmtInt(Math.round(g.pos.y * 3.281 / 100) * 100) + " ft"}` }));
+  };
+
   /* ======================= lifecycle ======================= */
   A.start = function (mode) {
     A.clear();
@@ -543,23 +783,27 @@
     if (!A.on) return false;
     RJ.combat.forceCrowd = true;
     A.nextEvent = 3; A.nextShow = rand(50, 95);
+    for (let i = 0; i < A.DENSITY_BG[RJ.settings.airTraffic || "normal"] * (nearCity(mode.player.pos) ? 1.4 : 1); i++) spawnGhost(mode.player.pos, true); // a full sky from the first second
     return true;
   };
   A.stop = function () {
     A.on = false; RJ.combat.forceCrowd = false;
     const el = document.getElementById("wanted"); if (el) el.remove();
     A.list = []; A.show = null;
+    for (let i = G.length - 1; i >= 0; i--) dropGhost(i);
+    dropLayer();
   };
   /** combat.reset() (respawn, mode change): the aircraft are already gone; forget them and the wanted level. */
   A.clear = function () {
     A.list = []; A.show = null; A.seen = A.seen || {}; A.cool = {}; A.t = A.t || 0;
+    for (const g of G) g.ac = null; // their full aircraft went with combat.reset(); the flights themselves fly on
     Object.assign(W, { level: 0, lastHostile: -1e9, lastEsc: -1e9, evade: 0, contact: false, nextSpawn: 0, raptors: false, raptorGrp: null, flashT: 0 });
     if (A.on) A.nextShow = Math.min(A.nextShow || 1e9, A.t + rand(60, 120));
   };
   A.armed = () => A.on;
   A.setLevel = (l) => setLevel(l, "Test"); // debugging / tests
   /** Player aircraft count for each state, for tests and the status line. */
-  A.stats = () => ({ traffic: A.list.filter((a) => a.alive && !a.air.resp && !a.air.show).length, responders: responders().length, show: !!A.show, level: W.level });
+  A.stats = () => ({ traffic: A.list.filter((a) => a.alive && !a.air.resp && !a.air.show).length, flights: G.length, promoted: G.filter((g) => g.ac).length, responders: responders().length, show: !!A.show, level: W.level });
 
   A.update = function (dt, pl) {
     if (!A.on) return;
@@ -567,6 +811,7 @@
     if (W.flashT > 0) W.flashT -= dt;
     A._acc = (A._acc || 0) + dt;
     if (A.show) { A.show.update(dt); if (A.show.done && !A.show.alive) A.show = null; }
+    for (const g of G) stepGhost(g, dt);
     if (A._acc < 0.25) { drawStars(); return; }
     const step = A._acc; A._acc = 0;
     if (!pl || !pl.alive) { drawStars(); return; }
@@ -575,12 +820,13 @@
       const a = A.list[i], info = a.air;
       const gone = !a.alive && (a.state === "dead" || A.t - (info.deadT || (info.deadT = A.t)) > 25);
       const d = a.pos.distanceTo(pl.pos);
-      const far = a.alive && !(info.resp && !info.leaving) && !(info.show && A.show && !A.show.done) && d > 21000;
+      const far = a.alive && !info.ghost && !(info.resp && !info.leaving) && !(info.show && A.show && !A.show.done) && d > 21000;
       if (gone || far) { A.list.splice(i, 1); RJ.combat.remove(a); }
       else if (a.alive && info.dynamic && a.pilot && Math.random() < step * 0.02 && a.agl > 1500) { a.pilot.rollT = rand(1.2, 2.2); a.pilot.rollDir = Math.random() < 0.5 ? -1 : 1; }
     }
     // ---- traffic ----
-    const want = density(), have = A.list.filter((a) => a.alive && !a.air.resp && !a.air.show).length;
+    ghostTick(pl, step);
+    const want = density(), have = A.list.filter((a) => a.alive && !a.air.resp && !a.air.show && !a.air.ghost).length;
     A.nextEvent -= step;
     if (have < want && A.nextEvent <= 0) {
       const e = pickEvent();
@@ -627,5 +873,5 @@
     }
   });
   // an NPC fighter fired at by the player recognises the threat right away (missile warning on its side)
-  RJ.on("missile", (e) => { const t = e.msl.target; if (A.on && byPlayer(e.by) && t && t.air && t.air.mil && !t.air.resp && !t.kr && !t.air.show) enlist(t); });
+  RJ.on("missile", (e) => { const t = e.msl.target; if (A.on && byPlayer(e.by) && t && t.air && t.air.mil && !t.air.resp && !t.kr && !t.spec.flight.model && !t.air.show) enlist(t); });
 })(window.RJ);

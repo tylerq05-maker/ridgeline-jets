@@ -155,7 +155,7 @@
     }
     /** s: {N, ab, thr, gain, air, front (0 tail-on .. 1 nose-on), pan, dop, interior} */
     apply(p, s) {
-      const t = this.ctx.currentTime, T = (param, v, tc = 0.06) => param.setTargetAtTime(v, t, tc);
+      const t = this.ctx.currentTime, T = (param, v, tc = 0.06) => param.setTargetAtTime(Math.min(v, 20000), t, tc); // Doppler on a fast fly-by can push a whine past the audio band
       const N = s.N, d = s.dop, fr = s.front, rear = 1 - fr;
       T(this.out.gain, s.gain, 0.09);
       if (this.lastQ !== p.scream) { this.lastQ = p.scream; this.rasp.f.Q.setTargetAtTime(p.scream ? 6 : 0.9, t, 0.2); }

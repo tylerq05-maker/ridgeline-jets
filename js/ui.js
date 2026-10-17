@@ -336,7 +336,7 @@
     const un = RJ.isUnlocked(h.sel);
     // paint jobs: saved per aircraft, applied to the hangar model and to your jet in every mode
     const paint = (RJ.settings.paint || {})[a.id] || "factory";
-    $("hg-paint").innerHTML = Object.entries(RJ.PAINTS).map(([k, v]) => `<button class="chip" data-paint="${k}" aria-pressed="${k === paint}">${esc(v.name)}</button>`).join("");
+    $("hg-paint").innerHTML = Object.entries(RJ.PAINTS).filter(([, v]) => !v.hidden).map(([k, v]) => `<button class="chip" data-paint="${k}" aria-pressed="${k === paint}">${esc(v.name)}</button>`).join("");
     $("hg-lock").hidden = un;
     if (!un) $("hg-lock").innerHTML = `<b>Locked for Dogfight.</b> ${esc(UI.unlockText(a))} You can still take it on a test flight in Free Flight.`;
     const sel = $("hg-select");

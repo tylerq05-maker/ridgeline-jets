@@ -146,7 +146,7 @@
       if (o.neutral && o.form) continue; // an airshow formation gets one bracket, on its leader
       const neutral = !!o.neutral, enemy = o.team !== pl.team && !neutral;
       const d = o.pos.distanceTo(pl.pos);
-      if (RJ.combat.crowd && d > (enemy ? 9000 : neutral ? 4000 : 2500)) continue; // big battles: bracket the nearby fight, not all 100 jets
+      if (RJ.combat.crowd && d > (enemy ? 9000 : neutral ? 7000 : 2500)) continue; // big battles: bracket the nearby fight, not all 100 jets
       const p = proj(o.pos, cam);
       if (!p.on) continue;
       if (o === pl.target) continue;
@@ -158,8 +158,19 @@
       x.moveTo(p.x - r, p.y + r - 4); x.lineTo(p.x - r, p.y + r); x.lineTo(p.x - r + 4, p.y + r);
       x.moveTo(p.x + r - 4, p.y + r); x.lineTo(p.x + r, p.y + r); x.lineTo(p.x + r, p.y + r - 4);
       x.stroke();
-      if (d < 6000 || o.tag) text((d / 1000).toFixed(1), p.x, p.y + r + 12, "center", 11);
+      if ((d < 6000 && !neutral) || o.tag) text((d / 1000).toFixed(1), p.x, p.y + r + 12, "center", 11); // traffic: bracket only (busy skies stay readable)
       if (o.tag) text(o.tag, p.x, p.y - r - 6, "center", 12); // multiplayer callsign
+    }
+    // distant traffic (Free Flight airspace): a small diamond and type / flight level, so it can be spotted
+    if (RJ.airspace && RJ.airspace.on && pl.alive) {
+      x.strokeStyle = "rgba(225,232,240,0.6)"; x.fillStyle = "rgba(225,232,240,0.75)"; x.lineWidth = 1;
+      let lab = 0;
+      for (const m of RJ.airspace.markers(pl, 14)) {
+        const p = proj(m.pos, cam); if (!p.on) continue;
+        x.beginPath(); x.moveTo(p.x, p.y - 4); x.lineTo(p.x + 4, p.y); x.lineTo(p.x, p.y + 4); x.lineTo(p.x - 4, p.y); x.closePath(); x.stroke();
+        if (lab++ < 4) text(`${m.label} · ${(m.d / 1000).toFixed(0)} km`, p.x, p.y - 8, "center", 10); // the nearest few get a label
+      }
+      x.lineWidth = 2;
     }
     x.strokeStyle = C; x.fillStyle = C;
     if (pl.alive && pl.target && pl.target.alive) targetBox(pl, cam, C);

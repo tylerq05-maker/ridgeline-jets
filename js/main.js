@@ -626,6 +626,7 @@
     if (steps === SIM_MAX) simAcc = Math.min(simAcc, SIM_DT); // too slow to keep up: drop time rather than spiral
     applyInterp(simAcc / SIM_DT);
     if (RJ.combat.crowd) RJ.combat.drawCrowd(camera);
+    if (RJ.airspace && RJ.airspace.on) RJ.airspace.draw(camera);
     const player = RJ.game.mode.player;
     const focus = !player.alive && mode.spectate && mode.spectate.alive ? mode.spectate : player;
     // continuous shake sources: transonic buffet and low, fast turbulence

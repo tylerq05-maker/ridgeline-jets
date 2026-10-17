@@ -735,6 +735,7 @@
     const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(P, 3)); g.computeVertexNormals();
     return g;
   }
+  C.impostorGeo = impostorGeo;
   const _m4 = new THREE.Matrix4(), _sc = V3(), _ic = new THREE.Color();
   C.drawCrowd = function (camera) {
     if (!C.crowdMesh) {
@@ -756,7 +757,7 @@
       const s = a.vis.dims.len * Math.max(1, d / 2000);
       _m4.compose(a.pos, a.q, _sc.set(s, s, s));
       cm.setMatrixAt(n, _m4);
-      cm.setColorAt(n, _ic.setHex(a.team === myTeam ? 0x5a6676 : 0x6a5a52));
+      cm.setColorAt(n, _ic.setHex(a.neutral ? 0xdfe3e7 : a.team === myTeam ? 0x5a6676 : 0x6a5a52)); // traffic: light airframes
       n++;
     }
     cm.count = n; cm.visible = n > 0;
