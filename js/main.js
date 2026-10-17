@@ -284,6 +284,7 @@
       }
     }
     if (RJ.cannon) RJ.cannon.screenFx(P, camera);
+    RJ.sonic.screenHeat(P, camera, focus);
     P.shocks = RJ.sonic.screenShocks(camera);
     P.flash = Math.max(0, P.flash - dt * 2.2);
     P.chroma = RJ.damp(P.chroma, 0, 4, dt);
@@ -646,6 +647,7 @@
     } else abL.intensity = 0;
     // audio
     RJ.audio.update(player, camera, camMode === "cockpit", RJ.combat.aircraft);
+    RJ.sonic.listen(camera, RJ.audio._camV, RJ.combat.aircraft);
     RJ.audio.setGun(player.firing && player.alive);
     if (player.alive && player.target && player.target.alive && player.spec.msl.n && player.missiles > 0 && player.lockT > 0) RJ.audio.tone(player.locked ? "locked" : "locking");
     else RJ.audio.tone(null);
@@ -712,16 +714,18 @@
       if (ac.isPlayer || ac.pos.distanceTo(camera.position) < 4000) RJ.sonic.trigger(ac);
     });
     RJ.on("boomfx", (e) => {
-      const d = e.center.distanceTo(camera.position);
+      // the crossing itself makes no boom for an outside listener (that comes when the cone sweeps over them,
+      // see RJ.sonic.listen); riding with the jet you get the structural / pressure cue and a short impulse
       const inPit = e.ac.isPlayer && cam.mode === "cockpit";
-      RJ.audio.sonicBoom(d, inPit, 0.8 + e.vis * 0.4);
+      const riding = e.ac === RJ.game.mode.player && !cam.temp && (cam.mode === "chase" || cam.mode === "cockpit");
+      if (riding) {
+        RJ.audio.machCue(inPit, e.vis);
+        cam.kick(inPit ? 0.45 : 0.8); cam.punch = 2.5;
+      }
       if (e.ac.isPlayer) {
-        cam.kick(1.5); cam.punch = 7;
-        RJ.post.fx.chroma = 0.006;
-        if (inPit) { RJ.post.fx.flash = 0.18 + e.vis * 0.22; RJ.post.fx.flashCol = [0.95, 0.97, 1.0]; }
-        RJ.ui.flash("MACH 1", e.vis > 0.6 ? "Shock cone" : "Sonic boom", 1.4);
+        RJ.ui.flash("MACH 1", e.vis > 0.55 ? "Condensation cloud" : "Supersonic", 1.2);
         startReplay(e.ac, e.center);
-      } else if (d < 1500) cam.kick(0.6 * (1 - d / 1500));
+      }
     });
     RJ.on("explosion", (e) => {
       const d = e.pos.distanceTo(camera.position);

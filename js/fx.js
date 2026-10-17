@@ -214,7 +214,7 @@
 
   /** The sonic boom's vapor: a dense sunlit shell around the airframe plus slow wisps that linger. */
   FX.boomBurst = (c, fwd, up, right, vel, R0, L0, vis, sunDir) => {
-    const n = Math.round(130 * Math.min(1.6, vis + 0.3));
+    const n = Math.round(70 * Math.min(1.6, vis + 0.2));
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
       const ca = Math.cos(a), sa = Math.sin(a);
@@ -223,7 +223,7 @@
       const r = R0 * (0.85 + Math.random() * 0.4);
       const along = (Math.random() - 0.5) * L0 * 0.55;
       const px = c.x + rx * r - fwd.x * along, py = c.y + ry * r - fwd.y * along, pz = c.z + rz * r - fwd.z * along;
-      const out = 16 + Math.random() * 38;
+      const out = 2 + Math.random() * 6;
       const lit = 0.78 + 0.22 * Math.max(0, rx * sunDir.x + ry * sunDir.y + rz * sunDir.z);
       FX.smokeP.spawn(px, py, pz, rx * out * 1.4 + vel.x * 0.05, ry * out * 1.4 + vel.y * 0.05, rz * out * 1.4 + vel.z * 0.05, 0.6 + Math.random() * 0.7, 1.8 + R0 * 0.2, 8 + R0 * 0.9, lit, lit, lit * 1.02, 0.42 * vis, 0, 2.2);
     }

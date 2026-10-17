@@ -385,6 +385,7 @@
   /** Per-frame: player engine (startup, spool, afterburner), up to three other aircraft with Doppler, environment. */
   AU.update = function (pl, cam, inCockpit, others) {
     if (!AU.ctx || !AU.engine || !pl) return;
+    AU._inPit = inCockpit;
     const now = performance.now() / 1000; // game clock: keeps spooling right even if the audio device is slow to start
     const dt = RJ.clamp(now - (AU._t || now), 0, 0.1); AU._t = now;
     // listener velocity (the camera may ride the jet, orbit it, or stand still for a fly-by)
@@ -458,8 +459,12 @@
     E.gustT -= 1 / 30;
     if (E.gustT <= 0) { E.gustT = 0.25 + Math.random() * 0.6; E.gustTo = 0.75 + Math.random() * 0.5; }
     E.gust = lerp(E.gust, E.gustTo || 1, 0.08);
-    const lo = Math.pow(q, 0.8) * (inCockpit ? 0.32 : 0.45) * E.gust + hyK * 0.5, hi = q * (inCockpit ? 0.1 : 0.3) + hyK * 0.25;
-    P(E.windLo.g.gain, lo, 0.15); P(E.windLo.f.frequency, 120 + Math.sqrt(q) * 260, 0.2);
+    // transonic: shocks dancing on the skin make the flow roar and buffet (M 0.85–1.0); once supersonic it settles
+    const M = pl.alive ? pl.mach || 0 : 0, tb = RJ.smooth(0.85, 0.98, M) * (1 - RJ.smooth(1.0, 1.1, M)), sup = RJ.smooth(1.0, 1.15, M);
+    const buf = tb * (0.75 + 0.5 * Math.sin(performance.now() * 0.023) * Math.sin(performance.now() * 0.0071));
+    const lo = Math.pow(q, 0.8) * (inCockpit ? 0.32 : 0.45) * E.gust * (1 + buf * 0.7 - sup * (inCockpit ? 0.18 : 0)) + hyK * 0.5;
+    const hi = q * (inCockpit ? 0.1 : 0.3) * (1 + tb * 0.5 - sup * (inCockpit ? 0.25 : 0)) + hyK * 0.25;
+    P(E.windLo.g.gain, lo, 0.1); P(E.windLo.f.frequency, (120 + Math.sqrt(q) * 260) * (1 - tb * 0.25), 0.2);
     P(E.windHi.g.gain, hi, 0.15); P(E.windHi.f.frequency, 700 + v * 6, 0.2);
     P(E.whistle.g.gain, inCockpit ? 0 : RJ.smooth(0.5, 1.2, q) * 0.025, 0.2); P(E.whistle.f.frequency, 1800 + v * 4, 0.2);
     // tyres on the runway: rumble that builds with speed, plus seams every ~25 m
@@ -587,7 +592,9 @@
     f.frequency.setValueAtTime(opts.f0, t); if (opts.f1) f.frequency.exponentialRampToValueAtTime(opts.f1, t + opts.dur);
     if (opts.q) f.Q.value = opts.q;
     const g = ctx.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(opts.gain, t + (opts.attack || 0.005)); g.gain.exponentialRampToValueAtTime(0.0001, t + opts.dur);
-    src.connect(f).connect(g).connect(opts.bus || AU.sfxBus);
+    let out = g;
+    if (opts.pan && ctx.createStereoPanner) { const pn = ctx.createStereoPanner(); pn.pan.value = opts.pan; g.connect(pn); out = pn; }
+    src.connect(f).connect(g); out.connect(opts.bus || AU.sfxBus);
     src.start(t, Math.random()); src.stop(t + opts.dur + 0.05);
   }
   function thump(freq, dur, gain, delay = 0) {
@@ -608,6 +615,37 @@
   AU.flare = () => { burst({ f0: 2500, f1: 800, dur: 0.25, gain: 0.25, type: "bandpass", q: 1 }); };
   AU.hit = () => { burst({ f0: 2200, dur: 0.12, gain: 0.35, type: "bandpass", q: 3 }); thump(140, 0.15, 0.3); };
   AU.hitMarker = () => { burst({ f0: 4200, dur: 0.05, gain: 0.12, type: "bandpass", q: 6, bus: AU.uiBus }); };
+  /** The boom as an observer hears it when the Mach cone passes: an N-wave (two pressure jumps a fraction of a
+   *  second apart, the gap growing with aircraft length and distance), its ground reflection, sub-bass, and the
+   *  rumble rolling back off the terrain. Distance takes the high end (air absorption) and the level (~r^-3/4). */
+  AU.boomNWave = (dist, strength, pan = 0, len = 15) => {
+    if (!AU.ctx) return;
+    const muf = AU._inPit ? 0.45 : 1; // heard through the canopy: duller and quieter
+    const g = RJ.clamp(strength, 0, 1.4) * muf, hiCut = 9000 / (1 + dist / 1500) * (AU._inPit ? 0.06 : 1), gap = 0.06 + len * 0.0045 + Math.pow(Math.max(dist, 50), 0.25) * 0.012;
+    const crack = (dl, k) => {
+      burst({ f0: Math.max(500, hiCut), f1: Math.max(250, hiCut * 0.25), dur: 0.12, gain: 0.9 * g * k, delay: dl, attack: 0.002, pan });
+      thump(52, 0.5, 0.95 * g * k, dl); thump(31, 0.9, 0.7 * g * k, dl);
+    };
+    crack(0, 1); crack(gap, 0.9);
+    crack(0.025 + Math.min(0.05, 30 / Math.max(dist, 30)), 0.35);                              // ground reflection
+    burst({ brown: true, f0: Math.min(700, hiCut), f1: 50, dur: 2.8, gain: 0.55 * g, delay: 0.04, attack: 0.03, pan: pan * 0.6 });
+    burst({ brown: true, f0: 380, f1: 55, dur: 1.8, gain: 0.25 * g, delay: 0.9, attack: 0.08, pan: -pan * 0.4 });
+    burst({ brown: true, f0: 260, f1: 45, dur: 2.2, gain: 0.14 * g, delay: 2.1, attack: 0.15, pan: pan * 0.2 });
+  };
+  /** The Mach 1 crossing heard from inside / alongside the jet: no outside boom reaches you. Cockpit: a muffled
+   *  structural thump, a shudder through the airframe and the flow note settling. Chase: a deep pressure thump. */
+  AU.machCue = (inCockpit, vis = 0.5) => {
+    if (!AU.ctx) return;
+    if (inCockpit) {
+      thump(42, 0.45, 0.45, 0); thump(68, 0.18, 0.22, 0.02);
+      burst({ brown: true, f0: 260, f1: 70, dur: 0.9, gain: 0.32, attack: 0.03, bus: AU.envBus });
+      burst({ f0: 180, dur: 0.35, gain: 0.08, type: "bandpass", q: 3, delay: 0.05, bus: AU.envBus }); // airframe creak
+    } else {
+      thump(36, 1.0, 0.6 + vis * 0.25, 0); thump(58, 0.35, 0.3, 0.01);
+      burst({ brown: true, f0: 520, f1: 60, dur: 1.6, gain: 0.35 + vis * 0.15, attack: 0.02 });
+      burst({ f0: 1400, f1: 300, dur: 0.6, gain: 0.08, type: "bandpass", q: 0.7, attack: 0.05 });
+    }
+  };
   /** Sonic boom: N-wave double crack, sub-bass punch, rolling rumble and terrain echoes. */
   AU.sonicBoom = (dist = 0, cockpit = false, big = 1) => {
     if (!AU.ctx) return;
