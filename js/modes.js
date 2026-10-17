@@ -115,6 +115,9 @@
       const regionId = course ? course.region : o.region;
       const weather = course ? (o.weather === "default" ? course.weather : o.weather) : o.weather;
       const env = { time: o.time, weather: regionId === "clouds" && o.weather === "scattered" ? "cloudsea" : weather };
+      // time passes in Free Flight (Setup ▸ Time passes; Settings default 26×): the clock starts at the chosen time of day
+      const flow = +(o.flow != null ? o.flow : RJ.settings.timeFlow != null ? RJ.settings.timeFlow : 26);
+      if (flow > 0) env.cycle = { hour: (RJ.world.TIMES[o.time] || RJ.world.TIMES.golden).hour, rate: flow };
       RJ.world.setEnvironment(env);
       RJ.atlas.ensure();
       const reg = RJ.world.findRegion(regionId);
@@ -159,7 +162,7 @@
       } else if (RJ.world.airbase) RJ.world.setAirbase(null);
       // light the view ahead: at low sun angles put the sun behind the pilot's right shoulder
       // so the castle and the range ahead are side-lit instead of hidden in glare
-      if (!course && regionId === "mountains" && ["dawn", "golden", "sunset", "morning"].includes(o.time)) {
+      if (!course && !env.cycle && regionId === "mountains" && ["dawn", "golden", "sunset", "morning"].includes(o.time)) {
         RJ.world.setEnvironment(Object.assign({}, env, { sunAz: ((-yaw / RJ.DEG + 150) % 360 + 360) % 360 }));
       }
       await RJ.world.prepare(pos, progress);
@@ -350,7 +353,8 @@
       if (this.rings) return `<b>${this.course.name.toUpperCase()}</b>${Math.min(this.ringIdx + 1, this.rings.length)} / ${this.rings.length} · ${RJ.fmtTime(this.t)}`;
       if (this.o.activity === "lowlevel") return `<b>LOW-LEVEL</b>${this.lowTime.toFixed(1)} s · ${RJ.fmtTime(Math.max(0, 180 - this.sessionT))} left`;
       const r = RJ.progress.records;
-      return `<b>FREE FLIGHT · ${this.player.spec.short}</b>Best M ${r.mach.toFixed(2)} · ${RJ.fmtInt(r.alt * 3.281)} ft`;
+      const W = RJ.world, clk = W.cycle ? ` · ${W.clockText()}${W.clock.run ? "" : " ⏸"}` : "";
+      return `<b>FREE FLIGHT · ${this.player.spec.short}${clk}</b>Best M ${r.mach.toFixed(2)} · ${RJ.fmtInt(r.alt * 3.281)} ft`;
     }
     objective() {
       const pl = this.player;

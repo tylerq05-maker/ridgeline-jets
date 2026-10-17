@@ -575,6 +575,7 @@
     if (I.action("retry") && mode.kind === "challenge") { RJ.restartGame(); return; }
     if (I.action("replay")) { if (RJ.replay.start("playing")) return; }
     if (I.action("photo")) { RJ.photo.start("playing"); return; }
+    if (I.action("timeflow") && RJ.world.cycle) { const C = RJ.world.clock; C.run = !C.run; RJ.ui.flash(C.run ? "TIME FLOWING" : "TIME PAUSED", RJ.world.clockText() + (C.run ? " · " + C.rate + "×" : ""), 1.2); }
     if (I.action("ghost") && mode.kind === "challenge") RJ.ghost.toggle();
     if (I.action("camera")) cam.cycle();
     if (I.action("map")) RJ.nav.toggle();

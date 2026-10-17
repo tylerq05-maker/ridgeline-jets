@@ -1012,14 +1012,36 @@
     { e: 70, top: [0.14, 0.39, 0.85], hor: [0.68, 0.82, 0.95], sun: [1.0, 1.0, 0.97], si: 1.15, hs: [0.82, 0.9, 1.0], hg: [0.34, 0.36, 0.28], hi: 0.62 }
   ];
   W.TIMES = {
-    dawn: { label: "Dawn", e: 3.5, az: 95, haze: 1.6 },
-    morning: { label: "Morning", e: 24, az: 120, haze: 1.2 },
-    noon: { label: "Noon", e: 62, az: 175, haze: 1.0 },
-    golden: { label: "Golden hour", e: 10, az: 245, haze: 1.15 },
-    sunset: { label: "Sunset", e: 1.8, az: 262, haze: 1.35 },
-    night: { label: "Night", e: -16, az: 230, haze: 1.05 },
-    dynamic: { label: "Dynamic", e: 6, az: 90, dynamic: true, haze: 1.2 }
+    dawn: { label: "Sunrise", e: 3.5, az: 95, haze: 1.6, hour: 5.35 },
+    morning: { label: "Morning", e: 24, az: 120, haze: 1.2, hour: 8 },
+    noon: { label: "Noon", e: 62, az: 175, haze: 1.0, hour: 12.2 },
+    afternoon: { label: "Afternoon", e: 40, az: 245, haze: 1.1, hour: 15.5 },
+    golden: { label: "Golden hour", e: 10, az: 245, haze: 1.15, hour: 18.1 },
+    sunset: { label: "Sunset", e: 1.8, az: 262, haze: 1.35, hour: 18.95 },
+    night: { label: "Night", e: -16, az: 230, haze: 1.05, hour: 22 },
+    dynamic: { label: "Dynamic", e: 6, az: 90, dynamic: true, haze: 1.2, hour: 5.35 }
   };
+  /* ---------------- the clock: a continuous day/night cycle (Free Flight) ----------------
+   * Solar geometry for a mid-latitude summer day (38° N, day 200: sunrise ~04:55, sunset ~19:15 solar time).
+   * rate = game seconds per real second; the default 26× turns 30 minutes of flying into 13 hours of day. */
+  W.clock = { h: 12, rate: 26, run: true, lat: 38, day: 200 };
+  W.solar = function (h, out) {
+    const C = W.clock, D = RJ.DEG, phi = C.lat * D, dec = 23.44 * D * Math.sin((2 * Math.PI * (284 + C.day)) / 365);
+    const H = (h - 12) * 15 * D;
+    const se = Math.sin(phi) * Math.sin(dec) + Math.cos(phi) * Math.cos(dec) * Math.cos(H), e = Math.asin(RJ.clamp(se, -1, 1));
+    // azimuth from north, clockwise (east = 90°): north is -z and east +x in this world
+    const az = Math.atan2(-Math.sin(H), Math.tan(dec) * Math.cos(phi) - Math.sin(phi) * Math.cos(H));
+    out = out || {}; out.e = e / D; out.az = ((az / D) % 360 + 360) % 360; return out;
+  };
+  W.clockText = () => { const h = ((W.clock.h % 24) + 24) % 24, m = Math.floor((h % 1) * 60); return String(Math.floor(h)).padStart(2, "0") + ":" + String(m).padStart(2, "0"); };
+  const _sol = {}, _moon = {};
+  function clockSun() {
+    W.solar(W.clock.h, _sol); W.sunElev = _sol.e; W.sunAz = _sol.az;
+    // a nearly full moon, opposite the sun and a little behind it; kept above 15° as the night key light
+    W.solar(W.clock.h + 10.4, _moon); W._moonE = Math.max(15, _moon.e); W._moonAz = _moon.az;
+    // daily temperature swing (coolest at dawn, warmest mid-afternoon): nudges the speed of sound
+    RJ.tempOffset = (W._tempBase || 0) + 6 * Math.sin(((W.clock.h - 9) / 24) * 2 * Math.PI) - 1;
+  }
   W.WEATHER = {
     clear: { label: "Clear", alto: 0.25,  clusters: 40, alt: [5200, 6400], thick: 0.35, dark: 0, fog: 1, sun: 1, haze: 0, density: 6e-5, cirrus: 0.75, mist: 0.25, humid: 0.3, wind: 4 },
     scattered: { label: "Scattered clouds", alto: 0.55,  clusters: 170, alt: [2300, 3300], thick: 1, dark: 0.04, fog: 1, sun: 1, haze: 0.05, density: 9e-5, cirrus: 0.5, mist: 0.7, humid: 0.55, wind: 7 },
@@ -1041,10 +1063,17 @@
     const prevW = W.env && W.env.weather;
     W.env = Object.assign({ time: "golden", weather: "scattered" }, env);
     const T = W.TIMES[W.env.time] || W.TIMES.golden;
-    W.sunElev = env.sunElev != null ? env.sunElev : T.e; W.sunAz = env.sunAz != null ? env.sunAz : T.az; W.dynamic = !!T.dynamic && env.sunElev == null; W.dynPhase = 0.04;
+    W.sunElev = env.sunElev != null ? env.sunElev : T.e; W.sunAz = env.sunAz != null ? env.sunAz : T.az; W.dynamic = false;
+    // a running clock: Free Flight passes { hour, rate }; the old "Dynamic" preset is a cycle from sunrise at 26×
+    const cyc = env.sunElev == null ? (env.cycle || (T.dynamic ? { hour: T.hour, rate: 26 } : null)) : null;
+    W.cycle = !!cyc;
+    if (cyc && cyc !== W.clock) { W.clock.h = cyc.hour != null ? cyc.hour : T.hour; W.clock.rate = cyc.rate || 26; W.clock.run = true; }
+    if (cyc) W.env.cycle = W.clock;
     if (RJ.clouds) RJ.clouds.setWeather(W.env.weather);
     // air temperature shifts the speed of sound (cold nights and storms make Mach 1 come a little sooner)
-    RJ.tempOffset = ({ night: -9, dawn: -6, morning: -2, noon: 5, golden: 1, sunset: -2, dynamic: 0 }[W.env.time] || 0) + ({ storm: -6, overcast: -3, cloudsea: -2 }[W.env.weather] || 0);
+    RJ.tempOffset = ({ night: -9, dawn: -6, morning: -2, noon: 5, afternoon: 4, golden: 1, sunset: -2, dynamic: 0 }[W.env.time] || 0) + ({ storm: -6, overcast: -3, cloudsea: -2 }[W.env.weather] || 0);
+    W._tempBase = { storm: -6, overcast: -3, cloudsea: -2 }[W.env.weather] || 0;
+    if (W.cycle) clockSun();
     if (W.cloudGeo && (prevW !== W.env.weather || !W.clusters)) buildClouds();
     W.syncCloudLayer();
     applyLighting(true);
@@ -1056,11 +1085,15 @@
     const e = W.sunElev * RJ.DEG, az = W.sunAz * RJ.DEG;
     W.sunDir.set(Math.sin(az) * Math.cos(e), Math.sin(e), -Math.cos(az) * Math.cos(e)).normalize();
     // after dusk the key light is the moon, high in the opposite sky
-    const me = 38 * RJ.DEG, ma = az + 2.8;
+    const me = (W.cycle ? W._moonE : 38) * RJ.DEG, ma = W.cycle ? W._moonAz * RJ.DEG : az + 2.8;
     W.moonDir = (W.moonDir || RJ.V3()).set(Math.sin(ma) * Math.cos(me), Math.sin(me), -Math.cos(ma) * Math.cos(me)).normalize();
     W.night = W.sunElev < -4;
     W.lightDir = (W.lightDir || RJ.V3()).copy(W.night ? W.moonDir : W.sunDir);
-    W.sunKey = (W.night ? "m" : "") + Math.round(W.sunElev / 2) + ":" + Math.round(W.sunAz / 4);
+    // terrain sun-visibility is baked per chunk: with the clock running, re-bake only once the light has moved 4°
+    if (!W.cycle || !W._bakeDir || W._bakeNight !== W.night || W._bakeDir.angleTo(W.lightDir) > 0.07) {
+      W.sunKey = (W.night ? "m" : "") + Math.round(W.sunElev / 2) + ":" + Math.round(W.sunAz / 4) + (W.cycle ? ":" + Math.round(W.clock.h * 60) : "");
+      W._bakeDir = (W._bakeDir || RJ.V3()).copy(W.lightDir); W._bakeNight = W.night;
+    }
     const t = todAt(W.sunElev);
     // daylight and twilight colours come from the physical atmosphere; the keyframes only cover deep night
     const physW = RJ.smooth(-14, -4, W.sunElev), mieB = 9e-6 * (1 + wx.haze * 3), K = 1.2 * (0.8 + 0.2 * RJ.smooth(5, 30, W.sunElev));
@@ -1595,14 +1628,14 @@
     mistT += dt;
     if (mistT > 0.1) { mistT = 0; updateMist(cam); }
 
-    if (W.dynamic) {
-      W.dynPhase += dt / 900;
-      if (W.dynPhase > 1) W.dynPhase = 0;
-      W.sunAz = 75 + W.dynPhase * 210;
-      W.sunElev = -9 + 75 * Math.sin(W.dynPhase * Math.PI);
+    if (W.cycle && W.clock.run && dt > 0) {
+      // time-based (not frame-based): the same day passes at any frame rate; sky, fog, sun, moon and shadow
+      // direction update every frame, the reflection/ambient environment probe every few seconds
+      W.clock.h = (W.clock.h + (dt * W.clock.rate) / 3600) % 24;
+      clockSun();
       envT += dt;
-      applyLighting(envT > 8);
-      if (envT > 8) envT = 0;
+      applyLighting(envT > 5);
+      if (envT > 5) envT = 0;
     }
 
     // dynamic shadow frustum: tight when low for crisp aircraft shadows, wider when high

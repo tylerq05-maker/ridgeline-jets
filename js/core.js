@@ -50,14 +50,14 @@ window.RJ = window.RJ || {};
   RJ.DEFAULT_KEYS = {
     pitchUp: "w", pitchDown: "s", rollLeft: "a", rollRight: "d", yawLeft: "q", yawRight: "e",
     throttleUp: "r", throttleDown: "f", afterburner: "shift", airbrake: "b",
-    guns: "space", missile: "x", flares: "c", target: "t", camera: "v", hud: "u", pause: "p", mute: "n", map: "m", hyper: "h", autopilot: "l", gear: "g", retry: "backspace", replay: "k", photo: "o", ghost: "j", wingAttack: "1", wingCover: "2", wingForm: "3", wingDefend: "4", talk: "y"
+    guns: "space", missile: "x", flares: "c", target: "t", camera: "v", hud: "u", pause: "p", mute: "n", map: "m", hyper: "h", autopilot: "l", gear: "g", retry: "backspace", replay: "k", photo: "o", ghost: "j", wingAttack: "1", wingCover: "2", wingForm: "3", wingDefend: "4", talk: "y", timeflow: "i"
   };
   RJ.KEY_ALTS = { pitchUp: "arrowup", pitchDown: "arrowdown", rollLeft: "arrowleft", rollRight: "arrowright", pause: "escape", throttleUp: "pageup", throttleDown: "pagedown" };
   RJ.ACTION_NAMES = {
     pitchUp: "Pitch up (climb)", pitchDown: "Pitch down (dive)", rollLeft: "Roll left", rollRight: "Roll right",
     yawLeft: "Rudder left", yawRight: "Rudder right", throttleUp: "Throttle up", throttleDown: "Throttle down",
     afterburner: "Afterburner (hold)", airbrake: "Air brake (hold)", guns: "Guns / bombs", missile: "Fire missile",
-    flares: "Flares", target: "Next target", camera: "Change camera", hud: "Toggle HUD", pause: "Pause", mute: "Mute sound", gear: "Landing gear", retry: "Instant retry (challenges)", replay: "Replay last 60 s", photo: "Photo mode", ghost: "Show/hide ghost", wingAttack: "Wingmen: attack my target", wingCover: "Wingmen: cover me", wingForm: "Wingmen: form up", wingDefend: "Wingmen: defend objective", talk: "Talk to Nova (hold)", map: "Map and waypoints", hyper: "HYPERSONIC (Star Wars craft)", autopilot: "Autopilot to waypoint"
+    flares: "Flares", target: "Next target", camera: "Change camera", hud: "Toggle HUD", pause: "Pause", mute: "Mute sound", gear: "Landing gear", retry: "Instant retry (challenges)", replay: "Replay last 60 s", photo: "Photo mode", ghost: "Show/hide ghost", wingAttack: "Wingmen: attack my target", wingCover: "Wingmen: cover me", wingForm: "Wingmen: form up", wingDefend: "Wingmen: defend objective", talk: "Talk to Nova (hold)", map: "Map and waypoints", timeflow: "Pause / resume time of day (Free Flight)", hyper: "HYPERSONIC (Star Wars craft)", autopilot: "Autopilot to waypoint"
   };
   const DEFAULTS = {
     quality: "high", shadows: true, viewDist: 1, clouds: 1,
