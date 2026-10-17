@@ -792,8 +792,64 @@
 
   /* ======================= BUILD ======================= */
   /* ---------- PBR paint with procedural panel lines, rivets and weathering ---------- */
+  /* Paint designs, computed per pixel in the airframe's own space (u: 0 nose → 1 tail), so one pattern wraps
+   * every model: camouflage, stripes, flames, fades, nebulae... c1–c3 are the design's colours. */
+  const PATTERN_CODE = [
+    "if (rjPat > 0.5) {",
+    "  vec3 P = vObjP; float u = clamp((P.z - rjDim.x) / rjDim.y, 0.0, 1.0); vec3 col = rjC1; float ny = normalize(vObjN).y;",
+    "  float fwp = length(fwidth(P.xz)) + 1e-4;",
+    "  if (rjPat < 1.5) {", // splinter: hard-edged angular shards
+    "    vec2 q = P.xz + P.y * 0.6; float a1 = floor(dot(q, vec2(0.82, 0.57)) * 0.55), a2 = floor(dot(q, vec2(-0.45, 0.89)) * 0.7), a3 = floor(dot(q, vec2(0.12, -0.99)) * 0.45);",
+    "    float h = fract(sin(a1 * 12.9 + a2 * 78.2 + a3 * 37.7) * 43758.5); col = h < 0.36 ? rjC1 : (h < 0.7 ? rjC2 : rjC3);",
+    "  } else if (rjPat < 2.5) {", // digital: pixelated three-tone camo
+    "    vec2 q = floor((P.xz + vec2(P.y * 0.8)) / 0.32) * 0.32; float n = rjVN(q * 0.55) * 0.65 + rjVN(q * 1.7 + 4.0) * 0.35;",
+    "    col = n < 0.42 ? rjC1 : (n < 0.6 ? rjC2 : rjC3);",
+    "  } else if (rjPat < 3.5) {", // woodland: soft-edged organic blobs
+    "    vec2 q = P.xz + vec2(P.y * 0.7, -P.y * 0.4); float n1 = rjVN(q * 0.42 + 3.0) * 0.7 + rjVN(q * 1.3) * 0.3, n2 = rjVN(q * 0.5 + 19.0) * 0.7 + rjVN(q * 1.5 + 7.0) * 0.3;",
+    "    col = mix(rjC1, rjC2, smoothstep(0.52, 0.55, n1)); col = mix(col, rjC3, smoothstep(0.6, 0.63, n2));",
+    "  } else if (rjPat < 4.5) {", // tiger: ragged dark stripes across the airframe
+    "    float s = sin(P.z * 2.6 + rjVN(P.xz * 0.8) * 5.0 + abs(P.x) * 1.4 + P.y * 2.0);",
+    "    col = mix(rjC1, rjC2, smoothstep(0.42, 0.5, s) * smoothstep(0.35, 0.65, rjVN(P.xz * 0.35 + 2.0) + 0.3)); col = mix(col, rjC3, smoothstep(0.85, 0.9, s));",
+    "  } else if (rjPat < 5.5) {", // hot-rod flames licking back from the nose
+    "    float lick = 0.34 + 0.09 * sin(P.x * 5.0 + P.y * 6.0) + 0.06 * sin(P.x * 11.0 - P.y * 9.0) + 0.04 * rjVN(P.xz * 2.0);",
+    "    float f = 1.0 - smoothstep(lick - 0.015, lick + 0.015, u);",
+    "    vec3 fl = mix(rjC3, rjC2, smoothstep(0.0, lick * 0.8, u)); fl = mix(fl, vec3(0.75, 0.08, 0.05), smoothstep(lick * 0.6, lick, u));",
+    "    col = mix(rjC1, fl, f); col = mix(col, vec3(0.02), (1.0 - smoothstep(0.0, 0.012, abs(u - lick))) * 0.8);",
+    "  } else if (rjPat < 6.5) {", // twin racing stripes over the spine and down the wings
+    "    float st = (1.0 - smoothstep(0.13, 0.15, abs(abs(P.x) - 0.42))) * step(0.0, ny + 0.2);",
+    "    col = mix(rjC1, rjC2, st); col = mix(col, rjC3, (1.0 - smoothstep(0.02, 0.035, abs(abs(abs(P.x) - 0.42) - 0.15))) * step(0.0, ny + 0.2));",
+    "  } else if (rjPat < 7.5) {", // checkered nose and tail
+    "    vec2 q = floor(P.xz / 0.7 + vec2(P.y)); float ch = mod(q.x + q.y, 2.0);",
+    "    col = (u < 0.18 || u > 0.82) ? mix(rjC2, rjC3, ch) : rjC1; col = mix(col, rjC3, (1.0 - smoothstep(0.004, 0.012, abs(u - 0.18))) + (1.0 - smoothstep(0.004, 0.012, abs(u - 0.82))));",
+    "  } else if (rjPat < 8.5) {", // lightning: neon zig-zag bolts along the airframe
+    "    float zig = abs(fract(P.z * 0.45) - 0.5) * 2.0 - 0.5; float d = abs(abs(P.x) - 0.6 - zig * 0.9) - 0.04 * (1.0 + u);",
+    "    col = mix(rjC1, rjC2, 1.0 - smoothstep(0.0, 0.08, d)); col = mix(col, rjC3, 1.0 - smoothstep(0.0, 0.025, d));",
+    "  } else if (rjPat < 9.5) {", // sunset fade from nose to tail
+    "    col = mix(rjC1, rjC2, smoothstep(0.0, 0.55, u)); col = mix(col, rjC3, smoothstep(0.5, 1.0, u)); col *= 0.82 + 0.18 * step(0.0, ny);",
+    "  } else if (rjPat < 10.5) {", // galaxy: deep space, nebula clouds and stars
+    "    vec2 q = P.xz + vec2(P.y * 0.9); float n = rjVN(q * 0.6) * 0.5 + rjVN(q * 1.7 + 3.0) * 0.3 + rjVN(q * 4.3) * 0.2;",
+    "    col = mix(rjC1, rjC2, smoothstep(0.45, 0.8, n)); col = mix(col, rjC3, smoothstep(0.6, 0.95, rjVN(q * 0.9 + 11.0)) * 0.8);",
+    "    vec2 sc = floor(q * 6.0); float star = step(0.985, fract(sin(dot(sc, vec2(12.9, 78.2))) * 43758.5)) * (1.0 - smoothstep(0.12, 0.3, length(fract(q * 6.0) - 0.5)));",
+    "    col += vec3(star) * (1.0 - smoothstep(0.02, 0.06, fwp));",
+    "  } else if (rjPat < 11.5) {", // carbon fibre weave (fades to the weave's average far away)
+    "    vec2 q = P.xz * 22.0 + P.y * 22.0; vec2 c = floor(q); float w = mod(c.x + c.y, 2.0); vec2 f = fract(q);",
+    "    float v = w > 0.5 ? smoothstep(0.0, 0.5, f.x) * smoothstep(1.0, 0.5, f.x) : smoothstep(0.0, 0.5, f.y) * smoothstep(1.0, 0.5, f.y);",
+    "    col = mix(mix(rjC1, rjC2, v), mix(rjC1, rjC2, 0.5), smoothstep(0.004, 0.015, fwp));",
+    "  } else if (rjPat < 12.5) {", // two-tone counter-shading: dark spine, pale belly
+    "    col = mix(rjC2, rjC1, smoothstep(-0.25, 0.35, ny + P.y * 0.15)); col = mix(col, rjC3, (1.0 - smoothstep(0.01, 0.03, abs(ny - 0.05))) * 0.6);",
+    "  } else if (rjPat < 13.5) {", // neon paint splash on black
+    "    vec2 q = P.xz + vec2(P.y * 0.8); float a = rjVN(q * 0.9 + 5.0) * 0.7 + rjVN(q * 3.1) * 0.3, b = rjVN(q * 0.8 + 31.0) * 0.7 + rjVN(q * 2.7 + 9.0) * 0.3, c = rjVN(q * 1.1 + 57.0) * 0.7 + rjVN(q * 3.5 + 2.0) * 0.3;",
+    "    col = mix(col, rjC2, smoothstep(0.66, 0.68, a)); col = mix(col, rjC3, smoothstep(0.68, 0.7, b)); col = mix(col, vec3(1.0, 0.92, 0.15), smoothstep(0.72, 0.74, c));",
+    "  } else {", // dazzle: bold zebra geometry
+    "    vec2 q = P.xz + vec2(P.y * 0.5); float s1 = sin(dot(q, vec2(1.6, 0.9)) * 2.2), s2 = sin(dot(q, vec2(-1.1, 1.7)) * 1.6 + 1.3);",
+    "    col = (s1 * s2 > 0.0) ? rjC1 : rjC2; col = mix(col, rjC3, step(0.93, abs(s2)));",
+    "  }",
+    "  diffuseColor.rgb = col;",
+    "}"
+  ].join("\n");
   const PANEL_CODE = [
     "#include <roughnessmap_fragment>",
+    PATTERN_CODE,
     "{",
     "  vec3 an = abs(normalize(vObjN));",
     "  vec2 pc = (an.y > max(an.x, an.z)) ? vObjP.xz : ((an.x > an.z) ? vObjP.zy : vObjP.xy);",
@@ -814,6 +870,7 @@
     "  roughnessFactor = clamp(roughnessFactor + (grime - 0.5) * 0.22 + line * 0.15, 0.05, 1.0);",
     "}"
   ].join("\n");
+  const NO_PATTERN = { rjPat: { value: 0 }, rjC1: { value: new THREE.Color() }, rjC2: { value: new THREE.Color() }, rjC3: { value: new THREE.Color() }, rjDim: { value: new THREE.Vector2(0, 1) } };
   function panelize(mat) {
     mat.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader
@@ -821,12 +878,15 @@
         .replace("#include <begin_vertex>", "#include <begin_vertex>\nvObjP = position; vObjN = normal;")
         .replace("#include <project_vertex>", "#include <project_vertex>\nvWPa = (modelMatrix * vec4(transformed, 1.0)).xyz;");
       shader.fragmentShader = shader.fragmentShader
-        .replace("#include <common>", "#include <common>\nvarying vec3 vObjP; varying vec3 vObjN; varying vec3 vWPa;\n" + RJ.world.GLSL_NOISE)
+        .replace("#include <common>", "#include <common>\nvarying vec3 vObjP; varying vec3 vObjN; varying vec3 vWPa;\nuniform float rjPat; uniform vec3 rjC1; uniform vec3 rjC2; uniform vec3 rjC3; uniform vec2 rjDim;\n" + RJ.world.GLSL_NOISE)
         .replace("#include <roughnessmap_fragment>", PANEL_CODE)
         // thin double-sided plates (fins, canards) can carry inward normals: always shade the side we see
         .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\nnormal = faceforward(normal, -normalize(vViewPosition), normal);")
         // thin fins seen edge-on with a grazing sun can spike the GGX lobe into a bloom "lightsaber"
         .replace("#include <lights_fragment_end>", "#include <lights_fragment_end>\nreflectedLight.directSpecular = min(reflectedLight.directSpecular, vec3(0.45));");
+      // always bind the design uniforms (a plain paint gets "no pattern"): uniforms a material leaves unset keep
+      // the previous jet's values on the shared program, so a design would leak onto every other aircraft
+      Object.assign(shader.uniforms, mat.userData.rjPat || NO_PATTERN);
       RJ.world.addCloudShadows(shader, "vWPa");
     };
     return mat;
@@ -1001,7 +1061,25 @@
     desert: { name: "Desert", body: 0xc4a77d, trim: 0x8a6f4c, accent: 0x5b4a33 },
     shadow: { name: "Shadow", body: 0x2a2d31, trim: 0x1b1d20, accent: 0x7d1f1f },
     racer: { name: "Racer", body: 0xf2f2f0, trim: 0xc8102e, accent: 0xc8102e },
-    jungle: { name: "Jungle", body: 0x4b5a36, trim: 0x2f3a22, accent: 0xb59b3c }
+    jungle: { name: "Jungle", body: 0x4b5a36, trim: 0x2f3a22, accent: 0xb59b3c },
+    // designs: a pattern across the whole airframe (c: its three colours)
+    splinter: { name: "Splinter camo", pattern: 1, c: [0x6b7a5a, 0x3d4a35, 0x9a9070], accent: 0x2b2b2b },
+    digital: { name: "Digital camo", pattern: 2, c: [0x8a9199, 0x5d656e, 0x3c434b], accent: 0xffffff },
+    woodland: { name: "Woodland camo", pattern: 3, c: [0x56653f, 0x2f3824, 0x7a6845], accent: 0x1d1f1a },
+    snowcamo: { name: "Winter camo", pattern: 3, c: [0xe8ecef, 0xaab3bb, 0x6c757d], accent: 0xc0392b },
+    tiger: { name: "Tiger meet", pattern: 4, c: [0xf08c1a, 0x141414, 0xf7e7c6], accent: 0x141414 },
+    flames: { name: "Hot-rod flames", pattern: 5, c: [0x111215, 0xff8a1c, 0xffe14d], accent: 0xff5a1c },
+    stripes: { name: "Racing stripes", pattern: 6, c: [0x1f4fbf, 0xf4f4f2, 0xc8102e], accent: 0xf4f4f2 },
+    checkers: { name: "Checkered", pattern: 7, c: [0xd8d9d6, 0x151515, 0xd4202a], accent: 0xd4202a },
+    lightning: { name: "Lightning", pattern: 8, c: [0x18191f, 0x2fd3ff, 0xeaffff], accent: 0x2fd3ff },
+    sunset: { name: "Sunset fade", pattern: 9, c: [0x4b1d78, 0xe0367a, 0xffb347], accent: 0xffd27a },
+    galaxy: { name: "Galaxy", pattern: 10, c: [0x070a1f, 0x5b2a9e, 0x1fb5c9], accent: 0xb48cff },
+    carbon: { name: "Carbon fibre", pattern: 11, c: [0x1a1b1e, 0x3a3d43, 0x000000], accent: 0xd8ff2f, rough: 0.3, metal: 0.4 },
+    ghost: { name: "Ghost grey", pattern: 12, c: [0xb3b8bd, 0x7f868d, 0x9aa1a8], accent: 0x5a6068 },
+    neon: { name: "Neon splash", pattern: 13, c: [0x0d0d10, 0xff2fa8, 0x2bff88], accent: 0xffef2b },
+    dazzle: { name: "Dazzle", pattern: 14, c: [0xf2f2ee, 0x15161a, 0x3d6fd8], accent: 0x3d6fd8 },
+    chrome: { name: "Chrome", body: 0xd9dde1, trim: 0xa9afb5, accent: 0x2b2b2b, rough: 0.12, metal: 1.0 },
+    gold: { name: "Gold", body: 0xd4a640, trim: 0x8f6b22, accent: 0x111111, rough: 0.2, metal: 1.0 }
   };
   RJ.buildAircraft = function (id, livery) {
     const a = A[id];
@@ -1011,11 +1089,16 @@
     if (livery === "aggressor") { const p = AGGRESSOR[Math.floor(Math.random() * AGGRESSOR.length)]; body = p[0]; trim = p[1]; }
     const PJ = RJ.PAINTS[livery];
     if (PJ && PJ.body != null) { body = PJ.body; trim = PJ.trim; }
+    if (PJ && PJ.pattern) { body = PJ.c[0]; trim = PJ.c[1]; }
     const stealthy = a.stealth > 1.5;
+    const rB = PJ && PJ.rough != null ? PJ.rough : stealthy ? 0.72 : 0.46, mB = PJ && PJ.metal != null ? PJ.metal : stealthy ? 0.12 : 0.38;
+    // a design: one set of uniforms shared by the body, trim and faceted panels (dimensions filled in once built)
+    const pat = PJ && PJ.pattern ? { rjPat: { value: PJ.pattern }, rjC1: { value: new THREE.Color(PJ.c[0]) }, rjC2: { value: new THREE.Color(PJ.c[1]) }, rjC3: { value: new THREE.Color(PJ.c[2]) }, rjDim: { value: new THREE.Vector2(-8, 16) } } : null;
+    const pm = (m) => { if (pat) m.userData.rjPat = pat; return panelize(m); };
     const M = {
-      body: panelize(std(body, stealthy ? 0.72 : 0.46, stealthy ? 0.12 : 0.38)),
-      trim: panelize(std(trim, stealthy ? 0.74 : 0.55, stealthy ? 0.12 : 0.3)),
-      facet: panelize(std(body, 0.62, 0.2, { flatShading: true })),
+      body: pm(std(body, rB, mB)),
+      trim: pm(std(trim, PJ && PJ.rough != null ? PJ.rough + 0.06 : stealthy ? 0.74 : 0.55, PJ && PJ.metal != null ? PJ.metal : stealthy ? 0.12 : 0.3)),
+      facet: pm(std(body, 0.62, 0.2, { flatShading: true })),
       glass: new THREE.MeshStandardMaterial({ color: a.colors.glass, roughness: 0.04, metalness: 1.0, transparent: true, opacity: 0.6, envMapIntensity: 1.7 }),
       dark: std(0x1c1e21, 0.82, 0.2),
       metal: std(0x707176, 0.3, 0.9, { emissive: 0x000000 }),
@@ -1038,6 +1121,7 @@
     const bb = new THREE.Box3().setFromObject(g);
     const size = bb.getSize(V3());
     g.userData.dims = { len: size.z, span: size.x, height: size.y, minZ: bb.min.z, maxZ: bb.max.z, minY: bb.min.y };
+    if (pat) pat.rjDim.value.set(bb.min.z, Math.max(1, size.z));
     addGear(g, M, a, bb);
     addLights(g, M, a);
     addPilot(g, a);
