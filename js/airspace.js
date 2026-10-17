@@ -716,12 +716,25 @@
       const d = Math.hypot(g.pos.x - P.x, g.pos.z - P.z, g.pos.y - P.y);
       if (g.ac) {
         promoted++;
-        const keep = pl.target === g.ac ? 14000 : 6500;
+        const keep = pl.target === g.ac ? 16000 : 6500;
         if (d > keep) demote(g);
         continue;
       }
       if (d > 32000 || (ghostDone(g) && d > 4000)) { dropGhost(i); continue; }
       if (d < 4500 && promoted < 30 && made < 6) { promote(g); promoted++; made++; } // a few per tick: no hitch
+    }
+    // the flight the player is pointing at becomes a real (lockable) aircraft out to missile range
+    const m = pl.spec.msl;
+    if (m && m.n) {
+      const rng = m.range * 1.5;
+      let best = null, ba = 0.26; // ~15° off the nose
+      for (const g of G) {
+        if (g.ac) continue;
+        const d = g.pos.distanceTo(P); if (d > rng) continue;
+        const a = Math.acos(RJ.clamp(tv.copy(g.pos).sub(P).dot(pl.fwd) / d, -1, 1));
+        if (a < ba) { ba = a; best = g; }
+      }
+      if (best) promote(best);
     }
     // keep the population up: fill fast when the area is empty (start, new location), then trickle in at the edges
     const n = G.length, k = n < want * 0.6 ? 10 : n < want ? 3 : 0;
@@ -782,12 +795,13 @@
     A.on = density() > 0 && mode.o.activity === "roam";
     if (!A.on) return false;
     RJ.combat.forceCrowd = true;
+    RJ.combat.lockAssist = { time: 0.4, cone: 1.4, range: 1.5, burn: 1.7 }; // Free Flight: locks come quicker and from further out
     A.nextEvent = 3; A.nextShow = rand(50, 95);
     for (let i = 0; i < A.DENSITY_BG[RJ.settings.airTraffic || "normal"] * (nearCity(mode.player.pos) ? 1.4 : 1); i++) spawnGhost(mode.player.pos, true); // a full sky from the first second
     return true;
   };
   A.stop = function () {
-    A.on = false; RJ.combat.forceCrowd = false;
+    A.on = false; RJ.combat.forceCrowd = false; RJ.combat.lockAssist = null;
     const el = document.getElementById("wanted"); if (el) el.remove();
     A.list = []; A.show = null;
     for (let i = G.length - 1; i >= 0; i--) dropGhost(i);
@@ -801,6 +815,18 @@
     if (A.on) A.nextShow = Math.min(A.nextShow || 1e9, A.t + rand(60, 120));
   };
   A.armed = () => A.on;
+  /** Free Flight: with no target, the aircraft nearest the nose (within ~15° and lock range) is picked up. */
+  A.noseTarget = function (pl) {
+    const m = pl.spec.msl; if (!m || !m.n) return null;
+    const rng = m.range * 1.5; let best = null, ba = 0.26;
+    for (const o of RJ.combat.aircraft) {
+      if (o === pl || !o.alive || o.team === pl.team) continue;
+      const d = o.pos.distanceTo(pl.pos); if (d > rng) continue;
+      const a = Math.acos(RJ.clamp(tv.copy(o.pos).sub(pl.pos).dot(pl.fwd) / d, -1, 1));
+      if (a < ba) { ba = a; best = o; }
+    }
+    return best;
+  };
   A.setLevel = (l) => setLevel(l, "Test"); // debugging / tests
   /** Player aircraft count for each state, for tests and the status line. */
   A.stats = () => ({ traffic: A.list.filter((a) => a.alive && !a.air.resp && !a.air.show).length, flights: G.length, promoted: G.filter((g) => g.ac).length, responders: responders().length, show: !!A.show, level: W.level });

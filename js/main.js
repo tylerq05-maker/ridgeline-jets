@@ -603,6 +603,7 @@
         if (mode.command) for (const [k, o] of [["wingAttack", "attack"], ["wingCover", "cover"], ["wingForm", "form"], ["wingDefend", "defend"]]) if (I.action(k)) mode.command(o);
         if (I.action("target")) RJ.combat.cycleTarget(pl);
         if (!pl.target || !pl.target.alive) RJ.combat.autoTarget(pl);
+        if ((!pl.target || !pl.target.alive) && mode.armed && RJ.airspace.noseTarget) { const t = RJ.airspace.noseTarget(pl); if (t) { pl.target = t; pl.lockT = 0; pl.locked = false; } }
         if (I.action("missile")) {
           if (!pl.spec.msl.n) RJ.ui.flash("NO MISSILES ON THIS AIRCRAFT", null, 1);
           else if (pl.missiles <= 0) RJ.ui.flash("WINCHESTER", "Out of missiles", 1);

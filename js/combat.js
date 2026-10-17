@@ -178,11 +178,12 @@
   C.inSeeker = function (ac, t) {
     const m = ac.spec.msl;
     if (!m || !m.n || !t || !t.alive) return false;
+    const as = ac.isPlayer && C.lockAssist; // Free Flight: a friendlier seeker for the player
     const d = tv.copy(t.pos).sub(ac.pos);
     const dist = d.length();
-    if (dist > m.range) return false;
+    if (dist > m.range * (as ? as.range : 1)) return false;
     const ang = Math.acos(RJ.clamp(d.dot(ac.fwd) / dist, -1, 1)) / DEG;
-    return ang <= m.cone;
+    return ang <= m.cone * (as ? as.cone : 1);
   };
   function updateLock(ac, dt) {
     const m = ac.spec.msl;
@@ -190,7 +191,7 @@
     const t = ac.target;
     if (t && t.alive && C.inSeeker(ac, t)) {
       const resist = (t.spec.stealth || 1) * (t.spec.jammer ? 2 : 1);
-      ac.lockT = Math.min(1, ac.lockT + dt / (m.lock * resist));
+      ac.lockT = Math.min(1, ac.lockT + dt / (m.lock * resist * (ac.isPlayer && C.lockAssist ? C.lockAssist.time : 1)));
       t.lockedByT = Math.max(t.lockedByT, 0.25);
       ac.locked = ac.lockT >= 1;
     } else { ac.lockT = Math.max(0, ac.lockT - dt * 2); ac.locked = false; }
@@ -243,6 +244,7 @@
     };
     mesh.position.copy(p); mesh.quaternion.setFromUnitVectors(Z, tv.copy(ac.fwd).negate()); // leaves the rail pointing where the jet points
     if (MF) MF.launch(msl); // per-type turn limit, ignition delay, release puff
+    if (ac.isPlayer && C.lockAssist) msl.burn *= C.lockAssist.burn; // Free Flight: the motor burns long enough to reach the longer lock range
     if (m.cone >= 180) {
       // all-aspect defensive launch: eject the missile toward the target so its seeker starts on it
       msl.vel.copy(target.pos).sub(p).normalize().multiplyScalar(Math.max(ac.speed * 0.6, 180));
