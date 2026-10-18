@@ -298,6 +298,15 @@
           if (g === 1 && bwayDist(al, ac) < 13 + Math.min(L.a1 - L.a0, L.c1 - L.c0) * 0.5) continue;
           let h = z.h(r, L.ave);
           if (!z.tall && h > 70 && !L.ave) h = 70;
+          // Jet City scale: the tower districts rise well past reality (up to ~1.6×), but stay under the
+          // Empire State Building's roof near it and under One World Trade Center everywhere
+          if (z.tall && h > 60) {
+            h = 60 + (h - 60) * RJ.lerp(1.3, 1.75, r());
+            const dE = Math.hypot(bce, bcn);
+            h = Math.min(h, dE < 500 ? 330 : 500);
+          }
+          // Billionaires' Row: a line of pencil-thin supertalls along 57th Street
+          if (g === 1 && Math.abs((A0 + A1) / 2 / ST + 34 - 57) < 0.6 && Math.abs((C0 + C1) / 2) < 700 && r() < 0.55) h = P(r, 380, 480);
           if (L.big) h = Math.max(h, z.tall ? P(r, 70, 300, 1.5) : h);
           // near the water, keep the skyline believable: big towers hug the cores
           const row = !!L.row && h < 26;
@@ -588,6 +597,8 @@
     return h;
   };
   NYC.solids = []; // landmark collision functions (x, z) → top y
+  NYC.deckSolids = []; // bridge decks (x, y, z) → inside: slabs you can fly under
+  NYC.solidAtY = (p) => { for (const f of NYC.deckSolids) if (f(p.x, p.y, p.z)) return true; return false; };
 
   /* ======================= streets: ground shader ======================= */
   function districtTexture() {
@@ -887,6 +898,19 @@
   NYC.within = (x, z, pad) => { if (!NY) return false; const d = Math.hypot(x - NY.cx, z - NY.cz); return d < NY.R + (pad || 0); };
   NYC.esbWorld = () => { const n = RJ.world.gen.nyc; return [n.ex, n.ez]; };
   /** Spawn point for free flight: over the Upper Bay by the Statue of Liberty, heading for Lower Manhattan. */
+  /** New York Skyline Run: down the Sixth Avenue canyon, along the Hudson past One World Trade Center, round the
+   *  Battery, under the Brooklyn Bridge and up the East Side to finish above the Empire State Building. */
+  NYC.route = function () {
+    NY = NY || RJ.world.gen.nyc;
+    if (RJ.atlas && RJ.atlas.built) NYC.ensure();
+    // Sixth Avenue (AVES[7]) street by street from 58th down to 15th: the gates sit on the avenue's centre line
+    const six = [58, 52, 46, 40, 34, 28, 22, 15].map((k, i) => { const [e, n] = NYC.addr(k, AVES[7]), [x, z] = NYC.toWorld(e, n), v = RJ.V3(x, 170 - i * 9, z); v.keep = true; return v; });
+    const G = [
+      [40.7290, -74.0135, 80], [40.7180, -74.0160, 120], [40.7127, -74.0165, 280], [40.7040, -74.0175, 90], [40.7030, -74.0090, 100],
+      [40.70574, -73.99628, 20, 1], [40.7080, -73.9880, 70], [40.7250, -73.9720, 110], [40.7420, -73.9725, 150], [40.7484, -73.9830, 470]];
+    const out = G.map(([la, lo, y, k]) => { const [e, n] = local(la, lo), [x, z] = NYC.toWorld(e, n); const v = RJ.V3(x, y, z); v.keep = true; v.tight = !!k; return v; });
+    return six.concat(out);
+  };
   NYC.spawn = function () {
     NY = NY || RJ.world.gen.nyc;
     if (RJ.atlas && RJ.atlas.built) NYC.ensure();

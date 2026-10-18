@@ -240,12 +240,13 @@
         if (LANDMARK.some(([lx, lz]) => Math.hypot(lx - x, lz - z) < 140)) continue;
         const df = Math.hypot(x - fidi[0], z - fidi[1]), ds = Math.hypot(x - soma[0], z - soma[1]);
         const core = Math.max(Math.exp(-df / 650), Math.exp(-ds / 750) * 0.6);
-        if (core > 0.25) {
+        if (core > 0.18) {
           // downtown: towers on the block, tallest at the heart of the Financial District
-          const nT = 2 + Math.floor(r() * 3);
+          const nT = 3 + Math.floor(r() * 3);
           for (let k = 0; k < nT; k++) {
             const tx = x + (r() - 0.5) * A.bw * 0.6, tz = z + (r() - 0.5) * A.bd * 0.6, w = 28 + r() * 22, d = 26 + r() * 20;
-            const h = 30 + core * (60 + r() * 200) * (r() < 0.25 ? 1.3 : 0.75);
+            // Jet City scale: a denser, taller downtown, still topped by Salesforce Tower (326 m)
+            const h = Math.min(300, 30 + core * (70 + r() * 230) * (r() < 0.3 ? 1.5 : 1.0));
             add(tx, tz, w, d, h, 0, 0x8f989f + Math.floor(r() * 4) * 0x060606, footMinAxis(tx, tz, w, d) - 2);
           }
           continue;
@@ -420,6 +421,15 @@
     add("sanfrancisco", { group: null, cx, cz, marker: V3(cx, 500, cz) });
   };
   /** Free Flight start: low over the bay east of Alcatraz, heading for the Golden Gate. */
+  /** San Francisco Bay Run: under the Golden Gate, along the Marina, round Alcatraz, over Telegraph Hill, between
+   *  the Transamerica Pyramid and Salesforce Tower, then under the Bay Bridge's western span. */
+  SF.route = function () {
+    if (!SF.available()) return null;
+    SF.ensure();
+    const G = [[37.8199, -122.4783, 35], [37.8090, -122.4500, 60], [37.8070, -122.4300, 70], [37.8240, -122.4230, 90], [37.8060, -122.4100, 220],
+      [37.7975, -122.4020, 200], [37.7925, -122.3985, 345], [37.7890, -122.3925, 160], [37.79215, -122.3815, 28]];
+    return G.map(([la, lo, y], i) => { const [x, z] = geo(la, lo); const v = RJ.V3(x, y, z); v.keep = true; v.tight = i === 0 || i === G.length - 1; return v; });
+  };
   SF.spawn = function () {
     if (!SF.available()) return null;
     if (RJ.atlas && RJ.atlas.built) SF.ensure();

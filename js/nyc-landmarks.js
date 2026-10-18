@@ -483,8 +483,12 @@
       const rx = x - cx, rz = z - cz, lx = rx * cs - rz * sn, lz = rx * sn + rz * cs;
       if (Math.abs(lz) > B.w / 2 + 12) return -Infinity;
       for (const tx of [-half, half]) if (Math.abs(lx - tx) < 13) return B.h + 2;
-      if (lx > x0 && lx < x1 && Math.abs(lz) < B.w / 2) return D;
       return -Infinity;
+    });
+    // the deck is a slab, not ground: you can fly under the bridge
+    L.deckSolids.push((x, y, z) => {
+      const rx = x - cx, rz = z - cz, lx = rx * cs - rz * sn, lz = rx * sn + rz * cs;
+      return lx > x0 && lx < x1 && Math.abs(lz) < B.w / 2 && y > D - 6 && y < D + 3;
     });
   }
   /** Queensboro Bridge: a steel cantilever truss hopping over Roosevelt Island. */
@@ -511,7 +515,8 @@
       const fin = new THREE.Mesh(new THREE.ConeGeometry(3, 12, 4), steel); fin.position.set(p, topY(p) + 16, s * (W / 2 + 1)); f.add(fin);
     }
     const cs = Math.cos(f.rotation.y), sn = Math.sin(f.rotation.y);
-    L.solids.push((x, z) => { const rx = x - ax, rz = z - az, lx = rx * cs - rz * sn, lz = rx * sn + rz * cs; if (Math.abs(lz) > W / 2 + 2 || lx < -150 || lx > len + 150) return -Infinity; for (const p of piers) if (Math.abs(lx - p) < 6) return topY(p) + 10; return D; });
+    L.solids.push((x, z) => { const rx = x - ax, rz = z - az, lx = rx * cs - rz * sn, lz = rx * sn + rz * cs; if (Math.abs(lz) > W / 2 + 2 || lx < -150 || lx > len + 150) return -Infinity; for (const p of piers) if (Math.abs(lx - p) < 6) return topY(p) + 10; return -Infinity; });
+    L.deckSolids.push((x, y, z) => { const rx = x - ax, rz = z - az, lx = rx * cs - rz * sn, lz = rx * sn + rz * cs; return Math.abs(lz) < W / 2 + 2 && lx > -150 && lx < len + 150 && y > D - 8 && y < D + 3; });
     grp.add(f);
   }
 

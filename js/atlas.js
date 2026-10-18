@@ -484,7 +484,7 @@
     if (RJ.nyc) {
       // New York builds lazily: the first time the camera comes within 45 km (or a flight starts there)
       const [cx, cz] = RJ.nyc.esbWorld();
-      add("nyc", { group: null, cx, cz, marker: V3(cx, 600, cz), heightAt: RJ.nyc.heightAt,
+      add("nyc", { group: null, cx, cz, marker: V3(cx, 600, cz), heightAt: RJ.nyc.heightAt, solidAt: (p) => RJ.nyc.ready && RJ.nyc.solidAtY(p),
         update: (dt, cam) => { if (!RJ.nyc.ready) { if (Math.hypot(cam.position.x - cx, cam.position.z - cz) < 45000) RJ.nyc.ensure(); else return; } RJ.nyc.update(dt, cam); } });
     }
     A.built = true;

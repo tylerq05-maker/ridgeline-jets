@@ -94,19 +94,35 @@
     islands: { name: "Island Sprint", region: "ocean", n: 16, step: 700, alt: [35, 70], clear: 25, turnCost: 0.4, weather: "scattered" },
     drone: { name: "Drone Race", region: "forest", n: 20, step: 150, alt: [5, 12], clear: 4, turnCost: 3, weather: "clear", ringR: 7, aircraft: "racedrone" }
   };
+  // city race routes (cities.js / citykit.js, nyc.js, sf.js): fixed gates through canyons, slaloms, under bridges
+  const CITY_RUNS = [["nyc", "New York Skyline Run"], ["sf", "San Francisco Bay Run"], ["tokyo", "Tokyo Neon Run"], ["dubai", "Dubai Supertall Run"], ["rio", "Rio Coastline Run"], ["hk", "Hong Kong Harbour Run"], ["chicago", "Chicago River Run"]];
+  for (const [id, name] of CITY_RUNS) M.COURSES["run_" + id] = { name, region: id, n: 0, ringR: id === "nyc" || id === "sf" ? 20 : 30, weather: "clear", points: () => M.cityRoute(id) };
+  M.cityRoute = function (id) {
+    let pts = id === "nyc" && RJ.nyc && RJ.nyc.route ? RJ.nyc.route() : id === "sf" && RJ.sf && RJ.sf.route ? RJ.sf.route() : RJ.cities ? RJ.cities.route(id) : null;
+    // gates that ended up inside a tower slide to open air (bridge gates stay put)
+    if (pts && RJ.cityKit) RJ.cityKit.clearRoute(pts, (x, z) => RJ.world.ground(x, z), 45);
+    return pts;
+  };
   M.ACTIVITIES = [
     { id: "roam", name: "Free roam", desc: "No goals. Fly anywhere, drop bombs in a bomber, chase records." },
     { id: "canyon", name: "Canyon Run", desc: "20 rings down a winding desert canyon. Unlocks the F-117." },
     { id: "mountain", name: "Mountain Pass", desc: "18 rings through snowy valleys between the peaks." },
     { id: "islands", name: "Island Sprint", desc: "16 rings skimming the waves between islands." },
     { id: "drone", name: "Drone Race", desc: "20 tight gates a few metres above the forest floor in an FPV racing quad." },
+    { id: "run_nyc", name: "New York Skyline Run", desc: "Down Sixth Avenue's canyon, past One World Trade, under the Brooklyn Bridge, up the Empire State." },
+    { id: "run_sf", name: "San Francisco Bay Run", desc: "Under the Golden Gate, past Alcatraz, between the downtown towers, under the Bay Bridge." },
+    { id: "run_tokyo", name: "Tokyo Neon Run", desc: "Under the Rainbow Bridge, the Shinjuku canyon, a tower slalom, then straight up a supertall." },
+    { id: "run_dubai", name: "Dubai Supertall Run", desc: "The Sheikh Zayed Road canyon, a slalom of 400 m towers and a climb past the Marina's twisters." },
+    { id: "run_rio", name: "Rio Coastline Run", desc: "Under the bridge to Niterói, down the city canyon and through the tower slalom." },
+    { id: "run_hk", name: "Hong Kong Harbour Run", desc: "Under Tsing Ma, through Central's packed canyon, a tower slalom and up past ICC." },
+    { id: "run_chicago", name: "Chicago River Run", desc: "Up the river under the bridges, through the Loop canyon and up the Willis Tower." },
     { id: "lowlevel", name: "Low-level challenge", desc: "3 minutes. Score time spent below 60 m above the ground." }
   ];
   M.REGIONS = [
     { id: "mountains", name: "Mountains" }, { id: "canyon", name: "Canyons" }, { id: "desert", name: "Desert" },
     { id: "ocean", name: "Ocean and islands" }, { id: "forest", name: "Forest valleys" }, { id: "clouds", name: "Above the clouds" },
     { id: "nyc", name: "New York City" }, { id: "sf", name: "San Francisco Bay" }, { id: "ye", name: "The Ye Monument" },
-    { id: "tokyo", name: "Tokyo" }, { id: "dubai", name: "Dubai" }, { id: "rio", name: "Rio de Janeiro" }
+    { id: "tokyo", name: "Tokyo" }, { id: "dubai", name: "Dubai" }, { id: "rio", name: "Rio de Janeiro" }, { id: "hk", name: "Hong Kong" }, { id: "chicago", name: "Chicago" }
   ];
 
   /* ======================= FREE FLIGHT ======================= */
@@ -131,7 +147,16 @@
       const reg = RJ.world.findRegion(regionId);
       let pos, yaw = reg.yaw;
       const spec = RJ.AIRCRAFT[o.aircraft];
-      if (course) {
+      const fixed = course && course.points ? course.points() : null;
+      if (course && course.points && !(fixed && fixed.length)) throw new Error(course.name + " is not available in this world");
+      if (fixed) {
+        // a city run: fixed gates; start 1.5 km out on the line into the first gate
+        this.rings = fixed;
+        const a = fixed[0], b = fixed[1] || fixed[0], d = V3(a.x - b.x, 0, a.z - b.z).normalize();
+        pos = V3(a.x + d.x * 1500, 0, a.z + d.z * 1500);
+        pos.y = Math.max(a.y + 40, M.highestAround(pos.x, pos.z, 600, 3) + 100);
+        yaw = yawFromDir(V3(a.x - pos.x, 0, a.z - pos.z));
+      } else if (course) {
         this.rings = valleyCourse(V3(reg.x, 0, reg.z), yaw, course.n, course);
         const first = this.rings[0];
         const back = dirFromYaw(yaw).multiplyScalar(-1600);
@@ -208,7 +233,7 @@
       if (this.carrierStart) RJ.ui.flash("ON THE CATAPULT", `Full power (${RJ.keyLabel(RJ.settings.keys.throttleUp)} / ${RJ.keyLabel(RJ.settings.keys.afterburner)}) to launch`, 3.5);
       else if (this.act) RJ.ui.flash(this.act.name.toUpperCase(), this.act.desc, 4);
       else RJ.ui.flash(course ? course.name.toUpperCase() : o.activity === "lowlevel" ? "LOW-LEVEL CHALLENGE" : this.runway ? "CLEARED FOR TAKEOFF" : "FREE FLIGHT",
-        course ? `${course.n} rings · par ${RJ.fmtTime(this.par)}` : this.runway ? `Full throttle (${RJ.keyLabel(RJ.settings.keys.throttleUp)} or ${RJ.keyLabel(RJ.settings.keys.afterburner)}), pull back at rotation speed` : RJ.world.TIMES[o.time].label + " · " + (env.weather === "dynamic" ? "Dynamic weather" : RJ.world.WEATHER[RJ.world.env.weather].label), 3.5);
+        course ? `${this.rings.length} rings · par ${RJ.fmtTime(this.par)}` : this.runway ? `Full throttle (${RJ.keyLabel(RJ.settings.keys.throttleUp)} or ${RJ.keyLabel(RJ.settings.keys.afterburner)}), pull back at rotation speed` : RJ.world.TIMES[o.time].label + " · " + (env.weather === "dynamic" ? "Dynamic weather" : RJ.world.WEATHER[RJ.world.env.weather].label), 3.5);
     }
     refreshRings() {
       this.ringMeshes.forEach((m, i) => {

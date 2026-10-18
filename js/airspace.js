@@ -578,7 +578,7 @@
     // each city has several airports around it (arrivals and departures spread out instead of converging on one point)
     const reg = (id, ap) => { const r = RJ.world.findRegion(id); if (r) for (const [dx, dz, w] of ap) out.push({ id, x: r.x + dx, z: r.z + dz, w, air: true, e: H(r.x + dx, r.z + dz), city: true }); };
     reg("nyc", [[14000, 9000, 2.6], [-15000, 4000, 2.2], [3000, -13000, 1.8]]); reg("sf", [[6000, 14000, 2.8], [-12000, -6000, 2]]);
-    for (const id of ["tokyo", "dubai", "rio"]) if (RJ.cities && RJ.cities.sites[id]) reg(id, [[8000, 6000, 2.2]]);
+    for (const id of ["tokyo", "dubai", "rio", "hk", "chicago"]) if (RJ.cities && RJ.cities.sites[id]) reg(id, [[8000, 6000, 2.2]]);
     for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2 + 0.2; out.push({ id: "gw" + i, x: -25000 + Math.cos(a) * 260000, z: 45000 + Math.sin(a) * 260000, w: 2.2, air: false, e: 0 }); }
     for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + 0.6; out.push({ id: "fix" + i, x: -25000 + Math.cos(a) * 70000, z: 45000 + Math.sin(a) * 70000, w: 1.4, air: false, e: 0 }); }
     return (HUBS = out);
