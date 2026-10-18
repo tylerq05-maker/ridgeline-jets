@@ -311,25 +311,20 @@
    * 8 km, its 3 km contrail is not. p = nozzle position, or null to end the trail (left the contrail band, hit). */
   const CON_T = { trail: { life: 14, s0: 5, s1: 40, step: 35, gray: 0.97, alpha: 0.4 } };
   const CWIND = new THREE.Vector3(1.2, 0, 0.8);
-  MF.contrail = function (ac, p) {
-    let r = ac._crib;
-    if (!p) { if (r) { r.dead = true; ac._crib = null; } return; }
-    if (!r) { r = ac._crib = newRibbon(CON_T, true); ribbonPush(r, p, CWIND, 1); ribbonPush(r, p, CWIND, 1); }
+  /** Continuous trail owned by ac under ac[key] (contrails, display smoke); p = emitter, or null to end it. */
+  function ownedTrail(ac, key, p, T) {
+    let r = ac[key];
+    if (!p) { if (r) { r.dead = true; ac[key] = null; } return; }
+    if (!r) { r = ac[key] = newRibbon(T, true); ribbonPush(r, p, CWIND, 1); ribbonPush(r, p, CWIND, 1); }
     const h = r.pts[0], q = r.pts[1];
-    if (q && (p.x - q.x) ** 2 + (p.y - q.y) ** 2 + (p.z - q.z) ** 2 > CON_T.trail.step ** 2) ribbonPush(r, p, CWIND, 1); // fix the old head, start a new one
+    if (q && (p.x - q.x) ** 2 + (p.y - q.y) ** 2 + (p.z - q.z) ** 2 > T.trail.step ** 2) ribbonPush(r, p, CWIND, 1); // fix the old head, start a new one
     else if (h) { h.x = p.x; h.y = p.y; h.z = p.z; h.t = RJ.fx.time || 0; }
-  };
+  }
+  MF.contrail = (ac, p) => ownedTrail(ac, "_crib", p, CON_T);
 
   /* ---------------- display smoke (airshows): a long white trail per jet, same ribbon as the contrails ---------------- */
   const SMOKE_T = { trail: { life: 12, s0: 1.8, s1: 18, step: 9, gray: 0.97, alpha: 0.55 } };
-  MF.smoke = function (ac, p) {
-    let r = ac._srib;
-    if (!p) { if (r) { r.dead = true; ac._srib = null; } return; }
-    if (!r) { r = ac._srib = newRibbon(SMOKE_T, true); ribbonPush(r, p, CWIND, 1); ribbonPush(r, p, CWIND, 1); }
-    const h = r.pts[0], q = r.pts[1];
-    if (q && (p.x - q.x) ** 2 + (p.y - q.y) ** 2 + (p.z - q.z) ** 2 > SMOKE_T.trail.step ** 2) ribbonPush(r, p, CWIND, 1);
-    else if (h) { h.x = p.x; h.y = p.y; h.z = p.z; h.t = RJ.fx.time || 0; }
-  };
+  MF.smoke = (ac, p) => ownedTrail(ac, "_srib", p, SMOKE_T);
 
   /* ---------------- impact ---------------- */
   MF.impact = function (msl, hit) {

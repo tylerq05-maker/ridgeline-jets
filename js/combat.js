@@ -267,8 +267,9 @@
         m.vel.y -= RJ.G0 * dt; m.vel.multiplyScalar(1 - 0.08 * dt);
         m.pos.addScaledVector(m.vel, dt); m.speed = m.vel.length();
         m.mesh.position.copy(m.pos);
-        m.mesh.quaternion.slerp(qq.setFromUnitVectors(Z, tv.copy(m.vel).normalize().negate()), Math.min(1, dt * 3));
+        m.mesh.quaternion.setFromUnitVectors(Z, tv.copy(m.vel).normalize().negate()); // rebuilt each step: the roll on top never accumulates
         if (RJ.missileFx && m.type) RJ.missileFx.update(m, dt, 0);
+        if (m.pos.y < RJ.world.ground(m.pos.x, m.pos.z)) detonate(m, i, null); // dropped low: it can hit the ground before the motor lights
         continue;
       }
       // motor: accelerate during burn (a hard kick in the first second of boost), then coast and bleed speed
