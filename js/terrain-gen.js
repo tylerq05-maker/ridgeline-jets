@@ -608,7 +608,9 @@
       if (AB) { const m = airbaseMask(x, z); if (m > 0.85) mix3(out, out, C.dryGrass, 0.35); }
       if (SITES.length) for (const st of SITES) {
         if (st.type !== "plateau" && st.type !== "flat" && st.type !== "pad") continue;
-        const dx = x - st.x, dz = z - st.z, R = (st.r || st.len) + 50; if (dx * dx + dz * dz > R * R * 4) continue;
+        const dx = x - st.x, dz = z - st.z, R = (st.r || st.len) + 50;
+        // Dubai sits in desert: sand and dry scrub for ~9 km around the city
+        if (st.kind === "dubai") { const d = Math.sqrt(dx * dx + dz * dz), w = 1 - smooth(st.r + 1500, st.r + 9000, d); if (w > 0 && h > 0.5) mix3(out, out, C.sand, w * 0.85 * smooth(0.5, 4, h)); } if (dx * dx + dz * dz > R * R * 4) continue;
         const m = siteMask(st, x, z); if (m > 0.97) { mix3(out, out, C.dryGrass, 0.3); mix3(out, out, C.rock, st.type === "plateau" ? 0.25 : 0.1); }
       }
       const j = 1 + N1(x / 90, z / 90) * 0.05;
@@ -749,6 +751,7 @@
           if (f.wl > -1e8 && h - f.wl < 4) continue;
           if (AB && airbaseMask(x, z) > 0.05) continue;
           if (SITES.length && clearMask(x, z) > 0.55) continue;
+          if (SITES.length && SITES.some((st) => st.kind === "dubai" && (x - st.x) * (x - st.x) + (z - st.z) * (z - st.z) < Math.pow(st.r + 6000, 2))) continue;
           const hx2 = sample(x + 15, z), hz2 = sample(x, z + 15);
           const sl2 = Math.max(Math.abs(hx2 - h), Math.abs(hz2 - h)) / 15;
           if (sl2 > 0.75) continue;

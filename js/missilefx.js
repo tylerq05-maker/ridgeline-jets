@@ -140,6 +140,7 @@
         "  vec4 mv = viewMatrix * w; vDepth = -mv.z; gl_Position = projectionMatrix * mv; }"
       ].join("\n"),
       fragmentShader: [
+        "#ifdef TINT\nuniform vec3 tint;\n#endif",
         "uniform float now; uniform vec3 lit; uniform vec3 amb; uniform vec3 hot; uniform vec3 fogCol; uniform float fogNear; uniform float fogFar; uniform vec3 sunDir;",
         "varying float vAge; varying float vSide; varying float vLife; varying float vA0; varying vec3 vW; varying float vDepth;",
         "float h(vec3 p){ return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }",
@@ -160,6 +161,9 @@
         "  col = min(col, vec3(0.86));",
         "#ifdef CONTRAIL",
         "  col = min(col * 1.12 + 0.1, vec3(0.97));",                           // ice-crystal contrail: brighter, no exhaust glow
+        "#ifdef TINT",
+        "  col = col * tint * 1.15;",                                            // coloured display smoke
+        "#endif",
         "#else",
         "  float heat = exp(-vAge * 9.0);",                                      // white-hot exhaust right behind the motor
         "  col = mix(col, hot * 3.2, heat * 0.85); alpha = max(alpha, heat * edge * 0.95 * vA0 * 1.6);",
@@ -176,7 +180,12 @@
     if (!conMat) { const b = ribbonMaterial(); conMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false, uniforms: b.uniforms, vertexShader: b.vertexShader, fragmentShader: b.fragmentShader, defines: { CONTRAIL: 1 } }); }
     return conMat;
   }
-  function newRibbon(T, contrail) {
+  const tintMats = {};
+  function tintMaterial(hex) {
+    if (!tintMats[hex]) { const b = ribbonMaterial(); tintMats[hex] = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false, uniforms: Object.assign({}, b.uniforms, { tint: { value: new THREE.Color(hex) } }), vertexShader: b.vertexShader, fragmentShader: b.fragmentShader, defines: { CONTRAIL: 1, TINT: 1 } }); }
+    return tintMats[hex];
+  }
+  function newRibbon(T, contrail, tint) {
     const g = new THREE.BufferGeometry(), N = RIB_N * 2;
     g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(N * 3), 3));
     g.setAttribute("born", new THREE.BufferAttribute(new Float32Array(N), 1));
@@ -187,7 +196,7 @@
     for (let i = 0; i < RIB_N - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
     g.setIndex(idx);
     for (let i = 0; i < N; i++) g.attributes.side.array[i] = i % 2 ? 1 : -1;
-    const mesh = new THREE.Mesh(g, contrail ? contrailMaterial() : ribbonMaterial());
+    const mesh = new THREE.Mesh(g, tint != null ? tintMaterial(tint) : contrail ? contrailMaterial() : ribbonMaterial());
     mesh.frustumCulled = false; mesh.renderOrder = 6; mesh.layers.set(RJ.LATE);
     RJ.scene.add(mesh);
     const r = { mesh, g, pts: [], T, dead: false, contrail: !!contrail };
@@ -312,10 +321,10 @@
   const CON_T = { trail: { life: 14, s0: 5, s1: 40, step: 35, gray: 0.97, alpha: 0.4 } };
   const CWIND = new THREE.Vector3(1.2, 0, 0.8);
   /** Continuous trail owned by ac under ac[key] (contrails, display smoke); p = emitter, or null to end it. */
-  function ownedTrail(ac, key, p, T) {
+  function ownedTrail(ac, key, p, T, tint) {
     let r = ac[key];
     if (!p) { if (r) { r.dead = true; ac[key] = null; } return; }
-    if (!r) { r = ac[key] = newRibbon(T, true); ribbonPush(r, p, CWIND, 1); ribbonPush(r, p, CWIND, 1); }
+    if (!r) { r = ac[key] = newRibbon(T, true, tint); ribbonPush(r, p, CWIND, 1); ribbonPush(r, p, CWIND, 1); }
     const h = r.pts[0], q = r.pts[1];
     if (q && (p.x - q.x) ** 2 + (p.y - q.y) ** 2 + (p.z - q.z) ** 2 > T.trail.step ** 2) ribbonPush(r, p, CWIND, 1); // fix the old head, start a new one
     else if (h) { h.x = p.x; h.y = p.y; h.z = p.z; h.t = RJ.fx.time || 0; }
@@ -324,7 +333,8 @@
 
   /* ---------------- display smoke (airshows): a long white trail per jet, same ribbon as the contrails ---------------- */
   const SMOKE_T = { trail: { life: 12, s0: 1.8, s1: 18, step: 9, gray: 0.97, alpha: 0.55 } };
-  MF.smoke = (ac, p) => ownedTrail(ac, "_srib", p, SMOKE_T);
+  /** Display smoke; `tint` (hex) colours it, e.g. the Red Arrows' red, white and blue. */
+  MF.smoke = (ac, p, tint) => ownedTrail(ac, "_srib", p, SMOKE_T, tint);
 
   /* ---------------- impact ---------------- */
   MF.impact = function (msl, hit) {

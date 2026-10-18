@@ -585,6 +585,7 @@
     if (type === "nyc" && RJ.nyc) { const s = RJ.nyc.spawn(); return { x: s.x, z: s.z, yaw: s.yaw, alt: s.alt }; }
     if (type === "sf" && RJ.sf) return RJ.sf.spawn();
     if (type === "ye" && RJ.ye && RJ.ye.spawn()) return RJ.ye.spawn();
+    if (RJ.cities && RJ.cities.SPEC[type]) { const s = RJ.cities.spawn(type); if (s) return s; }
     if (regionCache[type]) return regionCache[type];
     const test = REGION_TEST[type] || REGION_TEST.mountains;
     const step = type === "canyon" ? 600 : 1500;
@@ -1049,6 +1050,24 @@
     storm: { label: "Storm", clusters: 440, alt: [1500, 3600], thick: 1.8, dark: 0.6, fog: 0.7, sun: 0.28, haze: 0.9, gray: 0.75, rain: true, lightning: true, density: 3.4e-4, cirrus: 0, mist: 1, humid: 1, towers: 9, stratus: 1, wind: 16 },
     cloudsea: { label: "Cloud sea", alto: 0.35,  clusters: 520, alt: [1700, 2500], thick: 1.6, dark: 0.06, fog: 1, sun: 1, haze: 0.05, sea: true, density: 7e-5, cirrus: 0.65, mist: 0.6, humid: 0.7, stratus: 0.6, wind: 6 }
   };
+  // extended presets: built on the base ones. rain = intensity 0..1, bolts = [min, max] s between strikes,
+  // gust = gust strength (m/s), turb = extra convective turbulence, temp = air temperature offset
+  {
+    const B = W.WEATHER, X = (base, o) => Object.assign({}, B[base], o);
+    B.storm.rain = 0.75; B.storm.bolts = [5, 14]; B.storm.gust = 7; B.storm.turb = 0.5; B.storm.temp = -6;
+    B.overcast.temp = -3; B.cloudsea.temp = -2;
+    B.lightrain = X("overcast", { label: "Light rain", rain: 0.3, dark: 0.38, haze: 0.7, density: 2.2e-4, gust: 3, temp: -4 });
+    B.heavyrain = X("overcast", { label: "Heavy rain", rain: 0.85, dark: 0.5, sun: 0.35, haze: 0.85, gray: 0.7, density: 3.6e-4, gust: 6, turb: 0.25, wind: 12, temp: -5, bolts: [25, 60] });
+    B.thunder = X("storm", { label: "Thunderstorm", rain: 0.9, bolts: [3, 9], gust: 10, turb: 0.8, wind: 14 });
+    B.supercell = X("storm", { label: "Extreme supercell", rain: 1, dark: 0.5, sun: 0.45, haze: 0.45, density: 1.5e-4, gray: 0.5, clusters: 300, bolts: [1.2, 4], gust: 16, turb: 1.3, wind: 18, temp: -8 });
+    B.squall = X("storm", { label: "Squall line", rain: 0.95, dark: 0.55, bolts: [2, 6], gust: 14, turb: 1, wind: 20, squall: true });
+    B.windstorm = X("scattered", { label: "Windstorm", wind: 32, gust: 18, turb: 0.9, haze: 0.35, density: 1.4e-4, dark: 0.1, mist: 0.4 });
+    B.fog = X("overcast", { label: "Fog", alt: [120, 650], density: 1.6e-3, haze: 1, dark: 0.2, sun: 0.55, gray: 0.6, wind: 2, temp: -2, fogDeck: true });
+  }
+  /** Weather order shown in menus; "dynamic" is handled by RJ.weather (it changes the weather over time). */
+  W.WEATHER_MENU = ["clear", "scattered", "overcast", "lightrain", "heavyrain", "thunder", "supercell", "squall", "windstorm", "fog"];
+  /** The weather used for lighting and physics this frame: a blend while a transition is running. */
+  W.wx = () => W.wxMix || W.WEATHER[W.env && W.env.weather] || W.WEATHER.scattered;
 
   function todAt(e) {
     let a = TOD[0], b = TOD[TOD.length - 1];
@@ -1062,6 +1081,12 @@
   W.setEnvironment = function (env) {
     const prevW = W.env && W.env.weather;
     W.env = Object.assign({ time: "golden", weather: "scattered" }, env);
+    // "dynamic" weather: RJ.weather picks a starting sky and changes it over time
+    W.wxMix = null;
+    if (RJ.weather) W.env.weather = RJ.weather.onEnvironment(W.env.weather);
+    if (RJ.ships) RJ.ships.clear();
+    if (RJ.life) RJ.life.clear();
+    if (!W.WEATHER[W.env.weather]) W.env.weather = "scattered";
     const T = W.TIMES[W.env.time] || W.TIMES.golden;
     W.sunElev = env.sunElev != null ? env.sunElev : T.e; W.sunAz = env.sunAz != null ? env.sunAz : T.az; W.dynamic = false;
     // a running clock: Free Flight passes { hour, rate }; the old "Dynamic" preset is a cycle from sunrise at 26×
@@ -1071,8 +1096,8 @@
     if (cyc) W.env.cycle = W.clock;
     if (RJ.clouds) RJ.clouds.setWeather(W.env.weather);
     // air temperature shifts the speed of sound (cold nights and storms make Mach 1 come a little sooner)
-    RJ.tempOffset = ({ night: -9, dawn: -6, morning: -2, noon: 5, afternoon: 4, golden: 1, sunset: -2, dynamic: 0 }[W.env.time] || 0) + ({ storm: -6, overcast: -3, cloudsea: -2 }[W.env.weather] || 0);
-    W._tempBase = { storm: -6, overcast: -3, cloudsea: -2 }[W.env.weather] || 0;
+    RJ.tempOffset = ({ night: -9, dawn: -6, morning: -2, noon: 5, afternoon: 4, golden: 1, sunset: -2, dynamic: 0 }[W.env.time] || 0) + ((W.WEATHER[W.env.weather] || {}).temp || 0);
+    W._tempBase = (W.WEATHER[W.env.weather] || {}).temp || 0;
     if (W.cycle) clockSun();
     if (W.cloudGeo && (prevW !== W.env.weather || !W.clusters)) buildClouds();
     W.syncCloudLayer();
@@ -1080,7 +1105,7 @@
   };
 
   function applyLighting(full) {
-    const wx = W.WEATHER[W.env.weather] || W.WEATHER.scattered;
+    const wx = W.wx();
     const T = W.TIMES[W.env.time] || W.TIMES.golden;
     const e = W.sunElev * RJ.DEG, az = W.sunAz * RJ.DEG;
     W.sunDir.set(Math.sin(az) * Math.cos(e), Math.sin(e), -Math.cos(az) * Math.cos(e)).normalize();
@@ -1200,7 +1225,7 @@
         time: { value: 0 }, sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunCol: { value: new THREE.Color(1, 1, 1) },
         skyTop: { value: new THREE.Color(0.3, 0.5, 0.9) }, skyHor: { value: new THREE.Color(0.7, 0.8, 0.9) },
         deep: { value: new THREE.Color(0.02, 0.1, 0.16) }, shallow: { value: new THREE.Color(0.1, 0.38, 0.4) },
-        reflTex: { value: null }, texMatrix: { value: new THREE.Matrix4() }, useRefl: { value: 0 }, reflY: { value: 0 }, rain: { value: 0 }
+        reflTex: { value: null }, texMatrix: { value: new THREE.Matrix4() }, useRefl: { value: 0 }, reflY: { value: 0 }, rain: { value: 0 }, sea: { value: 1 }
       }]), W.atmoUniforms()),
       vertexShader: [
         "attribute vec2 winfo; varying vec3 vW; varying vec2 vInfo; varying vec4 vRefl;", W.GLSL_CURVE,
@@ -1213,7 +1238,7 @@
       ].join("\n"),
       fragmentShader: [
         "uniform float time; uniform vec3 sunDir; uniform vec3 sunCol; uniform vec3 skyTop; uniform vec3 skyHor; uniform vec3 deep; uniform vec3 shallow;",
-        "uniform sampler2D reflTex; uniform float useRefl; uniform float reflY; uniform float rain;",
+        "uniform sampler2D reflTex; uniform float useRefl; uniform float reflY; uniform float rain; uniform float sea;",
         "varying vec3 vW; varying vec2 vInfo; varying vec4 vRefl;",
         "#include <fog_pars_fragment>",
         // each wave octave fades out once its wavelength nears the pixel footprint (no moiré rings far away)
@@ -1225,12 +1250,20 @@
         "  float att = 1.0 / (1.0 + dist / 2200.0);",
         "  rjFp = dist * 0.0013 / max(0.08, abs(V.y));", // metres per pixel, stretched at grazing angles
         "  vec2 p = vW.xz; vec2 g = vec2(0.0);",
-        "  g += wave(p, vec2(0.80, 0.60), 0.018, 2.4, 0.85);",
-        "  g += wave(p, vec2(-0.55, 0.83), 0.031, 1.2, 1.1);",
-        "  g += wave(p, vec2(0.28, -0.96), 0.064, 0.55, 1.5);",
-        "  g += wave(p, vec2(-0.93, -0.36), 0.12, 0.26, 2.0) * att;",
+        // swell scales with the sea state (wind); a storm sea is long, steep and streaked with foam
+        "  float ss = sea * vInfo.y + (1.0 - vInfo.y);",
+        "  g += wave(p, vec2(0.80, 0.60), 0.018, 2.4, 0.85) * ss;",
+        "  g += wave(p, vec2(-0.55, 0.83), 0.031, 1.2, 1.1) * ss;",
+        "  g += wave(p, vec2(0.28, -0.96), 0.064, 0.55, 1.5) * mix(1.0, ss, 0.7);",
+        "  g += wave(p, vec2(-0.93, -0.36), 0.12, 0.26, 2.0) * att * mix(1.0, ss, 0.5);",
         "  g += wave(p, vec2(0.60, -0.80), 0.25, 0.11, 2.8) * att;",
         "  g += wave(p, vec2(0.97, 0.24), 0.52, 0.045, 3.9) * att * att;",
+        // rain: expanding rings in a grid of random cells, close to the camera only
+        "  if (rain > 0.02 && dist < 600.0) {",
+        "    vec2 c = floor(p * 0.6), f = fract(p * 0.6) - 0.5; float hs = fract(sin(dot(c, vec2(12.9898, 78.233))) * 43758.5);",
+        "    float r = fract(time * 1.3 + hs), d = length(f);",
+        "    g += f / max(d, 1e-3) * sin((d - r * 0.5) * 40.0) * exp(-abs(d - r * 0.5) * 18.0) * (1.0 - r) * rain * 0.35 * (1.0 - dist / 600.0) * step(hs, rain);",
+        "  }",
         "  float calm = mix(1.0, 0.35, 1.0 - vInfo.y);",
         "  vec3 N = normalize(vec3(-g.x * calm, 1.0, -g.y * calm));",
         "  float fres = 0.02 + 0.98 * pow(1.0 - max(dot(V, N), 0.0), 5.0);",
@@ -1244,6 +1277,7 @@
         "  vec3 col = mix(body, refl, fres) + sunCol * spec * smoothstep(-0.02, 0.1, sunDir.y);",
         "  float foam = (1.0 - smoothstep(0.0, 2.2, depth)) * (0.55 + 0.45 * sin(vW.x * 0.15 + vW.z * 0.11 + time * 1.3));",
         "  foam += smoothstep(0.62, 0.9, length(g) * 0.9) * vInfo.y * att * 0.35;",
+        "  if (sea > 1.3) { float st = sin(dot(p, vec2(0.6, 0.8)) * 0.08 + sin(dot(p, vec2(-0.8, 0.6)) * 0.013) * 3.0); foam += smoothstep(0.75, 1.0, st) * smoothstep(1.3, 2.4, sea) * vInfo.y * 0.25 * smoothstep(0.4, 0.9, length(g)); }",
         "  col = mix(col, vec3(0.93, 0.95, 0.97) * (0.55 + 0.45 * length(sunCol)), clamp(foam, 0.0, 1.0) * 0.65);",
         "  float a = mix(clamp(depth * 0.3, 0.0, 1.0), 1.0, fres * 0.6);",
         "  a *= smoothstep(-0.3, 0.6, depth);",
@@ -1566,6 +1600,9 @@
   /** Kept for callers; shadows now come straight from the weather map, so there is no extra pass. */
   W.renderCloudShadow = function () { };
   /** Billboards are the fallback; with volumetric clouds the layer heights come from the weather preset. */
+  /** Weather transitions: rebuild the billboard fallback and re-light with the blended weather. */
+  W.rebuildClouds = () => { if (W.cloudGeo) buildClouds(); W.syncCloudLayer(); };
+  W.relight = (full) => applyLighting(!!full);
   W.syncCloudLayer = function () {
     const vol = RJ.clouds && RJ.clouds.active();
     if (W.clouds) W.clouds.visible = !vol;
@@ -1574,7 +1611,7 @@
 
   /* ======================= RAIN ======================= */
   function initRain() {
-    const N = 1600;
+    const N = 3600;
     const pos = new Float32Array(N * 6);
     W.rainSeed = new Float32Array(N * 3);
     for (let i = 0; i < N * 3; i++) W.rainSeed[i] = Math.random();
@@ -1586,11 +1623,15 @@
     W.flash = 0; W.nextBolt = 6;
   }
   function updateRain(dt, cam, vel) {
-    const wx = W.WEATHER[W.env.weather];
-    const on = wx && wx.rain && cam.position.y < W.cloudMid;
+    // intensity comes from RJ.weather (local storm cells and squall bands), else from the preset
+    const wx = W.wx(), amt = RJ.weather ? RJ.weather.rain : +wx.rain || 0;
+    const on = amt > 0.02 && cam.position.y < Math.max(W.cloudMid, W.cloudBase + 400);
     W.rain.visible = !!on;
     if (!on) return;
-    const a = W.rain.geometry.attributes.position.array, S = W.rainSeed, N = S.length / 3, box = 90, t = performance.now() / 1000;
+    const S = W.rainSeed, N = Math.ceil(S.length / 3 * RJ.clamp(amt, 0.15, 1)), box = 90, t = performance.now() / 1000;
+    const a = W.rain.geometry.attributes.position.array;
+    W.rain.geometry.setDrawRange(0, N * 2);
+    W.rain.material.opacity = 0.22 + amt * 0.3;
     const vx = vel ? -vel.x * 0.012 : 0, vy = vel ? -vel.y * 0.012 : 0, vz = vel ? -vel.z * 0.012 : 0;
     for (let i = 0; i < N; i++) {
       const x = cam.position.x + (S[i * 3] - 0.5) * box, z = cam.position.z + (S[i * 3 + 2] - 0.5) * box;
@@ -1613,7 +1654,7 @@
     W.skyMat.uniforms.time.value += dt;
     W.waterMat.uniforms.time.value += dt;
     W.fallMat.uniforms.time.value += dt;
-    const wx = W.WEATHER[W.env.weather] || W.WEATHER.scattered;
+    const wx = W.wx();
     W.windOff.x += wx.wind * dt; W.windOff.y += wx.wind * 0.45 * dt;
     for (const m of [W.cloudMat, W.mistMat]) { m.uniforms.camPos.value.copy(cam.position); m.uniforms.wind.value.copy(W.windOff); }
     W.cloudShadowU.rjCloudXf.value.x = W.windOff.x; W.cloudShadowU.rjCloudXf.value.y = W.windOff.y;
@@ -1670,13 +1711,18 @@
     const under = cam.position.y < W.cloudBase && wx.clusters > 300 ? 0.75 : 1;
     if (W.flash <= 0) W.sun.intensity = W.sunIntensity * under;
 
-    if (wx.lightning) {
-      W.nextBolt -= dt;
-      if (W.nextBolt <= 0) { W.nextBolt = RJ.rand(6, 18); W.flash = 1; RJ.emit("thunder", { delay: RJ.rand(0.3, 2.5) }); }
-    }
+    // lightning strikes, gusts and weather changes live in RJ.weather; W.flash (0..1, scaled by distance) lights the sky
+    if (RJ.weather) RJ.weather.update(dt, cam);
+    // sea state follows the wind (bigger swell, more whitecaps); rain dimples the surface
+    W.seaState = RJ.damp(W.seaState || 1, RJ.clamp(wx.wind / 9, 0.5, 2.6), 0.2, dt);
+    W.waterMat.uniforms.sea.value = W.seaState;
+    W.waterMat.uniforms.rain.value = RJ.weather ? RJ.weather.rain : 0;
+    if (RJ.ships) RJ.ships.update(dt, cam);
+    if (RJ.life) RJ.life.update(dt, cam);
     if (W.flash > 0) {
-      W.flash = Math.max(0, W.flash - dt * (W.flash > 0.5 ? 6 : 2.5));
-      const f = W.flash > 0.85 || (W.flash > 0.4 && W.flash < 0.55) ? W.flash : W.flash * 0.3;
+      W.flashPeak = W.flashPeak || 1;
+      W.flash = Math.max(0, W.flash - dt * (W.flash > 0.5 * W.flashPeak ? 6 : 2.5));
+      const r = W.flash / W.flashPeak, f = (r > 0.85 || (r > 0.4 && r < 0.55) ? W.flash : W.flash * 0.3);
       W.hemi.intensity = W.hemiIntensity + f * 1.6;
       W.skyMat.uniforms.flash.value = f * 0.6;
     } else { W.hemi.intensity = W.hemiIntensity; W.skyMat.uniforms.flash.value = 0; }

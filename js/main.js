@@ -759,7 +759,7 @@
   /* Frame pacing: requestAnimationFrame already runs at the display's refresh rate (60/120/144/240 Hz);
    * the optional limit skips frames to hold a lower rate. Dynamic resolution trims the render scale when the
    * frame rate falls well below target and restores it when there is headroom. */
-  const PERF = { last: 0, n: 0, t0: 0, fps: 0, ms: 0, scale: 1, lowT: 0, highT: 0, vsync: 1000 / 60, el: null };
+  const PERF = { last: 0, n: 0, t0: 0, fps: 0, ms: 0, scale: 1, lowT: 0, highT: 0, vsync: 1000 / 60, el: null, tier: 0, tierT: 0 };
   RJ.perf = PERF;
   function perfTick(now, frameMs) {
     PERF.n++;
@@ -772,11 +772,24 @@
       if (PERF.fps < target * 0.85) { PERF.lowT += 0.5; PERF.highT = 0; } else if (PERF.fps > target * 0.96) { PERF.highT += 0.5; PERF.lowT = 0; } else { PERF.lowT = PERF.highT = 0; }
       if (PERF.lowT >= 1.5 && PERF.scale > 0.6) { PERF.scale = Math.max(0.6, PERF.scale - 0.1); PERF.lowT = 0; applyPixelRatio(); }
       else if (PERF.highT >= 4 && PERF.scale < 1) { PERF.scale = Math.min(1, PERF.scale + 0.1); PERF.highT = 0; applyPixelRatio(); }
+      // automatic quality: once resolution is at its floor and frames are still slow, shed load in steps
+      // (1: fewer ships/birds · 2: lighter volumetric clouds · 3: no ships, birds or whales); back up when there's headroom
+      const slow = PERF.fps < target * 0.8, fast = PERF.fps > target * 0.97;
+      PERF.tierT = (PERF.scale <= 0.6 && slow) ? Math.max(0, PERF.tierT) + 0.5 : (PERF.scale >= 1 && fast) ? Math.min(0, PERF.tierT) - 0.5 : 0;
+      if (PERF.tierT >= 6 && PERF.tier < 3) { PERF.tier++; PERF.tierT = 0; applyTier(); }
+      else if (PERF.tierT <= -20 && PERF.tier > 0) { PERF.tier--; PERF.tierT = 0; applyTier(); }
     } else if (PERF.scale !== 1 && RJ.settings.dynRes === false) { PERF.scale = 1; applyPixelRatio(); }
     if (!PERF.el) { PERF.el = document.createElement("div"); PERF.el.id = "fps"; document.body.appendChild(PERF.el); }
     PERF.el.hidden = !RJ.settings.showFps;
     if (RJ.settings.showFps) PERF.el.textContent = `${Math.round(PERF.fps)} FPS · ${PERF.ms.toFixed(1)} ms${PERF.scale < 1 ? ` · res ${Math.round(PERF.scale * 100)}%` : ""}`;
   }
+  function applyTier() {
+    const t = PERF.tier, q = RJ.settings.quality;
+    if (RJ.ships) { RJ.ships.on = t < 3; if (t >= 3) RJ.ships.clear(); }
+    if (RJ.life) RJ.life.tier = t;
+    if (RJ.clouds && RJ.clouds.setQuality) RJ.clouds.setQuality(t >= 2 ? ({ ultra: "high", high: "medium" }[q] || q) : q);
+  }
+  RJ.perf.applyTier = applyTier;
   function applyPixelRatio() {
     const Q = RJ.world.QUALITY[RJ.settings.quality] || RJ.world.QUALITY.high;
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, Q.pixel) * PERF.scale);

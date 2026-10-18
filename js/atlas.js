@@ -453,6 +453,7 @@
     if (RJ.realms) RJ.realms.plan(gen, P, A.home, sites);
     if (RJ.cannon) RJ.cannon.plan(gen, A.home, sites);
     if (RJ.ye) RJ.ye.plan(gen, A.home, sites);
+    if (RJ.cities) try { RJ.cities.plan(gen, A.home, sites); } catch (e) { console.warn("City placement failed", e); }
     W.castle = castle;
     W.setSites(sites);
     if (W.castleGroup) { W.scene.remove(W.castleGroup); RJ.castle.dispose(W.castleGroup); }
@@ -478,6 +479,7 @@
     if (RJ.realms) RJ.realms.build(add);
     if (RJ.cannon && RJ.cannon.site) tryB("cannon", () => RJ.cannon.build(), RJ.cannon.site);
     if (RJ.ye && RJ.ye.site) tryB("ye", () => RJ.ye.build(), RJ.ye.site);
+    if (RJ.cities) for (const id in RJ.cities.sites) tryB(id, () => RJ.cities.build(id), RJ.cities.sites[id]);
     if (RJ.sf) try { RJ.sf.register(add); } catch (e) { console.warn("San Francisco failed", e); }
     if (RJ.nyc) {
       // New York builds lazily: the first time the camera comes within 45 km (or a flight starts there)

@@ -91,19 +91,22 @@
   M.COURSES = {
     canyon: { name: "Canyon Run", region: "canyon", n: 20, step: 520, alt: [60, 95], clear: 25, turnCost: 1.5, weather: "clear", challenge: "canyon" },
     mountain: { name: "Mountain Pass", region: "mountains", n: 18, step: 650, alt: [120, 220], clear: 40, turnCost: 2.5, weather: "scattered" },
-    islands: { name: "Island Sprint", region: "ocean", n: 16, step: 700, alt: [35, 70], clear: 25, turnCost: 0.4, weather: "scattered" }
+    islands: { name: "Island Sprint", region: "ocean", n: 16, step: 700, alt: [35, 70], clear: 25, turnCost: 0.4, weather: "scattered" },
+    drone: { name: "Drone Race", region: "forest", n: 20, step: 150, alt: [5, 12], clear: 4, turnCost: 3, weather: "clear", ringR: 7, aircraft: "racedrone" }
   };
   M.ACTIVITIES = [
     { id: "roam", name: "Free roam", desc: "No goals. Fly anywhere, drop bombs in a bomber, chase records." },
     { id: "canyon", name: "Canyon Run", desc: "20 rings down a winding desert canyon. Unlocks the F-117." },
     { id: "mountain", name: "Mountain Pass", desc: "18 rings through snowy valleys between the peaks." },
     { id: "islands", name: "Island Sprint", desc: "16 rings skimming the waves between islands." },
+    { id: "drone", name: "Drone Race", desc: "20 tight gates a few metres above the forest floor in an FPV racing quad." },
     { id: "lowlevel", name: "Low-level challenge", desc: "3 minutes. Score time spent below 60 m above the ground." }
   ];
   M.REGIONS = [
     { id: "mountains", name: "Mountains" }, { id: "canyon", name: "Canyons" }, { id: "desert", name: "Desert" },
     { id: "ocean", name: "Ocean and islands" }, { id: "forest", name: "Forest valleys" }, { id: "clouds", name: "Above the clouds" },
-    { id: "nyc", name: "New York City" }, { id: "sf", name: "San Francisco Bay" }, { id: "ye", name: "The Ye Monument" }
+    { id: "nyc", name: "New York City" }, { id: "sf", name: "San Francisco Bay" }, { id: "ye", name: "The Ye Monument" },
+    { id: "tokyo", name: "Tokyo" }, { id: "dubai", name: "Dubai" }, { id: "rio", name: "Rio de Janeiro" }
   ];
 
   /* ======================= FREE FLIGHT ======================= */
@@ -112,7 +115,12 @@
     async setup(progress) {
       const o = this.o;
       const course = M.COURSES[o.activity];
-      const regionId = course ? course.region : o.region;
+      // activities (activities.js) can force the aircraft and region, start on a runway or at a set point
+      const act = this.act = RJ.activities ? RJ.activities.make(o.activity) : null;
+      this.spec0 = o.aircraft;
+      const forced = (course && course.aircraft) || (act && act.aircraft);
+      if (forced && RJ.AIRCRAFT[forced]) o.aircraft = forced;
+      const regionId = course ? course.region : act && act.region ? act.region : o.region;
       const weather = course ? (o.weather === "default" ? course.weather : o.weather) : o.weather;
       const env = { time: o.time, weather: regionId === "clouds" && o.weather === "scattered" ? "cloudsea" : weather };
       // time passes in Free Flight (Setup ▸ Time passes; Settings default 26×): the clock starts at the chosen time of day
@@ -145,6 +153,8 @@
         pos.y = Math.max(M.highestAround(pos.x, pos.z, 1200, 3) + 260, Math.min(mk.y + 150, M.highestAround(pos.x, pos.z, 1200, 3) + 900));
         yaw = yawFromDir(V3(-dx, 0, -dz));
       }
+      const st = act && act.start ? act.start() : null;
+      if (st) { pos = st.pos; yaw = st.yaw; }
       // Carrier start: on the bow catapult, launched off the deck
       const K = RJ.carrier, spec0 = RJ.AIRCRAFT[o.aircraft];
       this.carrierStart = !course && !near && o.activity === "roam" && o.start === "carrier" && K && K.site && M.carrierOK(spec0);
@@ -153,7 +163,7 @@
         pos = V3(cx, K.DECK + 3, cz); yaw = yawFromDir(V3(fx - cx, 0, fz - cz).normalize());
       }
       // Runway start: a mountain airbase laid along the valley floor
-      this.runway = !course && !near && !this.carrierStart && o.activity === "roam" && o.start === "runway" && regionId !== "ocean" && regionId !== "clouds" && reg.alt == null;
+      this.runway = !course && !near && !this.carrierStart && ((o.activity === "roam" && o.start === "runway") || (act && act.runway)) && regionId !== "ocean" && regionId !== "clouds" && reg.alt == null;
       if (this.runway) {
         const ab = regionId === "mountains" ? RJ.atlas.home.ab : RJ.world.planAirbase(reg.x, reg.z, reg.yaw);
         RJ.world.setAirbase(ab);
@@ -167,15 +177,17 @@
       }
       await RJ.world.prepare(pos, progress);
       const onDeck = this.runway || this.carrierStart;
-      this.player = makePlayer(o.aircraft, pos, yaw, onDeck ? 0 : cruiseSpeed(RJ.AIRCRAFT[o.aircraft]), onDeck);
-      this.player.throttle = onDeck ? 0 : 0.8;
+      this.player = makePlayer(o.aircraft, pos, yaw, onDeck ? 0 : st && st.speed ? st.speed : cruiseSpeed(RJ.AIRCRAFT[o.aircraft]), onDeck);
+      this.player.throttle = onDeck || this.player.spec.flight.glider ? 0 : 0.8;
       if (this.carrierStart) this.cat = { state: "hook", t: 0, x: pos.x, z: pos.z, yaw };
       RJ.game.allowBombs = (this.player.spec.bombs || 0) > 0;
       // living airspace (free roam): AI traffic, airshows, missile combat and the wanted level
       this.armed = !!(RJ.airspace && RJ.airspace.start(this));
+      this.startPos = pos.clone(); this.startYaw = yaw;
+      if (act) act.setup(this);
       if (course) {
         const pr = this.player.vis.dims;
-        this.ringR = Math.max(26, pr.span * 0.75 + 14);
+        this.ringR = course.ringR || Math.max(26, pr.span * 0.75 + 14);
         this.ringMeshes = this.rings.map((p, i) => {
           const m = ringMesh(this.ringR);
           m.position.copy(p);
@@ -194,8 +206,9 @@
       this.startPos = pos.clone(); this.startYaw = yaw;
       RJ.progress.stats.flights++; RJ.saveProgress();
       if (this.carrierStart) RJ.ui.flash("ON THE CATAPULT", `Full power (${RJ.keyLabel(RJ.settings.keys.throttleUp)} / ${RJ.keyLabel(RJ.settings.keys.afterburner)}) to launch`, 3.5);
+      else if (this.act) RJ.ui.flash(this.act.name.toUpperCase(), this.act.desc, 4);
       else RJ.ui.flash(course ? course.name.toUpperCase() : o.activity === "lowlevel" ? "LOW-LEVEL CHALLENGE" : this.runway ? "CLEARED FOR TAKEOFF" : "FREE FLIGHT",
-        course ? `${course.n} rings · par ${RJ.fmtTime(this.par)}` : this.runway ? `Full throttle (${RJ.keyLabel(RJ.settings.keys.throttleUp)} or ${RJ.keyLabel(RJ.settings.keys.afterburner)}), pull back at rotation speed` : RJ.world.TIMES[o.time].label + " · " + RJ.world.WEATHER[env.weather].label, 3.5);
+        course ? `${course.n} rings · par ${RJ.fmtTime(this.par)}` : this.runway ? `Full throttle (${RJ.keyLabel(RJ.settings.keys.throttleUp)} or ${RJ.keyLabel(RJ.settings.keys.afterburner)}), pull back at rotation speed` : RJ.world.TIMES[o.time].label + " · " + (env.weather === "dynamic" ? "Dynamic weather" : RJ.world.WEATHER[RJ.world.env.weather].label), 3.5);
     }
     refreshRings() {
       this.ringMeshes.forEach((m, i) => {
@@ -261,6 +274,7 @@
       if (pl.state === "flying") this.tdSink = Math.max(0, -pl.vel.y);
       this.carrierOps(dt);
       if (this.armed) RJ.airspace.update(dt, pl);
+      if (this.act) { this.act.update(this, dt); if (this.act.tick) this.act.tick(dt); }
       if (pl.alive) {
         if (pl.agl < 60 && pl.speed > 100) this.lowTime += dt;
         M.trackChallenges(pl, this);
@@ -344,15 +358,18 @@
       this.prevSide = null;
     }
     onDestroyed(d) {
+      if (this.act && this.act.onDestroyed && this.act.onDestroyed(this, d)) { this.respawnT = -1e9; return; } // the activity ends here
       if (d.ac === this.player) RJ.ui.flash(d.cause === "water" ? "SPLASHED" : "CRASHED", "Respawning…", 2.5, true);
     }
     hudExtras() {
       const pl = this.player, out = {};
       if (this.rings && !this.done) { out.ring = { pos: this.rings[this.ringIdx] }; if (this.rings[this.ringIdx + 1]) out.ring2 = { pos: this.rings[this.ringIdx + 1] }; }
       if (RJ.game.allowBombs) { out.bombMode = true; if (pl.alive && pl.bombs > 0) out.bombImpact = RJ.combat.bombImpact(pl); }
+      if (this.act && this.act.hud) this.act.hud(this, out);
       return out;
     }
     status() {
+      if (this.act) return this.act.status(this);
       if (this.rings) return `<b>${this.course.name.toUpperCase()}</b>${Math.min(this.ringIdx + 1, this.rings.length)} / ${this.rings.length} · ${RJ.fmtTime(this.t)}`;
       if (this.o.activity === "lowlevel") return `<b>LOW-LEVEL</b>${this.lowTime.toFixed(1)} s · ${RJ.fmtTime(Math.max(0, 180 - this.sessionT))} left`;
       const r = RJ.progress.records;
@@ -362,6 +379,7 @@
     objective() {
       const pl = this.player;
       if (this.rings) return "Fly through the yellow ring. The arrow points to it when it's off screen.";
+      if (this.act && !pl.onGround) return this.act.objective(this);
       const cg = this.carrierGuide();
       if (cg) return cg;
       if (this.cat && this.cat.state === "hook" && pl.onGround) return `Hooked to the catapult. Full power (${RJ.keyLabel(RJ.settings.keys.throttleUp)} / ${RJ.keyLabel(RJ.settings.keys.afterburner)}) and the cat fires; the deck ends 130 m ahead.`;
@@ -381,7 +399,7 @@
       if (this.armed) return `Live airspace: ${RJ.keyLabel(RJ.settings.keys.target)} picks the aircraft nearest your nose, ${RJ.keyLabel(RJ.settings.keys.missile)} fires a missile once locked. Attacking traffic brings the military.`;
       return "Explore. Climb for speed records or dive into the valleys.";
     }
-    dispose() { (this.ringMeshes || []).forEach((m) => RJ.scene.remove(m)); if (RJ.airspace) RJ.airspace.stop(); }
+    dispose() { (this.ringMeshes || []).forEach((m) => RJ.scene.remove(m)); if (RJ.airspace) RJ.airspace.stop(); if (this.act && this.act.dispose) this.act.dispose(); if (this.spec0) this.o.aircraft = this.spec0; }
   }
   M.FreeFlight = FreeFlight;
 

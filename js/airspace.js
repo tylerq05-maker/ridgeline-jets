@@ -36,6 +36,7 @@
     const K = {}; for (const k in KIND) K[k] = [];
     for (const s of Object.values(RJ.AIRCRAFT)) {
       const m = s.flight.model;
+      if (s.flight.glider || s.id === "racedrone") continue; // wingsuit, paper plane and the racing quad are player-only
       if (m === "car" || m === "bike") K.oddity.push(s.id);
       else if (m === "heli") K.heli.push(s.id);
       else if (m === "space") K.space.push(s.id);
@@ -213,9 +214,18 @@
       if (st.id === "roll" && st.rolling) { this.ac.input.roll = 0.32; this.ac.input.pitch = 0.1; this.ac.input.yaw = 0; }
     }
   }
+  /** Display teams (tributes). The Red Arrows fly Hawks in reality; there is no Hawk model yet, so their tribute
+   *  team uses the F-16 airframe in Red Arrows colours with red / white / blue smoke. */
+  const TEAMS = {
+    blue: { name: "Blue Angels", type: "fa18e", livery: "blueangels", call: "Blue Angel", tag: "BLUE ANGELS", lead: "BLUE ANGEL 1", feed: "Blue Angels airshow nearby" },
+    thunder: { name: "Thunderbirds", type: "f16", livery: "thunderbirds", call: "Thunderbird", tag: "THUNDERBIRDS", lead: "THUNDERBIRD 1", feed: "USAF Thunderbirds airshow nearby" },
+    red: { name: "Red Arrows", type: "f16", livery: "redarrows", call: "Red", tag: "RED ARROWS", lead: "RED 1", feed: "Red Arrows display nearby", smoke: [0xd8202a, 0xf4f4f4, 0x2a4fd8] }
+  };
+  A.TEAMS = TEAMS;
   const SHOW_SEQ = ["pass", "turn", "deltapass", "turn", "loop", "turn", "breakout", "turn", "roll", "turn", "wave", "turn", "echelonpass", "turn"];
   class Show {
-    constructor(pl) {
+    constructor(pl, team) {
+      this.team = TEAMS[team] || TEAMS[["blue", "thunder", "red"][Math.floor(Math.random() * 3)]];
       const fwd = flat(pl.vel.lengthSq() > 1 ? pl.vel : pl.fwd).clone();
       // somewhere ahead and off to one side, 7–10 km out: discovered, not dropped in front of the nose
       const brg = (Math.random() < 0.5 ? -1 : 1) * rand(25, 70) * DEG;
@@ -229,16 +239,16 @@
       for (let i = 0; i < 6; i++) {
         const s = SLOTS.diamond[i];
         const p = tv.set(s[0], s[1], s[2]).applyAxisAngle(UP, yaw).add(entry).clone();
-        const ac = make("fa18e", "traffic", p, yaw, 185, { kind: "fighter", livery: "blueangels", callsign: `Blue Angel ${i + 1}`, show: this, mil: false });
+        const T = this.team, ac = make(T.type, "traffic", p, yaw, 185, { kind: "fighter", livery: T.livery, callsign: `${T.call} ${i + 1}`, show: this, mil: false });
         ac.air.civ = true; ac.air.mil = false;
         this.jets.push(ac);
       }
-      this.lead = this.jets[0]; this.lead.tag = "BLUE ANGELS";
+      this.lead = this.jets[0]; this.lead.tag = this.team.tag;
       this.lead.pilot = new ShowPilot(this.lead, this);
       for (let i = 1; i < 6; i++) attach(this.jets[i], this.lead, i, "diamond");
       this.k = -1; this.t = 0; this.life = rand(330, 420); this.smoke = false;
       this.next("arrive");
-      RJ.ui.feed("Blue Angels airshow nearby", "b");
+      RJ.ui.feed(this.team.feed, "b");
     }
     get alive() { return this.jets.some((a) => a.alive); }
     shape(name) { for (const a of this.jets) if (a.form && a.form.to !== name) { a.form.from = a.form.to; a.form.to = name; a.form.mix = 0; } }
@@ -324,7 +334,8 @@
       for (const a of this.jets) {
         if (!a.alive) { if (a._srib) RJ.missileFx.smoke(a, null); continue; }
         const on = this.smoke && !a.air.fled && a.state === "flying";
-        RJ.missileFx.smoke(a, on ? a.mesh.localToWorld(tv.copy(a.vis.nozzles[0] || tv.set(0, 0, 8))) : null);
+        const sm = this.team.smoke;
+        RJ.missileFx.smoke(a, on ? a.mesh.localToWorld(tv.copy(a.vis.nozzles[0] || tv.set(0, 0, 8))) : null, sm ? sm[this.jets.indexOf(a) % 3] : undefined);
       }
       if (st.id === "depart" && L.pos.distanceTo(RJ.game.mode.player.pos) > 16000) this.done = true;
     }
@@ -431,7 +442,7 @@
   function react(ac, kind) {
     const info = ac.air;
     detachGhost(ac);
-    if (info.show) { info.show.scatter(); radio("ba", "BLUE ANGEL 1", ["Blue Angels taking fire! Knock it off, knock it off! Break and head for home!", "Boss here, we're under attack. Show's over, everybody out!"], 60); return; }
+    if (info.show) { info.show.scatter(); radio("ba", info.show.team.lead, [info.show.team.name + " taking fire! Knock it off, knock it off! Break and head for home!", "Lead here, we're under attack. Show's over, everybody out!"], 60); return; }
     if (info.resp) return;
     if (info.mil && info.grp) { for (const m of info.grp.members) if (m.alive && m.pos.distanceTo(ac.pos) < 12000) enlist(m); radio("pat", info.callsign.toUpperCase(), ["Taking fire! Weapons free, engage the bandit!", "We're being engaged! Flight, turn in and fight!"], 30); return; }
     if (info.mil && !ac.kr && !ac.spec.flight.model) { enlist(ac); radio("pat1", info.callsign.toUpperCase(), ["I'm hit! Engaging the shooter!", "Bandit on me! Fighting back!"], 30); return; }
@@ -567,6 +578,7 @@
     // each city has several airports around it (arrivals and departures spread out instead of converging on one point)
     const reg = (id, ap) => { const r = RJ.world.findRegion(id); if (r) for (const [dx, dz, w] of ap) out.push({ id, x: r.x + dx, z: r.z + dz, w, air: true, e: H(r.x + dx, r.z + dz), city: true }); };
     reg("nyc", [[14000, 9000, 2.6], [-15000, 4000, 2.2], [3000, -13000, 1.8]]); reg("sf", [[6000, 14000, 2.8], [-12000, -6000, 2]]);
+    for (const id of ["tokyo", "dubai", "rio"]) if (RJ.cities && RJ.cities.sites[id]) reg(id, [[8000, 6000, 2.2]]);
     for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2 + 0.2; out.push({ id: "gw" + i, x: -25000 + Math.cos(a) * 260000, z: 45000 + Math.sin(a) * 260000, w: 2.2, air: false, e: 0 }); }
     for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + 0.6; out.push({ id: "fix" + i, x: -25000 + Math.cos(a) * 70000, z: 45000 + Math.sin(a) * 70000, w: 1.4, air: false, e: 0 }); }
     return (HUBS = out);
@@ -792,7 +804,7 @@
   /* ======================= lifecycle ======================= */
   A.start = function (mode) {
     A.clear();
-    A.on = density() > 0 && mode.o.activity === "roam";
+    A.on = density() > 0 && (mode.o.activity === "roam" || !!(mode.act && mode.act.airspace));
     if (!A.on) return false;
     RJ.combat.forceCrowd = true;
     RJ.combat.lockAssist = { time: 0.4, cone: 1.4, range: 1.5, burn: 1.7 }; // Free Flight: locks come quicker and from further out

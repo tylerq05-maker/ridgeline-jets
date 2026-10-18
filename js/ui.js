@@ -96,7 +96,7 @@
     el.onclick = (e) => { const b = e.target.closest("[data-v]"); if (!b) return; UI.click(); onPick(b.dataset.v); };
   }
   const TIMES = () => Object.entries(RJ.world.TIMES).map(([id, t]) => ({ id, name: t.label }));
-  const WEATHERS = () => ["clear", "scattered", "overcast", "storm"].map((id) => ({ id, name: RJ.world.WEATHER[id].label }));
+  const WEATHERS = () => RJ.world.WEATHER_MENU.map((id) => ({ id, name: RJ.world.WEATHER[id].label })).concat([{ id: "dynamic", name: "Dynamic (changes)" }]);
 
   /* ---------------- main menu ---------------- */
   UI.refreshMain = function () {

@@ -702,6 +702,32 @@
     cockpit(g, 0.85, -5.8); tips(g, 7.2, 0, 3.1);
   };
 
+  /* racing quad: carbon X-frame, four 5-inch props, camera pod, battery strap */
+  B.racedrone = (g, M) => {
+    box(g, 0.16, 0.05, 0.22, 0, 0, 0, M.dark); box(g, 0.08, 0.05, 0.12, 0, 0.05, 0.02, M.accent);
+    box(g, 0.05, 0.05, 0.05, 0, 0.02, -0.12, M.glass);
+    for (const [x, z] of [[0.14, -0.14], [-0.14, -0.14], [0.14, 0.14], [-0.14, 0.14]]) {
+      const a = box(g, 0.025, 0.012, 0.2, x / 2, 0, z / 2, M.dark); a.rotation.y = Math.atan2(x, z);
+      tube(g, 0.018, 0.018, 0.03, x, 0.02, z, M.metal);
+      rotor(g, M, { x, y: 0.045, z, r: 0.065, blades: 3, chord: 0.02, speed: 260 });
+    }
+    cockpit(g, 0.03, -0.1); tips(g, 0.2, 0, 0);
+  };
+  /* wingsuit flyer: prone body, arm wings from wrist to hip, leg wing between the legs, helmet */
+  B.wingsuit = (g, M) => {
+    blob(g, 0.2, 0.13, 0.42, 0, 0, 0, M.body); blob(g, 0.12, 0.13, 0.13, 0, 0.04, -0.5, M.trim);
+    plate(g, [[0.12, -0.32], [0.82, -0.24], [0.78, -0.05], [0.12, 0.3]], 0.02, M.body);
+    plate(g, [[0.04, 0.3], [0.26, 0.9], [0.18, 1.0], [0.0, 0.92]], 0.02, M.accent);
+    pair((x) => blob(g, 0.06, 0.06, 0.3, x, -0.01, 0.62, M.body), 0.14);
+    cockpit(g, 0.05, -0.45); tips(g, 0.8, 0, -0.2);
+  };
+  /* paper plane, glider scale (1.6 m span): folded dart with a keel and creased wings */
+  B.paperplane = (g, M) => {
+    plate(g, [[0.02, -1.25], [0.8, 0.95], [0.6, 1.05], [0.02, 1.05]], 0.012, M.body, { dihedral: 0.12 });
+    fin(g, [[-1.2, 0], [1.05, 0], [1.05, -0.22], [0.2, -0.22]], M.trim, { thick: 0.02 });
+    tips(g, 0.8, 0, 0.95);
+  };
+
   /* ======================= CATALOG ======================= */
   const add = RJ.addAircraft;
   const LASER = (color, rate, dmg) => ({ name: "Laser cannons", rate, dmg, heat: 0.022, spread: 0.0012, speed: 1700, color, laser: true });
@@ -803,6 +829,27 @@
     flight: { vmax: 230, ref: 9000, mil: 2.7, ab: 0, vstall: 58, gmax: 2.5, roll: 24, pitch: 5.5, yaw: 4, ind: 2.0, eng: "fan" },
     hp: 520, stealth: 1, radar: 6000, gun: null, msl: { n: 0 }, flares: 60, freeOnly: true,
     unlock: { start: true }, sound: { type: "heavy", pitch: 0.8, family: "heavy" } }, 4.4);
+
+  // racing drone: tiny, violent thrust-to-weight, flips in a blink
+  add("racedrone", { name: "FPV Racing Drone", short: "DRONE", cat: "heli", role: "5-inch racing quadcopter", status: "Drone racing", year: 2016,
+    desc: "A 650 g racing quad: tilts nearly flat to go fast, 0–100 km/h in about a second, and stops just as hard. Same controls as the helicopters.",
+    colors: { body: 0x222428, trim: 0x111214, glass: 0x1a2430, accent: 0xe8471c }, build: "racedrone", noGear: true, gearH: 0.04,
+    flight: heliF(42, { tilt: 55, tiltRate: 7, yawRate: 240, yawResp: 9, climb: 20, tmax: 3.2, spool: 10, drag: 0.004, vdrag: 0.06, skid: 0.04 }),
+    hp: 12, stealth: 1, radar: 0, gun: null, msl: { n: 0 }, flares: 0, freeOnly: true,
+    unlock: { start: true }, sound: { type: "heavy", pitch: 2.4, family: "electric" } }, 0.15);
+  // gliders: no engine at all (flight.glider); drag is tuned so the best glide comes out right
+  add("wingsuit", { name: "Wingsuit", short: "WINGSUIT", cat: "civil", role: "Human flight · proximity glider", status: "BASE jumping", year: 1999,
+    desc: "No engine: you glide about 2.5 m forward for every metre down at 150–180 km/h. Dive to gain speed, flare to stretch the glide. Pull up near the ground at your peril.",
+    colors: { body: 0xe8471c, trim: 0x1d1f22, glass: 0x1a2430, accent: 0x1d1f22 }, build: "wingsuit", noGear: true, gearH: 0.1,
+    flight: { vmax: 62, ref: 2000, mil: 6.5, ab: 0, vstall: 20, gmax: 3, roll: 140, pitch: 40, yaw: 30, ind: 1.4, eng: "prop", glider: true },
+    hp: 30, stealth: 1, radar: 0, gun: null, msl: { n: 0 }, flares: 0, freeOnly: true,
+    unlock: { start: true }, sound: { type: "heavy", pitch: 1, family: "electric" } }, 0.3);
+  add("paperplane", { name: "Paper Plane (glider scale)", short: "PAPER", cat: "civil", role: "Folded dart · enlarged 1.6 m span", status: "Desk-drawer classic", year: 1909,
+    desc: "A classic dart folded from one sheet, scaled up so you can ride it. No power: about 6:1 glide, floaty and slow, pushed around by every gust.",
+    colors: { body: 0xf6f5f0, trim: 0xe9e7df, glass: 0x1a2430, accent: 0xcfd6e0 }, build: "paperplane", noGear: true, gearH: 0.05,
+    flight: { vmax: 26, ref: 500, mil: 3.4, ab: 0, vstall: 9, gmax: 2.5, roll: 90, pitch: 30, yaw: 20, ind: 1.2, eng: "prop", glider: true },
+    hp: 8, stealth: 1, radar: 0, gun: null, msl: { n: 0 }, flares: 0, freeOnly: true,
+    unlock: { start: true }, sound: { type: "heavy", pitch: 1, family: "electric" } }, 0.2);
 
   /* ---------------- per-aircraft handling character for the jet model ----------------
    * depart: how readily it departs at the stall (wing drop / nose slice); 0 = carefree fly-by-wire.

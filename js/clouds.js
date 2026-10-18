@@ -115,8 +115,18 @@
     scattered: { cov: -0.06, base: 2200, top: 3900, den: 1.0, storm: 0, flat: 0.1 },
     overcast: { cov: 0.34, base: 1700, top: 3500, den: 1.2, storm: 0, flat: 0.55 },
     storm: { cov: 0.36, base: 1300, top: 5200, den: 1.45, storm: 1, flat: 0.25 },
-    cloudsea: { cov: 0.42, base: 1500, top: 2700, den: 1.1, storm: 0, flat: 0.8 }
+    cloudsea: { cov: 0.42, base: 1500, top: 2700, den: 1.1, storm: 0, flat: 0.8 },
+    // stormTop: anvil height (m); sq: squall-line strength (a moving band of storm cells)
+    lightrain: { cov: 0.38, base: 1200, top: 3300, den: 1.25, storm: 0, flat: 0.6 },
+    heavyrain: { cov: 0.44, base: 900, top: 4300, den: 1.4, storm: 0.35, flat: 0.5, stormTop: 7500 },
+    thunder: { cov: 0.36, base: 1200, top: 5200, den: 1.5, storm: 1.2, flat: 0.25, stormTop: 12000 },
+    supercell: { cov: 0.16, base: 1000, top: 4400, den: 1.65, storm: 1.7, flat: 0.15, stormTop: 14500 },
+    squall: { cov: 0.06, base: 1100, top: 4600, den: 1.5, storm: 0.45, flat: 0.25, stormTop: 12500, sq: 1 },
+    windstorm: { cov: -0.14, base: 2500, top: 3700, den: 0.9, storm: 0, flat: 0.35 },
+    fog: { cov: 0.5, base: 0, top: 420, den: 1.3, storm: 0, flat: 1 }
   };
+  const KEYS = ["cov", "base", "top", "den", "storm", "flat", "stormTop", "sq"];
+  for (const k in PRESETS) { const P = PRESETS[k]; P.stormTop = P.stormTop || (P.storm > 0 ? 11000 : P.top); P.sq = P.sq || 0; }
   C.PRESETS = PRESETS;
   C.p = Object.assign({}, PRESETS.scattered);
 
@@ -132,12 +142,15 @@
     "uniform float detailScale; uniform float time; uniform float frame;",
     "uniform vec3 sunDir; uniform vec3 sunCol; uniform vec3 ambTop; uniform vec3 ambBot; uniform vec3 fogCol; uniform float fogDen;",
     "uniform vec4 holes[2];",
+    "uniform vec4 sq;     // squall band: dir x, dir z, offset along dir, half width",
+    "uniform vec4 fl;     // lightning flash position + intensity",
+    "uniform vec4 rn;     // rain shaft floor, rain amount, squall strength",
     "varying vec2 vUv;",
     "float viewZ(float d){ return (camNear * camFar) / ((camFar - camNear) * d - camFar); }",
     "vec3 rayDir(vec2 uv, out vec3 vdir){ vec4 v = invProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0); vdir = normalize(v.xyz / v.w); return normalize((camWorld * vec4(vdir, 0.0)).xyz); }",
     "float sceneDist(vec2 uv, vec3 vdir){ float z = texture2D(tLin, uv).r; if (z > 59000.0) return 1e7; return z / max(-vdir.z, 1e-4); }",
     "vec2 slabT(vec3 ro, vec3 rd){",
-    "  float lo = slab.x, hi = max(slab.y, slab.z);",
+    "  float lo = min(slab.x, rn.x), hi = max(slab.y, slab.z);",
     "  if (abs(rd.y) < 1e-4) { if (ro.y < lo || ro.y > hi) return vec2(1.0, 0.0); return vec2(0.0, slab.w); }",
     "  float ta = (lo - ro.y) / rd.y, tb = (hi - ro.y) / rd.y;",
     "  return vec2(max(min(ta, tb), 0.0), max(ta, tb));",
@@ -149,9 +162,16 @@
     "float density(vec3 p, bool cheap){",
     "  vec4 w = texture2D(tWeather, (p.xz - wmap.xy) * wmap.z);",
     "  float storm = w.b * wx.z;",
+    "  if (rn.z > 0.0) { float x = (dot(p.xz, sq.xy) - sq.z) / sq.w; storm = max(storm, rn.z * exp(-x * x) * smoothstep(0.15, 0.6, w.r + w.g * 0.35)); }",
     "  float cov = clamp(w.r * 1.12 + wx.x - 0.08 + storm * 0.6, 0.0, 1.0);",
     "  if (cov < 0.22) return 0.0;",
-    "  float top = mix(slab.x + (slab.y - slab.x) * mix(mix(0.32, 1.0, w.g), 0.45, wx.w), slab.z, storm);",
+    // rain shafts: grey curtains hanging from the base of strong cells down to the ground
+    "  if (p.y < slab.x) {",
+    "    if (rn.y <= 0.0 || storm < 0.3) return 0.0;",
+    "    float sh = texture(tShape, vec3(p.x - wmap.x * 1.1, p.y * 0.05, p.z - wmap.y * 1.1) * wmap.w * 2.3).r;",
+    "    return rn.y * 0.11 * smoothstep(0.3, 0.85, storm) * smoothstep(0.4, 0.75, sh) * (0.55 + 0.45 * smoothstep(rn.x, slab.x, p.y));",
+    "  }",
+    "  float top = mix(slab.x + (slab.y - slab.x) * mix(mix(0.32, 1.0, w.g), 0.45, wx.w), slab.z, min(storm, 1.0));",
     "  float hf = (p.y - slab.x) / max(top - slab.x, 1.0);",
     "  if (hf < 0.0 || hf > 1.0) return 0.0;",
     // flat bases, rounded tops; storms flare out into an anvil near the top
@@ -204,6 +224,7 @@
     "      float hf = clamp((p.y - slab.x) / max(slab.y - slab.x, 1.0), 0.0, 1.0);",
     "      vec3 amb = mix(ambBot, ambTop, hf) * (0.55 + 0.45 * hf);",
     "      vec3 S = sunCol * lum * mix(0.55, 1.0, powder) * 4.3 + amb;",
+    "      if (fl.w > 0.0) S += vec3(0.78, 0.82, 1.0) * fl.w * 3.5 * exp(-distance(p, fl.xyz) / 1800.0);",
     "      float st = dens * sigma;",
     "      float Ts = exp(-st * ds);",
     "      col += T * S * (1.0 - Ts);",
@@ -324,6 +345,7 @@
         ambTop: { value: new THREE.Color(0.5, 0.6, 0.8) }, ambBot: { value: new THREE.Color(0.3, 0.33, 0.4) },
         fogCol: { value: new THREE.Color(0.7, 0.8, 0.9) }, fogDen: { value: 3e-5 },
         holes: { value: [new THREE.Vector4(), new THREE.Vector4()] },
+        sq: { value: new THREE.Vector4(1, 0, 0, 3000) }, fl: { value: new THREE.Vector4() }, rn: { value: new THREE.Vector4(0, 0, 0, 0) },
         tCloud: { value: null }, lowRes: { value: new THREE.Vector2(4, 4) },
         frame: { value: 0 }, tCur: { value: null }, tHist: { value: null }, prevVP: { value: new THREE.Matrix4() }, histW: { value: 0 }
       };
@@ -363,11 +385,39 @@
     C.enabled = C.ok && !!C.q && RJ.settings.volClouds !== false && RJ.post.enabled;
   };
 
-  C.setWeather = function (id) {
-    C.p = Object.assign({}, PRESETS[id] || PRESETS.scattered);
-    C.p.cov += (RJ.settings.clouds - 1) * 0.25;
+  /** Switch weather. With blend (seconds) the cloud field morphs there gradually: storms build, decks thin out. */
+  C.setWeather = function (id, blend) {
+    C.target = Object.assign({}, PRESETS[id] || PRESETS.scattered);
+    C.target.cov += (RJ.settings.clouds - 1) * 0.25;
+    C.blendT = blend || 0;
+    if (!blend) C.p = Object.assign({}, C.target);
+    // a new squall line forms ~6 km upwind of the camera and marches across
+    if (C.target.sq > 0 && (!blend || C.p.sq < 0.05)) { const c = RJ.world.camera ? RJ.world.camera.position : { x: 0, z: 0 }; C.sqBase = c.x * C.sqDir[0] + c.z * C.sqDir[1]; C.sqOff = -6000; }
   };
-  C.layer = () => ({ base: C.p.base, top: C.p.top, stormTop: C.p.storm > 0 ? 11000 : C.p.top, mid: (C.p.base + C.p.top) / 2 });
+  /** Per frame: ease the live parameters toward the target preset, and advance the squall line. */
+  C.step = function (dt) {
+    const P = C.p, T = C.target;
+    if (T && C.blendT > 0) {
+      const k = Math.min(1, dt * 3 / C.blendT);
+      for (const key of KEYS) P[key] += (T[key] - P[key]) * k;
+    }
+    // the squall line crosses the map with the wind, ~1 km a minute; it returns after passing
+    C.sqOff = (C.sqOff == null ? -6000 : C.sqOff) + dt * 20;
+    if (C.sqOff > 30000) C.sqOff = -30000;
+  };
+  C.sqDir = [0.8, 0.6];
+  C.layer = () => ({ base: C.p.base, top: C.p.top, stormTop: Math.max(C.p.top, C.p.stormTop || 0), mid: (C.p.base + C.p.top) / 2 });
+  /** Storm strength (0..1.7) at world xz: the weather map's cells plus the squall band. */
+  C.stormAt = function (x, z, w) {
+    if (!C.weather) return 0;
+    w = w || C.weatherAt(x, z);
+    let s = w.b * C.p.storm;
+    if (C.p.sq > 0.01) {
+      const d = (x * C.sqDir[0] + z * C.sqDir[1] - (C.sqBase || 0) - C.sqOff) / 3200;
+      s = Math.max(s, C.p.sq * Math.exp(-d * d) * RJ.smooth(0.15, 0.6, w.r + w.g * 0.35));
+    }
+    return s;
+  };
 
   /* ---------------- CPU queries ---------------- */
   /** Bilinear weather sample at world xz (accounts for wind drift). */
@@ -386,13 +436,13 @@
   C.densityAt = function (p, pad = 1) {
     if (!C.weather) return 0;
     const P = C.p;
-    const lo = P.base - 160 * (pad - 1), hiMax = (P.storm > 0 ? 11000 : P.top) + 160 * (pad - 1);
+    const lo = P.base - 160 * (pad - 1), hiMax = C.layer().stormTop + 160 * (pad - 1);
     if (p.y < lo || p.y > hiMax) return 0;
     const w = C.weatherAt(p.x, p.z);
-    const storm = w.b * P.storm;
+    const storm = C.stormAt(p.x, p.z, w);
     const cov = RJ.clamp(w.r * 1.12 + P.cov - 0.08 + storm * 0.6 + (pad - 1) * 0.12, 0, 1);
     if (cov < 0.22) return 0;
-    const top = RJ.lerp(P.base + (P.top - P.base) * RJ.lerp(RJ.lerp(0.32, 1, w.g), 0.45, P.flat), 11000, storm) + 160 * (pad - 1);
+    const top = RJ.lerp(P.base + (P.top - P.base) * RJ.lerp(RJ.lerp(0.32, 1, w.g), 0.45, P.flat), C.layer().stormTop, Math.min(storm, 1)) + 160 * (pad - 1);
     const hf = (p.y - lo) / Math.max(top - lo, 1);
     if (hf < 0 || hf > 1) return 0;
     const prof = RJ.smooth(0, 0.07, hf) * (1 - RJ.smooth(RJ.lerp(0.45, 0.8, P.flat), 1, hf));
@@ -403,7 +453,7 @@
   C.shadowAt = function (x, z) {
     const W = RJ.world, sd = W.lightDir || W.sunDir, sy = Math.max(sd.y, 0.12), mid = C.layer().mid;
     const w = C.weatherAt(x + sd.x / sy * mid, z + sd.z / sy * mid);
-    const cov = RJ.clamp(w.r * 1.12 + C.p.cov - 0.08 + w.b * C.p.storm * 0.6, 0, 1);
+    const cov = RJ.clamp(w.r * 1.12 + C.p.cov - 0.08 + C.stormAt(x + sd.x / sy * mid, z + sd.z / sy * mid, w) * 0.6, 0, 1);
     return RJ.smooth(0.3, 0.62, cov);
   };
 
@@ -424,6 +474,10 @@
     const P = C.p, L = C.layer();
     U.slab.value.set(L.base, L.top, L.stormTop, 45000);
     U.wx.value.set(P.cov, P.den, P.storm, P.flat);
+    U.sq.value.set(C.sqDir[0], C.sqDir[1], (C.sqBase || 0) + (C.sqOff || 0), 3200);
+    const Wx = RJ.weather;
+    U.rn.value.set(Wx && Wx.shafts ? Math.max(0, L.base - 1600) : L.base, Wx ? Wx.shafts : 0, P.sq || 0, 0);
+    if (Wx && Wx.bolt) U.fl.value.set(Wx.bolt.fx, Wx.bolt.fy, Wx.bolt.fz, Wx.bolt.glow); else U.fl.value.w = 0;
     const wo = W.windOff || { x: 0, y: 0 };
     U.wmap.value.set(wo.x, wo.y, 1 / WMS, 1 / SHAPE_TILE);
     U.time.value += dt || 0.016;

@@ -847,29 +847,68 @@
     "  diffuseColor.rgb = col;",
     "}"
   ].join("\n");
+  /* Panel detail in the airframe's own space: irregular skin panels (seams fall on fuselage stations and wing
+   * chord/span lines, some dividers merged so panels vary in size), access hatches with fastener rows, recessed seams
+   * and raised rivets as real relief (a derivative bump on the normal, so they catch the sun), grime and streaks,
+   * chipped paint showing bare metal, and exhaust soot toward the tail. rjAir = (minZ, length, wear, gloss). */
   const PANEL_CODE = [
     "#include <roughnessmap_fragment>",
     PATTERN_CODE,
     "{",
     "  vec3 an = abs(normalize(vObjN));",
-    "  vec2 pc = (an.y > max(an.x, an.z)) ? vObjP.xz : ((an.x > an.z) ? vObjP.zy : vObjP.xy);",
-    "  vec2 f = abs(fract(pc / vec2(1.4, 0.95)) - 0.5);",
-    "  float m = max(f.x, f.y);",
-    // fade detail by its on-screen footprint so lines and rivets never alias into speckle
+    "  bool top = an.y > max(an.x, an.z);",
+    "  vec2 pc = top ? vObjP.xz : ((an.x > an.z) ? vObjP.zy : vObjP.xy);",
+    "  vec2 cell = top ? vec2(1.25, 0.85) : vec2(1.6, 0.9);",              // fuselage stations ~1.6 m, frames ~0.9 m
+    "  vec2 q = pc / cell, ci = floor(q), f = abs(fract(q) - 0.5);",
+    // merge some dividers: hashed per cell edge, so panels come in several sizes instead of a uniform grid
+    "  float hx = fract(sin(dot(ci, vec2(17.3, 41.9))) * 4375.85), hy = fract(sin(dot(ci, vec2(63.1, 9.7))) * 2531.17);",
+    "  float ex = f.x * step(0.35, hx) * 2.0, ey = f.y * step(0.3, hy) * 2.0;",
+    "  float m = max(ex, ey) * 0.5;",
     "#if __VERSION__ >= 300 || defined(GL_OES_standard_derivatives)",
     "  float fw = length(fwidth(pc));",
     "#else",
     "  float fw = length(vViewPosition) * 0.0016;",
     "#endif",
-    "  float line = smoothstep(0.468, 0.492, m) * (1.0 - smoothstep(0.012, 0.045, fw));",
+    "  float near = 1.0 - smoothstep(0.012, 0.045, fw);",
+    "  float line = smoothstep(0.47, 0.493, m) * near;",
+    // a few cells carry a small access hatch: an inset rectangle ringed by fasteners
+    "  vec2 hf = fract(q) - 0.5; float hatch = step(0.82, fract(hx * 7.13 + hy * 3.7));",
+    "  float hb = max(abs(hf.x) / 0.26, abs(hf.y) / 0.2);",
+    "  float hline = hatch * (1.0 - smoothstep(0.012, 0.05, abs(hb - 1.0))) * near;",
     "  vec2 rv = fract(pc / 0.17) - 0.5;",
-    "  float rivet = (1.0 - smoothstep(0.1, 0.2, length(rv))) * smoothstep(0.43, 0.47, m) * (1.0 - smoothstep(0.004, 0.012, fw));",
+    "  float rnear = 1.0 - smoothstep(0.004, 0.012, fw);",
+    "  float rivet = (1.0 - smoothstep(0.08, 0.2, length(rv))) * max(smoothstep(0.44, 0.47, m), hatch * (1.0 - smoothstep(0.03, 0.09, abs(hb - 1.18)))) * rnear;",
+    "  float wear = rjAir.z, gloss = rjAir.w;",
     "  float grime = rjVN(pc * 1.6) * 0.6 + rjVN(pc * 5.5) * 0.4;",
     "  float streak = rjVN(vec2(pc.x * 6.0, pc.y * 0.4));",
-    "  diffuseColor.rgb *= (1.0 - line * 0.4) * (1.0 - rivet * 0.2) * (0.91 + grime * 0.15) * (0.97 + streak * 0.05);",
-    "  roughnessFactor = clamp(roughnessFactor + (grime - 0.5) * 0.22 + line * 0.15, 0.05, 1.0);",
+    // aft soot from the exhausts: dark, sooty and streaked along the airflow toward the tail
+    "  float u = clamp((vObjP.z - rjAir.x) / max(rjAir.y, 1.0), 0.0, 1.0);",
+    "  float soot = smoothstep(0.78, 1.0, u) * (0.55 + 0.45 * rjVN(vec2(vObjP.x * 3.0 + vObjP.y * 2.0, vObjP.z * 0.35))) * wear;",
+    // chipped paint: bare aluminium along panel seams and in scattered nicks (worn airframes only)
+    "  float chip = smoothstep(0.78, 0.84, rjVN(pc * 9.0) * 0.7 + rjVN(pc * 23.0) * 0.3 + line * 0.25) * near * clamp(wear - 0.45, 0.0, 1.0);",
+    "  diffuseColor.rgb *= (1.0 - line * (0.32 + 0.12 * wear)) * (1.0 - hline * 0.3) * (1.0 - rivet * 0.16) * (1.0 - (0.09 * wear) + grime * 0.15 * wear) * (0.97 + streak * 0.05 * wear);",
+    "  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.04, 0.035, 0.03), soot * 0.55);",
+    "  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.62, 0.63, 0.65), chip * 0.85);",
+    "  roughnessFactor = clamp(roughnessFactor * (1.0 - 0.45 * gloss) + (grime - 0.5) * 0.22 * wear + line * 0.15 + soot * 0.3 - chip * 0.2, 0.04, 1.0);",
+    "  rjChip = chip;",
+    // relief: seams and hatch lines are recessed, rivet heads stand proud
+    "  rjBump = (-line - hline * 0.8 + rivet * 0.6) * 0.0016;",
     "}"
   ].join("\n");
+  const BUMP_CODE = [
+    "#include <normal_fragment_maps>",
+    "#if __VERSION__ >= 300 || defined(GL_OES_standard_derivatives)",
+    "{",
+    "  vec2 rjdH = vec2(dFdx(rjBump), dFdy(rjBump));",
+    "  vec3 rjSx = dFdx(-vViewPosition); vec3 rjSy = dFdy(-vViewPosition);",
+    "  vec3 rjR1 = cross(rjSy, normal); vec3 rjR2 = cross(normal, rjSx);",
+    "  float rjDet = dot(rjSx, rjR1) * (float(gl_FrontFacing) * 2.0 - 1.0);",
+    "  vec3 rjGrad = sign(rjDet) * (rjdH.x * rjR1 + rjdH.y * rjR2);",
+    "  normal = normalize(abs(rjDet) * normal - rjGrad * 60.0);",
+    "}",
+    "#endif"
+  ].join("\n");
+  const NO_AIR = { rjAir: { value: new THREE.Vector4(-10, 20, 0.8, 0) } };
   const NO_PATTERN = { rjPat: { value: 0 }, rjC1: { value: new THREE.Color() }, rjC2: { value: new THREE.Color() }, rjC3: { value: new THREE.Color() }, rjDim: { value: new THREE.Vector2(0, 1) } };
   function panelize(mat) {
     mat.onBeforeCompile = (shader) => {
@@ -878,16 +917,29 @@
         .replace("#include <begin_vertex>", "#include <begin_vertex>\nvObjP = position; vObjN = normal;")
         .replace("#include <project_vertex>", "#include <project_vertex>\nvWPa = (modelMatrix * vec4(transformed, 1.0)).xyz;");
       shader.fragmentShader = shader.fragmentShader
-        .replace("#include <common>", "#include <common>\nvarying vec3 vObjP; varying vec3 vObjN; varying vec3 vWPa;\nuniform float rjPat; uniform vec3 rjC1; uniform vec3 rjC2; uniform vec3 rjC3; uniform vec2 rjDim;\n" + RJ.world.GLSL_NOISE)
+        .replace("#include <common>", "#include <common>\nvarying vec3 vObjP; varying vec3 vObjN; varying vec3 vWPa;\nuniform float rjPat; uniform vec3 rjC1; uniform vec3 rjC2; uniform vec3 rjC3; uniform vec2 rjDim; uniform vec4 rjAir;\nfloat rjBump = 0.0; float rjChip = 0.0;\n" + RJ.world.GLSL_NOISE)
         .replace("#include <roughnessmap_fragment>", PANEL_CODE)
+        // chipped paint is bare metal
+        .replace("#include <metalnessmap_fragment>", "#include <metalnessmap_fragment>\nmetalnessFactor = mix(metalnessFactor, 0.85, rjChip);")
         // thin double-sided plates (fins, canards) can carry inward normals: always shade the side we see
-        .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\nnormal = faceforward(normal, -normalize(vViewPosition), normal);")
+        .replace("#include <normal_fragment_maps>", BUMP_CODE + "\nnormal = faceforward(normal, -normalize(vViewPosition), normal);")
         // thin fins seen edge-on with a grazing sun can spike the GGX lobe into a bloom "lightsaber"
         .replace("#include <lights_fragment_end>", "#include <lights_fragment_end>\nreflectedLight.directSpecular = min(reflectedLight.directSpecular, vec3(0.45));");
       // always bind the design uniforms (a plain paint gets "no pattern"): uniforms a material leaves unset keep
       // the previous jet's values on the shared program, so a design would leak onto every other aircraft
-      Object.assign(shader.uniforms, mat.userData.rjPat || NO_PATTERN);
+      Object.assign(shader.uniforms, mat.userData.rjPat || NO_PATTERN, mat.userData.rjAir || NO_AIR);
       RJ.world.addCloudShadows(shader, "vWPa");
+    };
+    return mat;
+  }
+  /** Canopy glass: clear head-on, mirror-like at grazing angles (Fresnel), with faint dust and fine scratches. */
+  function glassify(mat) {
+    mat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader.replace("#include <common>", "#include <common>\nvarying vec3 vGP;").replace("#include <begin_vertex>", "#include <begin_vertex>\nvGP = position;");
+      shader.fragmentShader = shader.fragmentShader
+        .replace("#include <common>", "#include <common>\nvarying vec3 vGP;\n" + RJ.world.GLSL_NOISE)
+        .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor + rjVN(vGP.xz * 9.0) * 0.06 + smoothstep(0.93, 0.98, rjVN(vec2(vGP.x * 70.0, vGP.z * 3.0))) * 0.12, 0.02, 1.0);")
+        .replace("#include <output_fragment>", "float fres = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 3.0);\ndiffuseColor.a = clamp(diffuseColor.a * (0.75 + fres * 0.9), 0.0, 0.97);\n#include <output_fragment>\ngl_FragColor.a = diffuseColor.a;");
     };
     return mat;
   }
@@ -1057,6 +1109,8 @@
   RJ.PAINTS = {
     factory: { name: "Factory", body: null },
     blueangels: { name: "Blue Angels tribute", body: 0x0d2c6c, trim: 0xf2b705, accent: 0xf2b705 },
+    thunderbirds: { name: "Thunderbirds tribute", body: 0xf2f2f0, trim: 0xc8102e, accent: 0x0d2c6c },
+    redarrows: { name: "Red Arrows tribute", body: 0xc8102e, trim: 0xf2f2f0, accent: 0x0d2c6c },
     arctic: { name: "Arctic", body: 0xe9edf0, trim: 0x9aa4ad, accent: 0xc0392b },
     desert: { name: "Desert", body: 0xc4a77d, trim: 0x8a6f4c, accent: 0x5b4a33 },
     shadow: { name: "Shadow", body: 0x2a2d31, trim: 0x1b1d20, accent: 0x7d1f1f },
@@ -1094,7 +1148,11 @@
     const rB = PJ && PJ.rough != null ? PJ.rough : stealthy ? 0.72 : 0.46, mB = PJ && PJ.metal != null ? PJ.metal : stealthy ? 0.12 : 0.38;
     // a design: one set of uniforms shared by the body, trim and faceted panels (dimensions filled in once built)
     const pat = PJ && PJ.pattern ? { rjPat: { value: PJ.pattern }, rjC1: { value: new THREE.Color(PJ.c[0]) }, rjC2: { value: new THREE.Color(PJ.c[1]) }, rjC3: { value: new THREE.Color(PJ.c[2]) }, rjDim: { value: new THREE.Vector2(-8, 16) } } : null;
-    const pm = (m) => { if (pat) m.userData.rjPat = pat; return panelize(m); };
+    // wear and gloss by kind of airframe: airliners glossy and clean, warbirds and attack jets well used, stealth coatings smooth
+    const air = { rjAir: { value: new THREE.Vector4(-10, 20,
+      a.cat === "airliner" || a.cat === "civil" ? 0.35 : a.cat === "historic" ? 1.15 : stealthy ? 0.55 : a.cat === "space" ? 0.6 : 0.9,
+      a.cat === "airliner" || a.cat === "civil" ? 0.55 : PJ && PJ.metal > 0.7 ? 0.3 : 0) } };
+    const pm = (m) => { if (pat) m.userData.rjPat = pat; m.userData.rjAir = air; return panelize(m); };
     const M = {
       body: pm(std(body, rB, mB)),
       trim: pm(std(trim, PJ && PJ.rough != null ? PJ.rough + 0.06 : stealthy ? 0.74 : 0.55, PJ && PJ.metal != null ? PJ.metal : stealthy ? 0.12 : 0.3)),
@@ -1122,6 +1180,8 @@
     const size = bb.getSize(V3());
     g.userData.dims = { len: size.z, span: size.x, height: size.y, minZ: bb.min.z, maxZ: bb.max.z, minY: bb.min.y };
     if (pat) pat.rjDim.value.set(bb.min.z, Math.max(1, size.z));
+    air.rjAir.value.x = bb.min.z; air.rjAir.value.y = Math.max(1, size.z);
+    glassify(M.glass);
     addGear(g, M, a, bb);
     addLights(g, M, a);
     addPilot(g, a);

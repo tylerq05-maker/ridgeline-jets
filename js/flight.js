@@ -7,6 +7,7 @@
   "use strict";
   const V3 = RJ.V3, DEG = RJ.DEG;
   const AX = V3(1, 0, 0), AY = V3(0, 1, 0), AZ = V3(0, 0, 1), UP = V3(0, 1, 0);
+  const WXA = {};
   const tq = new THREE.Quaternion(), tq2 = new THREE.Quaternion();
   const tv = V3(), tv2 = V3(), tv3 = V3();
 
@@ -112,6 +113,7 @@
     }
     thrustAcc(rho, v, dt) {
       const F = this.spec.flight, M = this.mach;
+      if (F.glider) { this.fuelFlow = 0; return 0; } // wingsuit, paper plane: gravity is the only engine
       let dry = this.spool * F.mil * RJ.thrustFactor(F.eng, rho, v, F, false, M), wet = 0;
       if (F.ab > 0) wet = this.abLevel * (F.ab - F.mil) * RJ.thrustFactor(F.eng, rho, v, F, true, M);
       else if (this.input.ab) dry *= 1.08;
@@ -226,11 +228,14 @@
       this.speed = Math.max(this.speed, 12);
       this.vel.copy(this.fwd).multiplyScalar(this.speed);
       // the air mass moves: wind drifts the ground track (airspeed is relative to the air)
-      const Wd = RJ.world, wx = (Wd.WEATHER && Wd.env && Wd.WEATHER[Wd.env.weather]) || {}, wind = (wx.wind || 4) * RJ.clamp(0.6 + alt / 6000, 0.6, 2.2);
+      const Wd = RJ.world, wx = (Wd.wx && Wd.env ? Wd.wx() : {}), wind = (wx.wind || 4) * RJ.clamp(0.6 + alt / 6000, 0.6, 2.2);
+      const wxa = RJ.weather ? RJ.weather.forAircraft(this, WXA) : null;
       this.vel.x += Math.cos(4.4) * wind; this.vel.z += Math.sin(4.4) * wind;
+      // gusts and storm downdrafts push the jet around; wind shear near the ground is felt as sudden sink
+      if (wxa) { const gk = RJ.clamp(0.6 + alt / 6000, 0.6, 1.6); this.vel.x += wxa.gx * gk; this.vel.z += wxa.gz * gk; this.vel.y += wxa.down; }
       this.pos.addScaledVector(this.vel, dt);
       // turbulence: mechanical bumps low over terrain and buildings, convective in cloud and storms
-      const tk = ((1 - RJ.smooth(30, 900, this.agl)) * (0.45 + (wx.wind || 4) / 18) + (wx.dark || 0) * 0.6 + (this.isPlayer ? (Wd.inCloud || 0) * 0.8 : 0)) * RJ.clamp(v / 220, 0.35, 1.3);
+      const tk = ((1 - RJ.smooth(30, 900, this.agl)) * (0.45 + (wx.wind || 4) / 18) + (wx.dark || 0) * 0.6 + (this.isPlayer ? (Wd.inCloud || 0) * 0.8 : 0) + (wxa ? wxa.turb : 0)) * RJ.clamp(v / 220, 0.35, 1.3);
       if (tk > 0.02) {
         const t = this.time + this.uid * 13.7;
         const n1 = Math.sin(t * 1.9) * Math.sin(t * 3.7 + 1.3) + 0.5 * Math.sin(t * 7.3 + 0.4), n2 = Math.sin(t * 2.3 + 2.1) * Math.sin(t * 5.1) + 0.5 * Math.sin(t * 8.9 + 3);

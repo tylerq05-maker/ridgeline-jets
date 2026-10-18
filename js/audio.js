@@ -306,7 +306,7 @@
       AU.pool = [0, 1, 2].map(() => ({ v: new EngineVoice(ctx, AU.otherBus), ac: null }));
       AU.applyVolumes();
       RJ.on("settings", AU.applyVolumes);
-      RJ.on("thunder", (d) => setTimeout(() => AU.thunder(), d.delay * 1000));
+      RJ.on("thunder", (d) => setTimeout(() => AU.thunder(d.dist), d.delay * 1000));
     } catch (e) { console.warn("Audio unavailable", e); AU.ctx = null; }
   };
 
@@ -410,6 +410,7 @@
       let s;
       if (inCockpit) s = { gain: p.cock[0], air: 18000, front: 0.5, pan: 0 };
       else { hear(pl, cam, p, _h); s = { gain: _h.gain, air: _h.air, front: _h.front, pan: _h.pan }; }
+      if (pl.spec.flight.glider) s.gain = 0; // no engine: only the wind
       E.apply(p, Object.assign(s, { N, ab, thr, dop: 1, interior: inCockpit }));
       E.thrLast = thr;
       P(AU.cabin.frequency, inCockpit ? p.cock[1] : 18000, 0.15);
@@ -999,7 +1000,14 @@
     if (AU._mus) AU.music(AU._mus.want);
   };
   AU.scStatus = () => !RJ.settings.musicSC ? "" : AU._scFail ? "fail" : SC.ready ? "ok" : "wait";
-  AU.thunder = () => { burst({ brown: true, f0: 400, f1: 50, dur: 3.5, gain: 0.8, attack: 0.15 }); thump(45, 2.5, 0.4, 0.1); };
+  /** Thunder heard at `dist` m: a sharp crack and ripping overhead, a long low roll far away (the air soaks up the highs). */
+  AU.thunder = (dist = 3000) => {
+    const near = RJ.clamp(1 - dist / 2500, 0, 1), lvl = RJ.clamp(1.3 - dist / 16000, 0.15, 1) * (AU._inPit ? 0.6 : 1);
+    if (near > 0) { burst({ f0: 5200, f1: 900, dur: 0.25, gain: 0.7 * near * lvl, attack: 0.002 }); thump(60, 0.6, 0.6 * near * lvl, 0.02); }
+    burst({ brown: true, f0: RJ.lerp(260, 650, near), f1: 45, dur: RJ.lerp(4.5, 3, near), gain: 0.85 * lvl, attack: RJ.lerp(0.35, 0.05, near) });
+    burst({ brown: true, f0: 220, f1: 40, dur: 3, gain: 0.35 * lvl, delay: RJ.rand(0.6, 1.4), attack: 0.3 });
+    thump(42, 2.5, 0.45 * lvl, 0.1);
+  };
   AU.splash = (dist = 0) => burst({ f0: 1800, f1: 300, dur: 1.2, gain: 0.6 * distGain(dist) });
   AU.bombWhistle = () => {
     if (!AU.ctx) return;
