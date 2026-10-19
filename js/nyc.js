@@ -323,7 +323,7 @@
 
   /* ======================= facade material ======================= */
   const FACADE_GLSL = [
-    "uniform float uNight; uniform float uTime;",
+    "uniform float uNight; uniform float uTime; uniform float uWet;",
     "varying vec4 vF; varying vec2 vB; varying vec3 vWP; varying vec3 vWN;",
     "float fh2(vec2 p){ vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }",
     "float fh1(float x){ return fh2(vec2(x, x * 0.6180339 + 17.17)); }",
@@ -459,7 +459,7 @@
   function facadeMaterial() {
     const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0.0, envMapIntensity: 1.0 });
     m.extensions = { derivatives: true };
-    m.userData.u = { uNight: { value: 0 }, uTime: { value: 0 }, uProbe: { value: null }, uProbeK: { value: 0 } };
+    m.userData.u = { uNight: { value: 0 }, uTime: { value: 0 }, uWet: RJ.cityKit ? RJ.cityKit.WET : { value: 0 }, uProbe: { value: null }, uProbeK: { value: 0 } };
     m.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, m.userData.u);
       sh.vertexShader = sh.vertexShader
@@ -468,7 +468,7 @@
       sh.fragmentShader = sh.fragmentShader
         .replace("#include <common>", "#include <common>\n" + FACADE_GLSL)
         .replace("#include <color_fragment>", "#include <color_fragment>\nrjFacade(); diffuseColor.rgb = fCol;")
-        .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = clamp(fRough, 0.04, 1.0);")
+        .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = clamp(fRough * (1.0 - 0.45 * uWet), 0.04, 1.0); diffuseColor.rgb *= 1.0 - 0.18 * uWet * (1.0 - fGlass);")
         .replace("#include <metalnessmap_fragment>", "#include <metalnessmap_fragment>\nmetalnessFactor = fMetal;")
         .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\nnormal = normalize(normal + (viewMatrix * vec4(fNW, 0.0)).xyz);")
         .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance += fEmis;")
@@ -878,6 +878,7 @@
     const dusk = RJ.clamp(1 - RJ.smooth(2, 14, W.sunElev), 0, 1) * 0.35;
     NYC.night = Math.max(night, dusk * 0.6);
     NYC.massMat.userData.u.uNight.value = NYC.night;
+    if (RJ.cityKit) RJ.cityKit.wetTick(dt);
     NYC.groundMat.userData.u.uNight.value = night;
     const d = Math.hypot(cam.position.x - NY.cx, cam.position.z - NY.cz);
     NYC.group.visible = d < NY.R + 30000;

@@ -130,7 +130,9 @@
   // neon districts, elevated roads and a bridge. Heights are exaggerated past reality on purpose.
   const STYLE = {
     tokyo: {
-      P: { stone: [0x9ea3a8, 0xbcb8ae, 0x7f878f, 0xd2cdc2, 0x6a727b, 0xa79e91], glass: [0x7e94a8, 0x9fb0be, 0x5d7186, 0x8aa0a0], warm: 0xfff1d6, cool: 0xd8ecff, crown: 0xff3b6b, styles: [4, 4, 0, 1, 3], forms: ["setback", "podium", "cyl", "notch", "twist", "taper", "oct", "setback"], crownP: 0.6, metal: 0xd6dde4 },
+      P: { stone: [0x9ea3a8, 0xbcb8ae, 0x7f878f, 0xd2cdc2, 0x6a727b, 0xa79e91], glass: [0x7e94a8, 0x9fb0be, 0x5d7186, 0x8aa0a0], warm: 0xfff1d6, cool: 0xd8ecff, crown: 0xff3b6b, styles: [4, 4, 0, 1, 3, 5], gstyles: [2, 2, 1, 6, 2], forms: ["setback", "podium", "cyl", "notch", "twist", "taper", "oct", "stepped", "deck", "ellipse"], crownP: 0.6, metal: 0xd6dde4, roof: 0x4a4f57, roof2: 0x6b4a3a },
+      trees: { kind: "tree", cols: [0x3f6e33, 0x4f7d38, 0x5c8a3e] }, parks: [{ s: -2500, p: -2500, rs: 300, rp: 380, name: "Yoyogi Park" }, { s: -600, p: -250, rs: 140, rp: 190, name: "Hibiya Park" }],
+     
       block: 64, street: 12, aveEvery: 4, outer: 6800, base: (d) => RJ.lerp(46, 10, RJ.smooth(600, 6500, d)),
       bumps: [{ s: -1800, p: -1300, r: 900, h: 330 }, { s: -300, p: 300, r: 700, h: 240 }, { s: 300, p: -2200, r: 600, h: 180 }, { s: -900, p: 1700, r: 600, h: 160 }],
       canyon: { s: -1100, half: 1900, width: 175, h: [180, 360] }, slalom: { n: 7, gap: 360, off: 0.27, h: [300, 460], w: 34 },
@@ -146,7 +148,9 @@
       bridge: { p: 1500, span: 1000, deck: 52, towerH: 126, color: 0xf2f2ee, island: 600, name: "Rainbow Bridge" }
     },
     dubai: {
-      P: { stone: [0xd8cbb0, 0xe6ddc8, 0xcbb98f, 0xf0ebe0], glass: [0x8fb0c8, 0xb8c8d6, 0x6f8fae, 0xc9d2da, 0x5f86a8], warm: 0xffe7c0, cool: 0xcfe6ff, crown: 0xffc24a, styles: [2, 1, 3, 0], forms: ["taper", "twist", "cyl", "tri", "setback", "taper", "notch"], crownP: 0.7, metal: 0xe0d0a0 },
+      P: { stone: [0xd8cbb0, 0xe6ddc8, 0xcbb98f, 0xf0ebe0], glass: [0x8fb0c8, 0xb8c8d6, 0x6f8fae, 0xc9d2da, 0x5f86a8], warm: 0xffe7c0, cool: 0xcfe6ff, crown: 0xffc24a, styles: [2, 1, 3, 0, 5], gstyles: [2, 6, 7, 2, 1], forms: ["taper", "twist", "cyl", "tri", "setback", "deck", "ellipse", "skygarden", "notch"], crownP: 0.7, metal: 0xe0d0a0, roof: 0xd9c9a8, roof2: 0xc8b48c },
+      trees: { kind: "palm", cols: [0x5d7a32, 0x6e8a3a] }, parks: [{ s: -300, p: -1750, rs: 240, rp: 260, name: "Safa Park" }],
+      highway: [[-2200, -4200, -2200, 4200]],
       block: 110, street: 22, aveEvery: 3, outer: 6500, base: (d) => RJ.lerp(22, 8, RJ.smooth(800, 6000, d)), sparse: 0.35,
       bumps: [{ s: -900, p: 0, r: 1300, h: 280 }, { s: -1500, p: -2600, r: 900, h: 380 }],
       canyon: { s: -700, half: 2600, width: 170, h: [260, 420] }, slalom: { n: 6, gap: 420, off: 0.28, h: [360, 520], w: 40 },
@@ -159,7 +163,9 @@
       ]
     },
     rio: {
-      P: { stone: [0xf2efe8, 0xe8dfcc, 0xd6d2c9, 0xf0e2c2, 0xc9d6dc, 0xe2d4b8], glass: [0x9fb6c4, 0x7f9aac, 0xb7c6cc], warm: 0xffd9a8, cool: 0xe8f2ff, crown: 0x7cff9a, styles: [1, 1, 0, 3, 0], forms: ["podium", "setback", "box", "cyl", "notch"], crownP: 0.35, metal: 0xd0d0d0 },
+      P: { stone: [0xf2efe8, 0xe8dfcc, 0xd6d2c9, 0xf0e2c2, 0xc9d6dc, 0xe2d4b8], glass: [0x9fb6c4, 0x7f9aac, 0xb7c6cc], warm: 0xffd9a8, cool: 0xe8f2ff, crown: 0x7cff9a, styles: [5, 5, 1, 0, 3, 5, 0], gstyles: [2, 1, 2], forms: ["podium", "setback", "box", "cyl", "notch", "slab", "ellipse"], crownP: 0.35, metal: 0xd0d0d0, roof: 0xa8553a, roof2: 0xb86a45 },
+      trees: { kind: "mix", cols: [0x3f7a2e, 0x4f8a36, 0x5d9a3e] }, parks: [{ s: -450, p: -1650, rs: 230, rp: 380, name: "Aterro do Flamengo" }],
+      highway: [[-650, -4200, -650, 300]],
       block: 72, street: 14, aveEvery: 4, outer: 6000, base: (d) => RJ.lerp(30, 9, RJ.smooth(600, 5500, d)),
       bumps: [{ s: -1200, p: 1500, r: 700, h: 260 }, { s: 0, p: -600, r: 600, h: 120 }],
       beach: { h: [70, 150], depth: 450 },
@@ -170,7 +176,9 @@
       stadium: { s: -2300, p: 2300, name: "Maracanã" }
     },
     hk: {
-      P: { stone: [0xc9c6bf, 0xb2b6ba, 0xe0dcd3, 0x9aa1a8, 0xd4c9b6], glass: [0x6f8aa0, 0x5a7690, 0x8ea6b8, 0x47627a], warm: 0xfff0d2, cool: 0xd6eaff, crown: 0x3bd1ff, styles: [4, 4, 1, 0, 3], forms: ["setback", "oct", "notch", "podium", "taper", "cyl", "tri"], crownP: 0.65, metal: 0xc8ccd0 },
+      P: { stone: [0xc9c6bf, 0xb2b6ba, 0xe0dcd3, 0x9aa1a8, 0xd4c9b6], glass: [0x6f8aa0, 0x5a7690, 0x8ea6b8, 0x47627a], warm: 0xfff0d2, cool: 0xd6eaff, crown: 0x3bd1ff, styles: [4, 4, 4, 5, 1, 0, 3], gstyles: [2, 2, 6, 1], forms: ["setback", "oct", "notch", "podium", "taper", "cyl", "tri", "slab", "skygarden", "deck"], crownP: 0.65, metal: 0xc8ccd0, roof: 0x55595e, roof2: 0x7a6a5a },
+      trees: { kind: "tree", cols: [0x2f6a2c, 0x3d7a33] }, parks: [{ s: -700, p: 1000, rs: 170, rp: 210, name: "Hong Kong Park" }],
+      highway: [[450, -3600, 450, 3600]],
       block: 58, street: 11, aveEvery: 4, outer: 5600, base: (d) => RJ.lerp(170, 55, RJ.smooth(400, 4500, d)), spikes: 0.14, spikeMax: 480,
       bumps: [{ s: 400, p: 0, r: 1000, h: 360 }, { s: -400, p: -1400, r: 900, h: 280 }, { s: -300, p: 1500, r: 900, h: 260 }],
       canyon: { s: -200, half: 2000, width: 130, h: [220, 380] }, slalom: { n: 7, gap: 320, off: 0.27, h: [280, 420], w: 30 },
@@ -185,7 +193,9 @@
       bridge: { p: 0, span: 1200, deck: 62, towerH: 206, color: 0xd8dade, toIsland: true, name: "Tsing Ma Bridge" }
     },
     chicago: {
-      P: { stone: [0xb9b2a6, 0x8e8a84, 0xcfc7b8, 0x6f6a64, 0xd9d3c6], glass: [0x3f4a55, 0x55626e, 0x2f3740, 0x6a7a88], warm: 0xffe4b8, cool: 0xdce8f2, crown: 0xffffff, styles: [0, 3, 1, 0, 2], forms: ["setback", "box", "podium", "notch", "setback", "taper"], crownP: 0.4, metal: 0xb0b4b8 },
+      P: { stone: [0xb9b2a6, 0x8e8a84, 0xcfc7b8, 0x6f6a64, 0xd9d3c6], glass: [0x3f4a55, 0x55626e, 0x2f3740, 0x6a7a88], warm: 0xffe4b8, cool: 0xdce8f2, crown: 0xffffff, styles: [0, 3, 1, 0, 5, 3], gstyles: [2, 1, 2, 6], forms: ["setback", "box", "podium", "notch", "stepped", "stepped", "taper", "ellipse"], crownP: 0.4, metal: 0xb0b4b8, roof: 0x4a4c50, roof2: 0x6a4a3a, tank: 0x6a5a48 },
+      trees: { kind: "tree", cols: [0x4f7a34, 0x5f8a3a, 0x8a7a30] }, parks: [{ s: "coast", p: -1000, rs: 230, rp: 620, name: "Grant Park" }],
+      highway: [[-2500, -4200, -2500, 4200]],
       block: 100, street: 20, aveEvery: 2, outer: 6400, base: (d) => RJ.lerp(60, 10, RJ.smooth(500, 6000, d)),
       bumps: [{ s: -600, p: 0, r: 1100, h: 300 }, { s: -300, p: 1400, r: 600, h: 200 }],
       canyon: { s: -1000, half: 2200, width: 160, h: [200, 340] }, slalom: { n: 6, gap: 380, off: 0.27, h: [300, 420], w: 34 },
@@ -206,6 +216,8 @@
 
   function buildCity(id, S, X) {
     const K = RJ.cityKit, T = STYLE[id], W = RJ.world, B = new K.Batch(), Pal = T.P;
+    const pick = (a, r) => a[Math.floor(r() * a.length)];
+    const treeKind = (r) => T.trees.kind === "mix" ? (r() < 0.4 ? "palm" : "tree") : T.trees.kind;
     const r = W.gen.mulberry32(id.split("").reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) >>> 0);
     const { grp, c, groundAt, keep, peakH } = X;
     const yaw = Math.atan2(S.px, S.pz), g = T.block, coreR = SPEC[id].R;
@@ -214,6 +226,40 @@
     const inNeon = (s, p) => T.neon.some((n) => (s - n.s) ** 2 + (p - n.p) ** 2 < n.r * n.r);
     const neon = [], NEONC = [0xff2a6d, 0x05d9e8, 0xfff35c, 0xff8a00, 0x9d4edd, 0x3cff6b, 0xff4dd8];
     const lots = [];
+    // ---------- waterfront survey: the last dry ground along the coast every 40 m ----------
+    const edge = new Map();
+    const P0 = Math.floor(T.outer / 40) * 40;
+    for (let p = -P0; p <= P0; p += 40) {
+      let prev = null;
+      for (let s = Math.max(-T.outer, S.coast - 1600); s < S.coast + 1600; s += 15) {
+        const [x, z] = c(s, p), gy = groundAt(x, z);
+        if (gy < 0.6) { if (prev != null) edge.set(p, prev); break; }
+        prev = gy > 1.2 ? s : prev;
+      }
+    }
+    const edgeAt = (p) => edge.get(Math.round(p / 40) * 40);
+    // the port takes the longest straight stretch of shore away from the centre and the landmarks; a marina the next
+    {
+      const runs = []; let cur = null;
+      for (let p = -P0; p <= P0; p += 40) {
+        const e = edge.get(p), pe = edge.get(p - 40), [ex, ez] = e != null ? c(e, p) : [0, 0];
+        const free = e != null && Math.abs(p) > 900 && Math.abs(p) < T.outer * 0.85 && !(T.bridge && Math.abs(p - T.bridge.p) < 500) && !(T.pier && Math.abs(p - T.pier.p) < 400) && !(T.river && Math.abs(p - T.river.p) < 250) &&
+          !(id === "dubai" && (Math.abs(p + 1600) < 500 || Math.abs(p - 1800) < 400)) && !(id === "rio" && p > 900 && p < 2700) && !keep.some(([kx, kz, kr]) => Math.hypot(kx - ex, kz - ez) < kr + 200);
+        if (free && cur && pe != null && Math.abs(e - pe) < 90) cur.b = p; else if (free) runs.push(cur = { a: p, b: p }); else cur = null;
+      }
+      runs.sort((u, v) => (v.b - v.a) - (u.b - u.a));
+      const pr = runs[0];
+      const r40 = (v) => Math.round(v / 40) * 40;
+      T.port = pr && pr.b - pr.a >= 600 ? [r40(Math.max(pr.a, (pr.a + pr.b) / 2 - 700)), r40(Math.min(pr.b, (pr.a + pr.b) / 2 + 700))] : null;
+      const mr = runs.find((u) => u !== pr && u.b - u.a >= 160) || (pr && pr.b - pr.a > 1900 ? { a: pr.b - 300, b: pr.b } : null);
+      T.marina = mr ? Math.round((mr.a + mr.b) / 80) * 40 : null;
+    }
+    const inPort = (s, p) => T.port && p > T.port[0] - 40 && p < T.port[1] + 40 && edgeAt(p) != null && s > edgeAt(p) - 470;
+    const parks = (T.parks || []).map((k) => Object.assign({}, k, { s: k.s === "coast" ? (edgeAt(k.p) != null ? edgeAt(k.p) - k.rs - 40 : S.coast - 400) : k.s }));
+    const inPark = (s, p) => parks.find((k) => Math.abs(s - k.s) < k.rs && Math.abs(p - k.p) < k.rp);
+    const hwL = (T.highway || []).map(([s0, p0, s1, p1]) => [Math.round(s0 / g) * g, Math.round(p0 / g) * g, Math.round(s1 / g) * g, Math.round(p1 / g) * g]);
+    const nearHw = (s, p, m) => hwL.some(([s0, p0, s1, p1]) => { const dx = s1 - s0, dp = p1 - p0, t = RJ.clamp(((s - s0) * dx + (p - p0) * dp) / (dx * dx + dp * dp), 0, 1); return Math.hypot(s - s0 - dx * t, p - p0 - dp * t) < m; });
+    const special = []; // park / plaza / parking blocks, filled after the towers
     if (T.river) T.river.from = S.coast + 30; // the river runs out into the lake
     // the bridge / island / river lanes are kept open
     const riverAt = (s, p) => T.river && s < T.river.from + 50 && s > T.river.to && Math.abs(p - T.river.p) < T.river.width / 2 + 25;
@@ -224,11 +270,20 @@
       // outer districts thin out with distance; Dubai is sparse between its clusters
       if (outer && r() < RJ.smooth(coreR, T.outer, bd) * 0.75) continue;
       if (T.sparse && !outer && r() < T.sparse * RJ.smooth(800, 2600, bd)) continue;
+      {
+        const [x, z] = c(bs, bp), gy = groundAt(x, z), pk = !outer && gy > 1.5 && Math.abs(bs - cs) > cw / 2 + g * 0.6 ? inPark(bs, bp) : null;
+        const roll = r();
+        if (pk || (!outer && gy > 1.5 && Math.abs(bs - cs) > cw / 2 + g && !riverAt(bs, bp) && !inPort(bs, bp) && roll < 0.075)) {
+          special.push({ s: bs, p: bp, x, z, y: outer ? gy : S.elev, kind: pk ? "park" : roll < 0.035 ? "plaza" : roll < 0.06 ? "parking" : "park", big: !!pk });
+          continue;
+        }
+      }
       const k = outer || bd > coreR * 0.65 ? 1 : 2, lw = g / k;
       for (let a = 0; a < k; a++) for (let b = 0; b < k; b++) {
         const s = i * g + (a + 0.5) * lw, p = j * g + (b + 0.5) * lw;
         if (Math.abs(s - cs) < cw / 2 + lw * 0.3) continue; // the canyon avenue (open across the whole city)
-        if (riverAt(s, p)) continue;
+        if (riverAt(s, p) || inPort(s, p)) continue;
+        if (nearHw(s, p, (lw - T.street) * 0.5 + 12)) continue;
         const [x, z] = c(s, p), gy = groundAt(x, z);
         if (gy < 1.5 || keep.some(([kx, kz, kr]) => Math.hypot(kx - x, kz - z) < kr)) continue;
         const hp = peakH(x, z); if (hp > gy - 3 && hp > -1e9) continue;
@@ -247,17 +302,150 @@
         const w = half * 2 * RJ.lerp(0.7, 0.95, r()), dd = half * 2 * RJ.lerp(0.7, 0.95, r());
         const tall = h > 160;
         const base = (outer ? Math.min(gy, groundAt(x + half, z + half), groundAt(x - half, z - half)) : S.elev) - 1;
-        lots.push({ s, p, x, z, y: base, w: tall ? Math.min(w, dd) * 0.95 : w, d: tall ? Math.min(w, dd) * 0.95 : dd, h });
+        lots.push({ s, p, x, z, y: base, w: tall ? Math.min(w, dd) * 0.95 : w, d: tall ? Math.min(w, dd) * 0.95 : dd, h, outer, gy, half });
       }
     }
     const opts = (L) => ({ x: L.x, z: L.z, y: L.y, w: L.w, d: L.d, h: L.h, ry: yaw, glassP: RJ.lerp(0.1, 0.85, RJ.smooth(40, 220, L.h)), P: Pal });
+    const roofCols = [Pal.roof || 0x8a4a32, Pal.roof2 || 0x5a5c60];
     for (const L of lots) {
+      if (L.outer) {
+        // the edge of town: a paved lot under every building; houses with pitched roofs, low blocks, warehouses
+        B.seed = r() * 97; B.base = L.y;
+        B.add("box", false, L.x, L.y, L.z, L.half * 2 + 4, L.gy - L.y + 0.35, L.half * 2 + 4, yaw, 0x8c8a84, 11, 0, 0);
+        B.seed = null; B.base = null;
+        const kind = r();
+        if (L.h < 26 && kind < 0.55 && L.half > 9) {
+          const n = L.half > 20 ? 4 : 2, q = L.half / 2;
+          for (let a = 0; a < n; a++) {
+            const ox = n === 4 ? (a % 2 ? q : -q) : (a ? q : -q), oz = n === 4 ? (a < 2 ? q : -q) : 0;
+            const hx = L.x + Math.cos(yaw) * ox + Math.sin(yaw) * oz, hz = L.z - Math.sin(yaw) * ox + Math.cos(yaw) * oz, hh = RJ.lerp(6, 10, r()), hw = q * RJ.lerp(1.2, 1.6, r());
+            B.seed = r() * 97; B.base = L.gy;
+            B.add("gable", false, hx, L.gy, hz, hw, hh, hw * RJ.lerp(0.9, 1.3, r()), yaw + (r() < 0.5 ? 0 : Math.PI / 2), pick(Pal.stone, r), 0, RJ.lerp(0.3, 0.6, r()), 0);
+            if (r() < 0.5) B.treeAt(hx + q * 0.7, L.gy, hz + q * 0.7, RJ.lerp(5, 9, r()), pick(T.trees.cols, r), treeKind(r));
+            B.seed = null; B.base = null;
+            B.foot2(hx, hz, hw * 0.5, L.gy + hh);
+          }
+          continue;
+        }
+        if (kind > 0.9 && L.half > 14) { K.tower(B, Object.assign(opts(L), { h: RJ.lerp(9, 14, r()), glass: false, st: 3, form: "box", w: L.half * 1.9, d: L.half * 1.6 }), r); continue; }
+      }
       K.tower(B, opts(L), r);
       if (inNeon(L.s, L.p) && L.h > 18 && L.h < 160 && r() < 0.6) for (let n = 0; n < 1 + Math.floor(r() * 2); n++) {
         const f = Math.floor(r() * 4), nx = [1, -1, 0, 0][f], np = [0, 0, 1, -1][f];
         const ox = S.sx * nx + S.px * np, oz = S.sz * nx + S.pz * np, off = (nx ? L.w : L.d) / 2 + 0.7;
         const hh = RJ.lerp(8, 26, r()), y = L.y + RJ.lerp(8, Math.max(10, Math.min(L.h - hh - 2, 60)), r());
         neon.push({ x: L.x + ox * off, y: y + hh / 2, z: L.z + oz * off, w: (nx ? L.d : L.w) * RJ.lerp(0.3, 0.7, r()), h: hh, ry: Math.atan2(ox, oz), col: NEONC[Math.floor(r() * NEONC.length)] });
+      }
+    }
+    // ---------- parks, plazas and parking: the breathing spaces between the towers ----------
+    const blockIn = g - T.street - 6;
+    const at = (x, z, ox, oz) => [x + Math.cos(yaw) * ox + Math.sin(yaw) * oz, z - Math.sin(yaw) * ox + Math.cos(yaw) * oz];
+    for (const sp of special) {
+      B.seed = r() * 97; B.base = sp.y;
+      if (sp.kind === "park") {
+        B.add("box", false, sp.x, sp.y - 0.4, sp.z, blockIn, 0.85, blockIn, yaw, 0x4e7a38, 12, 0, 0);
+        if (r() < (sp.big ? 0.12 : 0.3)) { const [px, pz] = at(sp.x, sp.z, (r() - 0.5) * blockIn * 0.3, (r() - 0.5) * blockIn * 0.3); B.add("cyl", false, px, sp.y + 0.05, pz, blockIn * 0.35, 0.45, blockIn * 0.28, yaw, 0x2c4a58, 9, 0, 0); } // pond
+        const n = Math.round(blockIn * blockIn / (sp.big ? 140 : 180));
+        for (let i = 0; i < n; i++) {
+          const [tx, tz] = at(sp.x, sp.z, (r() - 0.5) * blockIn * 0.92, (r() - 0.5) * blockIn * 0.92);
+          B.treeAt(tx, sp.y + 0.4, tz, RJ.lerp(7, 15, r()), pick(T.trees.cols, r), treeKind(r));
+        }
+      } else if (sp.kind === "plaza") {
+        B.add("box", false, sp.x, sp.y - 0.4, sp.z, blockIn, 0.75, blockIn, yaw, 0xb4ada2, 11, 0, 0);
+        B.add("cyl", false, sp.x, sp.y + 0.3, sp.z, 14, 0.8, 14, 0, 0xd4dadf, 11, 0, 0); B.add("cyl", false, sp.x, sp.y + 0.3, sp.z, 12, 0.6, 12, 0, 0x3a6a80, 9, 0, 0); // fountain
+        B.add("cyl", false, sp.x, sp.y + 0.3, sp.z, 1.4, 5, 1.4, 0, 0xd4dadf, 9, 0, 0);
+        for (let i = 0; i < 8; i++) { const a = (i / 8) * TAU, [tx, tz] = at(sp.x, sp.z, Math.cos(a) * blockIn * 0.36, Math.sin(a) * blockIn * 0.36); B.add("box", false, tx, sp.y + 0.3, tz, 3, 0.8, 3, yaw, 0x8a8478, 11, 0, 0); B.treeAt(tx, sp.y + 1.1, tz, RJ.lerp(6, 9, r()), pick(T.trees.cols, r), treeKind(r)); }
+        const [kx, kz] = at(sp.x, sp.z, blockIn * 0.3, -blockIn * 0.3); B.add("box", true, kx, sp.y + 0.3, kz, 9, 4, 6, yaw, 0x8aa0b0, 2, 0.6, 0);  // pavilion
+      } else {
+        B.add("box", false, sp.x, sp.y - 0.4, sp.z, blockIn, 0.75, blockIn, yaw, 0x3a3c40, 11, 0, 0);
+        const CARS = [0xe8e8e8, 0x202224, 0x8a8f96, 0x9a1c1c, 0x1c3a7a, 0xc8c2b4, 0x4a4e52];
+        for (let row = -2; row <= 2; row++) for (let cI = -Math.floor(blockIn / 6); cI <= blockIn / 6; cI++) {
+          if (r() < 0.3) continue;
+          const [cx, cz] = at(sp.x, sp.z, cI * 2.9, row * blockIn * 0.19);
+          B.add("box", false, cx, sp.y + 0.35, cz, 1.9, 1.45, 4.5, yaw, pick(CARS, r), 9, 0, 0);
+        }
+      }
+      B.seed = null; B.base = null;
+    }
+    // ---------- waterfront: seawall and promenade, a container port with gantry cranes, a marina ----------
+    const coastal = [...edge.keys()].sort((a, b) => a - b);
+    for (const p of coastal) {
+      const e = edge.get(p); if (Math.abs(p) > T.outer * 0.92) continue;
+      const [x, z] = c(e + 6, p), gy = Math.max(1.2, groundAt(...c(e, p)));
+      if (T.bridge && Math.abs(p - T.bridge.p) < 60) continue;
+      if (T.pier && Math.abs(p - T.pier.p) < 60) continue;
+      if (id === "dubai" && Math.abs(p + 1600) < 120) continue;
+      const port = T.port && p >= T.port[0] && p <= T.port[1];
+      B.seed = r() * 97; B.base = -6;
+      if (!T.beach || port) B.add("box", false, x, -6, z, 41, gy + 6.6, 8, yaw + Math.PI / 2, 0x9a978f, 11, 0, 0); // seawall / quay
+      B.seed = null; B.base = null;
+      if (!port && p % 80 === 0 && r() < 0.8) { const [tx, tz] = c(e - 10, p); B.treeAt(tx, gy, tz, RJ.lerp(7, 12, r()), pick(T.trees.cols, r), T.beach || id === "dubai" ? "palm" : treeKind(r)); }
+    }
+    if (T.port) {
+      // container yard paving, stacks, cranes on the quay, warehouses and tanks behind
+      const CR = [0xc23b22, 0x2f5fa8, 0xe8e4da, 0xd88a1a];
+      const crc = pick(CR, r);
+      for (let p = T.port[0]; p <= T.port[1]; p += 40) {
+        const e = edgeAt(p); if (e == null) continue;
+        const [x, z] = c(e - 230, p), gy = Math.max(1.2, groundAt(...c(e - 20, p)));
+        B.seed = r() * 97; B.base = gy - 1.5;
+        B.add("box", false, x, gy - 1.5, z, 460, 1.9, 41, yaw, 0x8f8d88, 11, 0, 0);
+        for (let ss = 50; ss < 260; ss += 17) {
+          if (r() < 0.2) continue;
+          const [bx, bz] = c(e - ss, p), n = 1 + Math.floor(r() * 4);
+          B.seed = r() * 97; B.base = gy + 0.4;
+          B.add("box", false, bx, gy + 0.4, bz, 36.6, 2.59 * n, 12.5, yaw + Math.PI / 2, 0x777777, 13, 0, 0);
+          B.foot2(bx, bz, 8, gy + 0.4 + 2.59 * n);
+        }
+        if (p % 120 === 0) { // gantry crane: four legs, portal, boom out over the water and back
+          const e0 = e - 8;
+          B.seed = r() * 97; B.base = gy;
+          for (const ls of [-1, 1]) for (const lp of [-1, 1]) { const [lx, lz] = c(e0 + ls * 12, p + lp * 9); B.add("box", false, lx, gy, lz, 1.6, 46, 1.6, yaw, crc, 9, 0, 0); }
+          const [mx, mz] = c(e0 + 18, p), [hx, hz] = c(e0 - 4, p);
+          B.add("box", false, mx, gy + 44, mz, 92, 3.2, 21, yaw, crc, 9, 0, 0);
+          B.add("box", false, hx, gy + 46.5, hz, 10, 6, 12, yaw, 0xdedede, 9, 0, 0);
+          for (const lp of [-1, 1]) { const [ax, az] = c(e0, p + lp * 9); B.add("box", false, ax, gy + 47, az, 1.2, 14, 1.2, yaw, crc, 9, 0, 0); }
+          B.lights.push(...c(e0 + 62, p).flatMap((v, i) => i ? [gy + 48, v] : [v]), ...c(e0, p).flatMap((v, i) => i ? [gy + 62, v] : [v]));
+          B.foot2(...c(e0 + 18, p), 34, gy + 62);
+        }
+        if (p % 160 === 0) { const [wx, wz] = c(e - 380, p); K.tower(B, { x: wx, z: wz, y: gy - 1, w: 70, d: 34, h: RJ.lerp(10, 16, r()), ry: yaw, glass: false, st: 3, form: "box", P: { stone: [0x9aa0a6, 0xb8b4ac, 0x7d8a96] }, lit: 0.15 }, r); }
+        else if (p % 160 === 80 && r() < 0.6) { const [tx, tz] = c(e - 380, p); B.seed = r() * 97; B.base = gy; B.add("cyl", false, tx, gy, tz, 28, RJ.lerp(12, 18, r()), 28, 0, 0xe4e4e0, 9, 0, 0); B.foot2(tx, tz, 15, gy + 18); }
+      }
+      B.seed = null; B.base = null;
+    }
+    if (T.marina != null && edgeAt(T.marina) != null) {
+      const e = edgeAt(T.marina), BOATS = [0xf4f4f2, 0xe8eef2, 0x2a3c5a, 0xf0ece0];
+      B.seed = r() * 97; B.base = -5;
+      const [bwx, bwz] = c(e + 190, T.marina); B.add("box", false, bwx, -5, bwz, 260, 7.5, 12, yaw + Math.PI / 2, 0x8d8a83, 11, 0, 0); // breakwater
+      for (let k = -2; k <= 2; k++) {
+        const [px, pz] = c(e + 80, T.marina + k * 34);
+        B.add("box", false, px, -0.6, pz, 150, 1.4, 2.6, yaw, 0xb8ae9c, 11, 0, 0);
+        for (let j = 0; j < 14; j++) for (const sd of [-1, 1]) {
+          if (r() < 0.25) continue;
+          const [bx, bz] = c(e + 18 + j * 9.5, T.marina + k * 34 + sd * 6), L = RJ.lerp(7, 14, r());
+          B.add("box", false, bx, -0.4, bz, L * 0.32, 1.8, L, yaw, pick(BOATS, r), 9, 0, 0);
+          if (r() < 0.45) B.add("cyl", false, bx, 1.4, bz, 0.22, L * 1.3, 0.22, 0, 0xdedede, 9, 0, 0);
+        }
+      }
+      B.seed = null; B.base = null;
+    }
+    // ---------- street trees along the avenues of the core ----------
+    if (RJ.settings.quality !== "low") {
+      const hTmp = K.grid(B), avR = Math.min(coreR, S.coast - 300) * 0.9, ae = T.aveEvery || 4;
+      for (let i = -Math.floor(avR / g); i <= avR / g; i++) {
+        if (i % ae) continue;
+        const off = T.street * 0.9 + 2.2;
+        for (let t = -avR; t < avR; t += 20) {
+          if (Math.abs(((t % g) + g) % g - g / 2) > g / 2 - T.street - 4) continue; // not in the crossings
+          for (const sd of [-1, 1]) for (const axis of [0, 1]) {
+            const ss = axis ? i * g + sd * off : t, pp = axis ? t : i * g + sd * off;
+            if (Math.hypot(ss, pp) > avR || Math.abs(ss - cs) < cw / 2 + 4 && axis === 0) continue;
+            const [x, z] = c(ss, pp), gy = groundAt(x, z);
+            if (gy < 1.5 || hTmp(x, z) > -1e9 || riverAt(ss, pp)) continue;
+            if (r() < 0.15) continue;
+            B.seed = r() * 97; B.treeAt(x, S.elev, z, RJ.lerp(6, 10, r()), pick(T.trees.cols, r), treeKind(r)); B.seed = null;
+          }
+        }
       }
     }
     // the slalom: slender towers alternating across the avenue after the canyon
@@ -277,18 +465,19 @@
       if (Hh.mast) for (const sgn of [-1, 1]) B.add("cyl", true, x + S.px * sgn * Hh.w * 0.22, gy + Hh.h, z + S.pz * sgn * Hh.w * 0.22, 2.4, Hh.mast, 2.4, 0, 0xd8dade, 9, 0, 0);
       if (!hero || Hh.h > hero.h) hero = { x, z, h: Hh.h, y: gy, w: Hh.w, top };
     }
-    // elevated expressways on pillars along street lines (Tokyo)
-    const solids = X.solids, paths = [];
+    // elevated expressways along street lines, with ramps down to the street at both ends
+    const solids = X.solids, paths = [], hws = [];
     for (const [s0, p0, s1, p1] of T.highway || []) {
-      const [ax, az] = c(Math.round(s0 / g) * g, Math.round(p0 / g) * g), [bx, bz] = c(Math.round(s1 / g) * g, Math.round(p1 / g) * g);
-      const L = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / L, uz = (bz - az) / L, Y = S.elev + 22;
-      for (let t = 0; t < L; t += 60) {
-        const x = ax + ux * t, z = az + uz * t, R = Math.hypot(x - S.x, z - S.z); if (R > coreR) continue;
-        B.add("box", false, x, Y, z, 22, 2.2, 61, Math.atan2(ux, uz), 0x8c8f93, 9, 0, 0);
-        B.add("box", false, x, S.elev, z, 3, 22, 3, 0, 0x8c8f93, 9, 0, 0);
-      }
-      solids.push({ x: (ax + bx) / 2, z: (az + bz) / 2, ux, uz, hl: L / 2, hw: 11, y0: Y - 0.5, y1: Y + 2.5 });
-      paths.push(K.path(ax, az, bx, bz, Y + 2.2));
+      const sn = (v) => Math.round(v / g) * g, a0 = [sn(s0), sn(p0)], a1 = [sn(s1), sn(p1)], pts = [];
+      const L = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]), n = Math.round(L / g), at = (k) => [a0[0] + (a1[0] - a0[0]) * k / n, a0[1] + (a1[1] - a0[1]) * k / n];
+      // clip to the dry core: stop short of the coast, the core edge and the hills
+      const ok = (k) => { const [ss, pp] = at(k), [x, z] = c(ss, pp); return groundAt(x, z) > 1.5 && Math.hypot(ss, pp) < coreR + 600 && (edgeAt(pp) == null || edgeAt(pp) > ss + 80) && peakH(x, z) < S.elev; };
+      let ka = 0, kb = n; while (ka < kb && !ok(ka)) ka++; while (kb > ka && !ok(kb)) kb--;
+      for (let k = ka + 1; k < kb; k++) if (!ok(k)) { kb = k - 1; break; }
+      if ((kb - ka) * g < 900) continue;
+      for (const k of [ka, kb]) { const [x, z] = c(...at(k)); pts.push({ x, z }); }
+      const hw = K.highway(grp, pts, { Y: S.elev + 22, ground: S.elev + 0.4, width: 22, lamp: id === "dubai" ? 0xffc870 : 0xffd9a0 });
+      solids.push(...hw.solids); paths.push(...hw.paths); hws.push(hw);
     }
     // street-level traffic along the avenues of the core
     const stR = Math.min(coreR, S.coast - 250);
@@ -385,12 +574,14 @@
     if (X.lm.favela) for (const [x, z] of X.lm.favela) { const y = peakH(x, z); if (y > 0) K.tower(B, { x, z, y: y - 1.5, w: RJ.lerp(5, 9, r()), d: RJ.lerp(5, 9, r()), h: RJ.lerp(4, 9, r()), ry: r() * TAU, glassP: 0, P: { stone: [0xe8b04a, 0xd9563a, 0x4f9ad8, 0x6fbf73, 0xe9e0cf, 0xc74a8e], glass: [0x888888] }, form: "box", st: 0, lit: 0.5 }, r); }
     if (id === "dubai") for (const rc of X.rects) if (rc.top === 2 && rc.hw < 40) for (let k = -rc.hl + 20; k < rc.hl - 10; k += 34) for (const sg2 of [-1, 1]) K.tower(B, { x: rc.x + rc.ux * k - rc.uz * sg2 * 16, z: rc.z + rc.uz * k + rc.ux * sg2 * 16, y: 2, w: 12, d: 12, h: RJ.lerp(6, 10, r()), ry: Math.atan2(rc.ux, rc.uz), glassP: 0, P: { stone: [0xf2ebe0, 0xe8dcc8], glass: [0x9fb6c4] }, form: "box", st: 0 }, r);
 
+    X.lm.stats = { edge: edge.size, special: special.length, port: T.port, marina: T.marina, hw: hws.length };
     const meshes = K.meshes(B, grp, Pal);
     const heightAt = K.grid(B);
     const far = K.farSkyline(B, W.scene, W.BACK);
     const streets = K.streets(grp, S, { R: stR, block: g, aveEvery: T.aveEvery || 4, street: T.street, lamp: id === "dubai" ? 0xffc870 : id === "tokyo" || id === "hk" ? 0xfff0e0 : 0xffb066 });
     const traffic = K.traffic(grp, S, { cars: id === "dubai" ? 380 : 650 }, paths);
     const nn = K.neon(grp, neon);
+    const av = K.avLights(B, grp);
 
     /* ---------- the race route: sea approach, under the bridge, down the canyon, the slalom, up the hero ---------- */
     const route = [], Y0 = S.elev;
@@ -419,6 +610,8 @@
       update(dt, cam, d) {
         traffic.update(dt, d < 9000);
         if (nn) nn.update();
+        if (av) av.update(performance.now() / 1000);
+        for (const hw of hws) hw.update();
         streets.visible = d < 16000;
         if (X.lm.wheel) { X.lm.wheel.rotation.z += dt * 0.05; X.lm.wheel.material.emissiveIntensity = K.NIGHT.value * 1.5; }
       }
@@ -562,6 +755,8 @@
       grp.visible = d < 60000;
       for (const m of city.meshes) { const t = m.userData.tile; m.visible = Math.hypot(cam.position.x - t.x, cam.position.z - t.z) < 15000; } // beyond: the far skyline twin
       RJ.cityKit.NIGHT.value = RJ.clamp(1 - RJ.smooth(-4, 8, W.sunElev), 0, 1);
+      // wet streets and facades follow the local rain, drying slowly after it stops
+      RJ.cityKit.wetTick(dt);
       city.update(dt, cam, d);
       if (lm.christMesh) lm.christMesh.material.emissiveIntensity = RJ.cityKit.NIGHT.value * 0.6; // floodlit at night
       for (const f of lm.far) { const fd = Math.hypot(cam.position.x - f.position.x, cam.position.z - f.position.z); f.visible = fd > 18000; f.material.color.set(0x7c8796).lerp(W.scene.fog.color, RJ.clamp((fd - 15000) / 120000, 0, 0.75)); }

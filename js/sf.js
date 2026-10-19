@@ -40,7 +40,7 @@
     const m = new THREE.MeshStandardMaterial({ color: o.color || 0xffffff, roughness: o.rough || 0.8, metalness: o.metal || 0, vertexColors: !!o.vcol });
     const key = "rjFacade" + [o.wx, o.wy, o.ww, o.wh, o.streak, o.lit, o.glass].join("_");
     m.onBeforeCompile = (sh) => {
-      sh.uniforms.rjNight = night;
+      sh.uniforms.rjNight = night; sh.uniforms.rjWet = RJ.cityKit ? RJ.cityKit.WET : { value: 0 };
       sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nvarying vec3 vFP; varying vec3 vFN; varying float vSeed;")
         .replace("#include <begin_vertex>", [
           "#include <begin_vertex>",
@@ -51,7 +51,7 @@
           "#endif",
           "vFN = normal;"
         ].join("\n"));
-      sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nuniform float rjNight; varying vec3 vFP; varying vec3 vFN; varying float vSeed;\nfloat fcH(vec2 p){ p = mod(p, 619.0); return fract(sin(dot(p, vec2(41.7, 289.3))) * 23758.5453); }")
+      sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nuniform float rjNight; uniform float rjWet; varying vec3 vFP; varying vec3 vFN; varying float vSeed;\nfloat fcH(vec2 p){ p = mod(p, 619.0); return fract(sin(dot(p, vec2(41.7, 289.3))) * 23758.5453); }")
         .replace("#include <color_fragment>", [
           "#include <color_fragment>",
           "vec3 fan = abs(normalize(vFN)); float rjWin = 0.0; vec2 rjCell = vec2(0.0);",
@@ -61,12 +61,18 @@
           `  vec2 fc = vec2(fu / ${o.wx.toFixed(2)}, vFP.y / ${o.wy.toFixed(2)}); rjCell = floor(fc); vec2 ff = fract(fc);`,
           `  rjWin = step(abs(ff.x - 0.5), ${(o.ww / 2).toFixed(3)}) * step(abs(ff.y - 0.55), ${(o.wh / 2).toFixed(3)}) * step(0.6, vFP.y);`,
           "  float fw = length(fwidth(vFP)); rjWin *= 1.0 - smoothstep(1.2, 4.0, fw);",
-          `  diffuseColor.rgb = mix(diffuseColor.rgb, vec3(${o.glass || "0.09, 0.11, 0.13"}), rjWin * 0.85);`,
+          // painted trim around each window, blinds and curtains in some, reveals that catch the sun
+          `  float rjTrim = step(abs(ff.x - 0.5), ${(o.ww / 2 + 0.06).toFixed(3)}) * step(abs(ff.y - 0.55), ${(o.wh / 2 + 0.05).toFixed(3)}) * step(0.6, vFP.y) * (1.0 - rjWin) * (1.0 - smoothstep(0.6, 2.0, fw));`,
+          `  diffuseColor.rgb = mix(diffuseColor.rgb, ${o.glass ? "diffuseColor.rgb * 0.7" : "vec3(0.92, 0.91, 0.87)"}, rjTrim * 0.8);`,
+          "  float rjB = fcH(rjCell * 1.37 + vSeed * 17.0);",
+          `  vec3 rjGl = vec3(${o.glass || "0.09, 0.11, 0.13"}); if (rjB < 0.22) rjGl = mix(rjGl, vec3(0.42, 0.38, 0.3), 0.5); else if (rjB > 0.9) rjGl = mix(rjGl, vec3(0.5, 0.5, 0.48), 0.35);`,
+          "  diffuseColor.rgb = mix(diffuseColor.rgb, rjGl, rjWin * 0.85);",
+          "  diffuseColor.rgb *= mix(0.72, 1.0, smoothstep(0.0, 6.0, vFP.y));",
           `  diffuseColor.rgb *= 1.0 - ${(o.streak || 0).toFixed(2)} * smoothstep(0.55, 1.0, fcH(vec2(floor(fu * 0.8), 7.0))) * (0.5 + 0.5 * fract(vFP.y * 0.07 + fcH(vec2(floor(fu * 0.8), 3.0))));`,
           "}"
         ].join("\n"))
-        .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.15, rjWin);")
-        .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>\ntotalEmissiveRadiance += vec3(1.0, 0.78, 0.48) * rjWin * step(${o.lit == null ? "0.55" : o.lit.toFixed(2)}, fcH(rjCell + vSeed * 31.0)) * rjNight * 1.6;`);
+        .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.15, rjWin) * (1.0 - 0.45 * rjWet); diffuseColor.rgb *= 1.0 - 0.15 * rjWet * (1.0 - rjWin);")
+        .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>\ntotalEmissiveRadiance += mix(vec3(1.0, 0.78, 0.48), vec3(0.85, 0.9, 1.0), step(0.8, fcH(rjCell * 0.7 + 3.0))) * (0.8 + 0.4 * fcH(rjCell + 9.0)) * rjWin * step(${o.lit == null ? "0.55" : o.lit.toFixed(2)}, fcH(rjCell + vSeed * 31.0)) * rjNight * 1.6;`);
     };
     m.customProgramCacheKey = () => key;
     return m;
@@ -361,7 +367,7 @@
     if (!SF.grp.visible) return;
     SF.t += dt;
     const nk = RJ.clamp(1 - RJ.smooth(-4, 8, W.sunElev), 0, 1);
-    night.value = nk;
+    night.value = nk; if (RJ.cityKit) RJ.cityKit.wetTick(dt);
     SF.lampMat.color.setRGB(1.6, 0.9, 0.45).multiplyScalar(0.1 + nk * 1.6);
     SF.pivot.rotation.y = SF.t * 0.9;
     SF.beam.material.opacity = 0.03 + nk * 0.22;
