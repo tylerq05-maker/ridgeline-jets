@@ -12,7 +12,7 @@
   const G = (x, z) => RJ.world.gen.height(x, z);
   const U = () => RJ.castle.util;
   const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = V3(), _p = V3(), _c = new THREE.Color();
-  const K = 1650;                 // metres per human-metre: a 1.85 m figure becomes ~3.05 km
+  const K = 1800;                 // metres per human-metre: a 1.85 m figure becomes ~3.3 km
   const PED = 290;                // pedestal height (m)
   YE.DEF = { id: "ye", name: "The Ye Monument", sub: "Kanye West in bronze: 3 km tall, ringed by 15 album monuments", icon: "tower", r: 16000, xp: 700 };
   if (RJ.atlas && RJ.atlas.DEFS && !RJ.atlas.DEFS.some((d) => d.id === "ye")) RJ.atlas.DEFS.push(YE.DEF);

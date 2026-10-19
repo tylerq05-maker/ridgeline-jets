@@ -1150,7 +1150,7 @@
     const pat = PJ && PJ.pattern ? { rjPat: { value: PJ.pattern }, rjC1: { value: new THREE.Color(PJ.c[0]) }, rjC2: { value: new THREE.Color(PJ.c[1]) }, rjC3: { value: new THREE.Color(PJ.c[2]) }, rjDim: { value: new THREE.Vector2(-8, 16) } } : null;
     // wear and gloss by kind of airframe: airliners glossy and clean, warbirds and attack jets well used, stealth coatings smooth
     const air = { rjAir: { value: new THREE.Vector4(-10, 20,
-      a.cat === "airliner" || a.cat === "civil" ? 0.35 : a.cat === "historic" ? 1.15 : stealthy ? 0.55 : a.cat === "space" ? 0.6 : 0.9,
+      a.cat === "airliner" || a.cat === "civil" ? 0.35 : a.cat === "future" ? 0.25 : a.cat === "historic" ? 1.15 : stealthy ? 0.55 : a.cat === "space" ? 0.6 : 0.9,
       a.cat === "airliner" || a.cat === "civil" ? 0.55 : PJ && PJ.metal > 0.7 ? 0.3 : 0) } };
     const pm = (m) => { if (pat) m.userData.rjPat = pat; m.userData.rjAir = air; return panelize(m); };
     const M = {

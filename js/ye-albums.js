@@ -30,7 +30,7 @@
     { id: "vultures2", title: "Vultures 2", year: "2024", accent: 0xbcbcbc, with: "with Ty Dolla $ign" },
     { id: "bully", title: "Bully", year: "", accent: 0x7d58c8 }
   ];
-  const RING = 6800;
+  const RING = 7800;
 
   /* ======================= textures ======================= */
   function titleCard(a) {
@@ -96,7 +96,9 @@
     return new Promise((res) => {
       const url = URL.createObjectURL(file), img = new Image();
       img.onload = () => {
-        const s = Math.min(1, 2048 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+        // as sharp as the GPU allows (4096 px on most desktops) so a kilometre-wide cover still holds up close
+        const maxT = Math.min(4096, (RJ.renderer && RJ.renderer.capabilities.maxTextureSize) || 2048);
+        const s = Math.min(1, maxT / Math.max(img.width, img.height)), c = document.createElement("canvas");
         c.width = Math.round(img.width * s); c.height = Math.round(img.height * s); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
         URL.revokeObjectURL(url);
         c.toBlob((blob) => { if (!blob) return res(false); tx("readwrite", (st) => st.put(blob, id)).catch(() => {}).then(() => applyImage(id, blob)).then(res); }, "image/jpeg", 0.93);
@@ -105,12 +107,29 @@
       img.src = url;
     });
   };
+  /** Many images at once: each file is matched to an album by its file name (e.g. "graduation.jpg", "808s.png"). */
+  const KEYS = { dropout: ["dropout", "college"], latereg: ["late", "registration"], graduation: ["graduation"], "808s": ["808"], mbdtf: ["mbdtf", "dark", "twisted", "fantasy"],
+    wtt: ["throne", "wtt"], yeezus: ["yeezus"], tlop: ["pablo", "tlop"], ksg: ["ghosts", "ksg", "kids"], ye: ["^ye[^a-z]", "^ye$"], jik: ["jesus", "jik"], donda: ["donda"],
+    vultures1: ["vultures.?1", "vultures.?i\\b", "vultures(?!.?2)"], vultures2: ["vultures.?2", "vultures.?ii"], bully: ["bully"] };
+  YA.matchFile = function (name) {
+    const n = name.toLowerCase().replace(/\.[a-z0-9]+$/, "");
+    for (const id of ["vultures2", "vultures1", "dropout", "latereg", "graduation", "808s", "mbdtf", "wtt", "yeezus", "tlop", "ksg", "jik", "donda", "bully", "ye"])
+      if (KEYS[id].some((k) => new RegExp(k).test(n))) return id;
+    return null;
+  };
+  YA.bulkArt = async function (files) {
+    const done = [], skipped = [];
+    for (const f of files) { const id = YA.matchFile(f.name); if (id && (await YA.setArt(id, f))) done.push(id); else skipped.push(f.name); }
+    return { done, skipped };
+  };
   YA.clearArt = function (id) { resetCard(id); return tx("readwrite", (st) => st.delete(id)).catch(() => {}); };
   function loadSaved() { for (const a of YA.ALBUMS) tx("readonly", (st) => st.get(a.id)).then((b) => { if (b) applyImage(a.id, b); }).catch(() => {}); }
 
   /** Settings ▸ Album art: one row per album (rendered by ui.js; wired here). */
   YA.settingsHTML = function (row, esc) {
     let h = row("Album art", "The official covers are copyrighted, so the game shows title cards. Add your own copy of each cover here: images stay in this browser only (never uploaded or published) and appear on the monuments around the Ye Monument.", "");
+    h += row("Add many covers at once", "Select several images: each is matched to its album by file name (e.g. graduation.jpg, 808s.png, mbdtf.jpg, vultures2.png)",
+      `<label class="ghost small" style="cursor:pointer">Choose images<input type="file" accept="image/*" multiple data-ye-bulk hidden></label>`);
     for (const a of YA.ALBUMS) {
       const has = YA.hasArt[a.id];
       h += row(a.title + (a.year ? " (" + a.year + ")" : ""), has ? "Your image is on the monument" : "Showing the title card",
@@ -119,6 +138,10 @@
     return h;
   };
   YA.bindUI = function (el, rerender) {
+    el.querySelectorAll("[data-ye-bulk]").forEach((inp) => inp.addEventListener("change", () => {
+      const fs = [...(inp.files || [])]; if (!fs.length) return;
+      YA.bulkArt(fs).then((r) => { if (RJ.ui && RJ.ui.toast) RJ.ui.toast(`${r.done.length} cover${r.done.length === 1 ? "" : "s"} placed` + (r.skipped.length ? ` · not matched: ${r.skipped.join(", ")}` : ""), 6000); rerender(); });
+    }));
     el.querySelectorAll("[data-ye-art]").forEach((inp) => inp.addEventListener("change", () => { const f = inp.files && inp.files[0]; if (f) YA.setArt(inp.dataset.yeArt, f).then(rerender); }));
     el.querySelectorAll("[data-ye-clear]").forEach((b) => b.addEventListener("click", (e) => { e.stopPropagation(); YA.clearArt(b.dataset.yeClear).then(rerender); }));
   };
@@ -134,7 +157,7 @@
     YA.ALBUMS.forEach((a, i) => {
       const ang = S.yaw + ((i + 0.5) / YA.ALBUMS.length) * TAU, r = RING + ((i * 37) % 5 - 2) * 220;
       const x = cx + Math.sin(ang) * r, z = cz + Math.cos(ang) * r;
-      const Sz = 620 + ((i * 53) % 7) * 46, lift = 220 + ((i * 71) % 6) * 85, style = i % 3;
+      const Sz = 840 + ((i * 53) % 7) * 60, lift = 260 + ((i * 71) % 6) * 110, style = i % 3; // covers 0.84–1.2 km square
       const face = ang + ((i % 2) ? 0.22 : -0.22);              // faces outward, angled for a varied skyline
       const grp = new THREE.Group(); grp.position.set(x, 0, z); grp.rotation.y = face;
       const c = Math.cos(face), sn = Math.sin(face);
@@ -190,13 +213,17 @@
         const bm = new THREE.Mesh(new THREE.CylinderGeometry(Sz * 0.28, 8, Sz * 1.05, 20, 1, true), new THREE.MeshBasicMaterial({ color: 0xfff2d8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
         bm.geometry.translate(0, Sz * 0.55, 0); bm.position.set(0, base + 26, side * Sz * 0.24); bm.rotation.x = -side * 0.22; bm.layers.set(RJ.LATE); grp.add(bm); beams.push(bm);
       }
+      // a sky beam in the album's colour straight up from the crown: marks every cover from far away, blazing at night
+      const skyMat = new THREE.MeshBasicMaterial({ color: a.accent, transparent: true, opacity: 0.08, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
+      const sky = new THREE.Mesh(new THREE.CylinderGeometry(Sz * 0.05, Sz * 0.03, 9000, 16, 1, true), skyMat);
+      sky.position.y = top + Sz * 0.15 + 4500; sky.layers.set(RJ.LATE); sky.frustumCulled = false; grp.add(sky);
       W.scene.add(grp); grp.updateMatrixWorld(true);
       // far-horizon copy: the art on the backdrop layer so the skyline reads from 100 km
       const far = new THREE.Group(); far.position.copy(grp.position); far.rotation.copy(grp.rotation);
       const fFrame = new THREE.Mesh(new THREE.BoxGeometry(Sz * 1.12, top - gmin + Sz * 0.1, Sz * 0.06), new THREE.MeshBasicMaterial({ color: 0x1a1918, fog: false })); fFrame.position.y = (top + gmin) / 2 + Sz * 0.05; far.add(fFrame);
       for (const side of [1, -1]) { const mt = new THREE.MeshBasicMaterial({ map: card, fog: false }); const p = new THREE.Mesh(new THREE.PlaneGeometry(Sz, Sz), mt); p.position.set(0, bot + Sz / 2, side * Sz * 0.032); p.rotation.y = side > 0 ? 0 : Math.PI; far.add(p); artMats.push(mt); }
       far.traverse((o) => { o.layers.set(W.BACK); o.frustumCulled = false; }); W.scene.add(far);
-      const mon = { a, grp, far, artMats, card, accMat, beacon, beams, x, z, face, top, base, solids, Sz };
+      const mon = { a, grp, far, artMats, card, accMat, beacon, beams, skyMat, x, z, face, top, base, solids, Sz };
       YA.byId[a.id] = mon; YA.mons.push(mon);
       // avenue from the plaza toward the monument, following the ground, lamps every 250 m
       for (let d = 1000; d < r - Sz * 0.6; d += 160) {
@@ -226,6 +253,7 @@
       m.accMat.color.setHex(m.a.accent).multiplyScalar(0.6 + nk * 1.8);
       m.beacon.material.color.setRGB((t + m.Sz * 0.001) % 1.5 < 0.25 ? 4 : 0.15, 0.05, 0.03);
       for (const b of m.beams) b.material.opacity = nk * 0.03;
+      m.skyMat.opacity = 0.035 + nk * 0.22;
     }
     YA.lampMat.color.setRGB(1.5, 1.15, 0.75).multiplyScalar(0.1 + nk * 1.6);
     const near = Math.hypot(cam.position.x - RJ.ye.site.x, cam.position.z - RJ.ye.site.z) < 30000;

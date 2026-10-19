@@ -21,9 +21,17 @@
     exp: { name: "experimental", len: 3.2, r: 0.11, fins: 0.5, body: 0x30343a, band: 0x3ad7ff, nose: 0x1a1d22, core: 0xe8fbff, flame: 0x39c8ff,
       trail: { life: 4.5, s0: 0.8, s1: 6, step: 3, gray: 0.6, alpha: 0.28 }, boom: 1.25, g: 34, ign: 0.05, boost: 0.8, glow: 0x5ad8ff, ball: 0x1f9dff, ion: [0.35, 0.8, 1.0] }
   };
+  // X-99 Phantom specials (fictional): Specter smart missile (violet guidance glow), Pulse and Nova energy shots
+  TYPES.specter = { name: "Specter", len: 3.4, r: 0.1, fins: 0.42, body: 0x15171b, band: 0x8a6bff, nose: 0x0b0d11, core: 0xf6eeff, flame: 0x9a7bff,
+    trail: { life: 6, s0: 0.9, s1: 7, step: 3, gray: 0.7, alpha: 0.34 }, boom: 1.5, g: 46, ign: 0.12, boost: 1.3, glow: 0xa890ff, ball: 0x7b5cff, ion: [0.62, 0.48, 1.0] };
+  TYPES.pulse = { name: "Pulse", len: 1.4, r: 0.2, fins: 0, body: 0xdff6ff, band: 0x8fe8ff, nose: 0xeaffff, core: 0xffffff, flame: 0x7fe0ff,
+    trail: { life: 2.4, s0: 1.2, s1: 4, step: 2, gray: 0.9, alpha: 0.4 }, boom: 1.2, g: 60, ign: 0, boost: 0.6, glow: 0x8fe8ff, ball: 0x5fd8ff, ion: [0.45, 0.88, 1.0], energy: 9 };
+  TYPES.nova = { name: "Nova", len: 2.2, r: 0.4, fins: 0, body: 0xfff1c8, band: 0xffd36a, nose: 0xffffff, core: 0xffffff, flame: 0xffc04a,
+    trail: { life: 5, s0: 3, s1: 14, step: 3, gray: 1.0, alpha: 0.5 }, boom: 4.2, g: 20, ign: 0, boost: 1.0, glow: 0xffd070, ball: 0xffb02a, ion: [1.0, 0.82, 0.45], energy: 26 };
   MF.TYPES = TYPES;
   /** Which missile this aircraft fires (mixed loadouts alternate, e.g. "AIM-120 + AIM-9X"). */
   MF.typeFor = function (ac) {
+    if (ac._mslType) return ac._mslType; // X-99: the selected special weapon
     const n = ((ac.spec.msl && ac.spec.msl.name) || "").toLowerCase(), k = ac.missiles || 0;
     if (/proton|concussion|hypersonic/.test(n)) return "exp";
     if (/aim-54|aim-47|phoenix/.test(n)) return /aim-9/.test(n) && k % 2 ? "ir" : "heavy";
@@ -66,7 +74,7 @@
       geo.translate(r * 0.9, 0, -0.006); geo.rotateX(Math.PI / 2); // span along x, chord along z
       for (let k = 0; k < 4; k++) { const f = new THREE.Mesh(geo, body); f.position.z = z; const wrap = new THREE.Group(); wrap.rotation.z = k * Math.PI / 2 + Math.PI / 4; wrap.add(f); g.add(wrap); }
     };
-    addFins(T.fins * 0.55, L * 0.11, L * 0.05, L * 0.05, L * 0.34);
+    if (T.fins) addFins(T.fins * 0.55, L * 0.11, L * 0.05, L * 0.05, L * 0.34);
     if (T.can) addFins(T.fins * 0.32, L * 0.06, L * 0.025, L * 0.025, -L * 0.33);
     if (T.mid) addFins(T.fins * 0.22, L * 0.2, L * 0.12, L * 0.06, -L * 0.08);
     // motor plume (the same layered flame shader as the jets: core, envelope, shock diamonds)
@@ -88,6 +96,14 @@
     const m = tpl[type].clone();
     const fl = m.getObjectByName("mflame"), gl = m.getObjectByName("mglow");
     m.userData = { flames: [{ flame: fl, glow: gl, mat: fl.material, core: fl.children[0] || null, halo: gl.children[0] || null, r: fl.userData.r }], halo: m.getObjectByName("mspr") };
+    // energy shots: no hardware, just a blazing orb (an extra additive sprite) on the motor point
+    if (TYPES[type].energy) {
+      m.traverse((o) => { if (o.isMesh && o !== fl && o !== gl && !fl.children.includes(o)) o.visible = false; });
+      const orb = new THREE.Sprite(new THREE.SpriteMaterial({ map: halo(), color: TYPES[type].glow, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      orb.scale.setScalar(TYPES[type].energy); orb.layers.set(RJ.LATE); orb.renderOrder = 13; orb.position.z = -TYPES[type].len * 0.4; m.add(orb);
+      const core = new THREE.Sprite(new THREE.SpriteMaterial({ map: halo(), color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+      core.scale.setScalar(TYPES[type].energy * 0.38); core.layers.set(RJ.LATE); core.renderOrder = 14; orb.add(core);
+    }
     return m;
   };
 

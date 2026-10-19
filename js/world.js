@@ -1644,9 +1644,12 @@
 
   /* ======================= PER-FRAME ======================= */
   let envT = 0, mistT = 0, fallFxT = 0;
+  const _ahead = new THREE.Vector3();
   W.update = function (dt, cam, focus, focusVel, focusAgl) {
     W.camera = cam;
-    W.updateChunks(focus, 6);
+    // very fast flight: stream terrain around a point ~3 s ahead so the world is ready before you arrive
+    if (focusVel && focusVel.lengthSq() > 350 * 350) { _ahead.copy(focusVel).multiplyScalar(Math.min(4, 3500 / focusVel.length())).add(focus); W.updateChunks(_ahead, 6); }
+    else W.updateChunks(focus, 6);
     updateFar(cam);
     pickReflectionLevel(cam, dt);
     W.skyMesh.position.copy(cam.position);

@@ -728,6 +728,24 @@
     tips(g, 0.8, 0, 0.95);
   };
 
+  /* X-99 Phantom (fictional): long flattened chined fuselage with a needle nose, gold-tinted canopy, cranked-arrow
+   * wing, all-moving canards, outward-canted twin tails, two blue-burning engines, glowing edge lines and
+   * internal weapon-bay doors that swing open when a missile is selected and fired */
+  B.x99 = (g, M) => {
+    lathe(g, [[-12.4, 0], [-11.6, 0.14], [-10, 0.42], [-7.5, 0.78], [-4.5, 1.02], [0, 1.16], [4, 1.12], [8, 0.98], [10.6, 0.82]], M.body, { sx: 1.42, sy: 0.52, segs: 12 });
+    blob(g, 0.52, 0.46, 2.8, 0, 0.5, -6.4, M.glass);
+    box(g, 1.1, 0.1, 6.2, 0, 0.42, -6.1, M.trim); // canopy frame spine
+    plate(g, [[0.8, -10.6], [2.1, -5.4], [2.7, -2.2], [0.8, -2.2]], 0.12, M.body, { y: -0.05 }); // sharp chines
+    plate(g, [[1.4, -2.6], [8.9, 4.6], [9.2, 6.3], [1.4, 7.8]], 0.2, M.body, { y: -0.1, dihedral: -0.03 });
+    moving(g, [[1.3, -7.6], [2.9, -6.4], [2.9, -5.9], [1.3, -5.6]], 0.08, M.body, -6.6, { y: 0.05, canard: true });
+    finPair(g, [[5.6, 0.4], [8.4, 3.6], [9.6, 3.6], [10.1, 0.4]], M.trim, 1.75, 0.55);
+    pair((x) => { box(g, 1.05, 0.85, 3.4, x, -0.42, -2.3, M.dark); box(g, 0.95, 0.12, 0.12, x, -0.02, -4.0, M.glow); }, 1.55); // intakes with lit lips
+    pair((x) => { box(g, 0.05, 0.05, 15.5, x, 0.02, -2.6, M.glow); box(g, 0.05, 0.05, 4.2, x * 3.9, -0.1, 5.2, M.glow); }, 1.3); // edge light lines
+    pair((x) => { const d = box(g, 0.85, 0.06, 4.4, x, -0.66, 0.6, M.body); d.name = x > 0 ? "bayR" : "bayL"; }, 0.5);
+    pair((x) => engine(g, M, 0.64, x, -0.05, 10.75, { color: 0x4cc8ff, core: 0xeefcff }), 0.88);
+    cockpit(g, 0.72, -6.4); tips(g, 9.0, -0.1, 6.2);
+  };
+
   /* ======================= CATALOG ======================= */
   const add = RJ.addAircraft;
   const LASER = (color, rate, dmg) => ({ name: "Laser cannons", rate, dmg, heat: 0.022, spread: 0.0012, speed: 1700, color, laser: true });
@@ -830,6 +848,14 @@
     hp: 520, stealth: 1, radar: 6000, gun: null, msl: { n: 0 }, flares: 60, freeOnly: true,
     unlock: { start: true }, sound: { type: "heavy", pitch: 0.8, family: "heavy" } }, 4.4);
 
+  RJ.CATEGORIES.push(["future", "Experimental (fictional)"]);
+  add("x99", { name: "X-99 Phantom", short: "X-99", cat: "future", role: "Experimental hypersonic air-dominance fighter", status: "Fictional prototype · 2070s", year: 2071,
+    desc: "Cruises at 1,500 mph, 2,200 on afterburner and 2,500 on HYPERBOOST (H). Its own weapons: Phantom burst cannon (guns), Specter smart missiles with Phantom lock on up to four targets, Pulse energy missiles and the charged Nova strike (Z switches, X fires; hold X to charge Nova). Alt or double-tap a rudder key: vector-dodge.",
+    colors: { body: 0x2c3036, trim: 0x15171a, glass: 0x5c4a1c, accent: 0x46d6ff }, build: "x99",
+    flight: { vmax: 983, ref: 12000, mil: 6, ab: 14, vstall: 68, gmax: 12, roll: 320, pitch: 34, yaw: 20, ind: 0.8, eng: "turbo", x99: true, tvc: true },
+    hp: 230, stealth: 2.2, radar: 16000, gun: { name: "Phantom burst cannon", rate: 30, dmg: 8, heat: 0.012, spread: 0.0016, speed: 2600, color: 0x7fe6ff, laser: true },
+    msl: { n: 36, name: "Specter / Pulse / Nova", lock: 0.35, cone: 70, range: 15000, speed: 1700 }, flares: 60, x99: true,
+    unlock: { start: true }, sound: { type: "jet", pitch: 1.18, scream: true } }, 1.0);
   // racing drone: tiny, violent thrust-to-weight, flips in a blink
   add("racedrone", { name: "FPV Racing Drone", short: "DRONE", cat: "heli", role: "5-inch racing quadcopter", status: "Drone racing", year: 2016,
     desc: "A 650 g racing quad: tilts nearly flat to go fast, 0–100 km/h in about a second, and stops just as hard. Same controls as the helicopters.",

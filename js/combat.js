@@ -244,6 +244,7 @@
     };
     mesh.position.copy(p); mesh.quaternion.setFromUnitVectors(Z, tv.copy(ac.fwd).negate()); // leaves the rail pointing where the jet points
     if (MF) MF.launch(msl); // per-type turn limit, ignition delay, release puff
+    if (ac._mslTune) ac._mslTune(msl); // X-99 specials: speed, damage, blast radius
     if (ac.isPlayer && C.lockAssist) msl.burn *= C.lockAssist.burn; // Free Flight: the motor burns long enough to reach the longer lock range
     if (m.cone >= 180) {
       // all-aspect defensive launch: eject the missile toward the target so its seeker starts on it
@@ -333,10 +334,15 @@
       hit.damage(m.dmg * RJ.rand(0.85, 1.15), m.owner, "missile");
       m.owner.stats.mslHits++;
       if (m.owner.isPlayer) RJ.emit("hitmarker", hit);
-    } else if (m.target && m.target.alive) {
+    } else if (m.target && m.target.alive && !m.splash) {
       // near-miss splash damage
       const d = m.pos.distanceTo(m.target.pos);
       if (d < 35) m.target.damage(m.dmg * 0.4 * (1 - d / 35), m.owner, "missile");
+    }
+    // area weapons (the X-99's Nova): everything hostile inside the blast radius takes damage
+    if (m.splash && !(m.owner && m.owner.remote)) for (const e of C.enemiesOf(m.owner, true)) {
+      if (e === hit) continue;
+      const d = m.pos.distanceTo(e.pos); if (d < m.splash) e.damage(m.dmg * 0.8 * (1 - d / m.splash), m.owner, "missile");
     }
     if (RJ.missileFx && m.type) RJ.missileFx.release(m); else RJ.scene.remove(m.mesh); // the smoke trail lingers and fades
     C.missiles.splice(i, 1);

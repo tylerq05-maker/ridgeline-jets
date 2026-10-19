@@ -224,7 +224,9 @@
       // induced drag grows below corner speed: hard turns slow you down, more so when already slow
       const induced = (1 - 0.45 * (this.ge || 0)) / mk * F.ind * Math.pow(Math.max(0, Math.abs(gAct) - 1), 1.5) * RJ.clamp(Math.pow((F.corner || 200) / v, 0.8), 0.6, 2.2);
       const wave = q * RJ.waveK(F, this.mach);
-      this.speed += (thrust - parasite - induced - wave - RJ.G0 * this.fwd.y) * dt;
+      // the X-99 has its own propulsion and drag model (x99.js): cruise, afterburner and hyperboost targets
+      if (F.x99 && RJ.x99) this.speed = RJ.x99.speedStep(this, dt);
+      else this.speed += (thrust - parasite - induced - wave - RJ.G0 * this.fwd.y) * dt;
       this.speed = Math.max(this.speed, 12);
       this.vel.copy(this.fwd).multiplyScalar(this.speed);
       // the air mass moves: wind drifts the ground track (airspeed is relative to the air)
@@ -270,6 +272,11 @@
         else this.destroy(null, gnd <= 0.5 ? "water" : "terrain");
       }
       if (this.state === "flying" && (RJ.atlas && RJ.atlas.built ? RJ.atlas.solidAt(this.pos) : RJ.world.castle && RJ.castle.solidAt(this.pos))) this.destroy(null, "terrain");
+      // very fast movers sweep through more than a building's width per step: test the midpoint too
+      if (this.state === "flying" && this.speed * dt > 5) {
+        const mx = this.pos.x - this.vel.x * dt * 0.5, my = this.pos.y - this.vel.y * dt * 0.5, mz = this.pos.z - this.vel.z * dt * 0.5;
+        if (my < RJ.world.ground(mx, mz) || (RJ.atlas && RJ.atlas.built && RJ.atlas.solidAt(tv.set(mx, my, mz)))) { this.pos.set(mx, my, mz); this.destroy(null, "terrain"); }
+      }
       this.timers(dt);
     }
 
@@ -482,7 +489,7 @@
           if (f.rocket) { const on = this.throttle > 0.03 && burning; s = on ? (1.0 + this.throttle * 1.1) * flick : 0.01; ab = on ? 1 : 0; power = on ? 1 : 0; }
           else if (f.small) { s = (0.1 + this.throttle * 0.16) * flick; ab = 0; }
           // dry power: a short, faint plume that only shows near full throttle; afterburner: long and blazing
-          else { s = (0.05 + sp * sp * 0.26 + this.abLevel * (1.75 + machBoost) * lenK + kick * 0.6 * this.abLevel) * flick * Math.sqrt(f.r / 0.5); ab = this.abLevel; power = sp; }
+          else { s = (0.05 + sp * sp * 0.26 + this.abLevel * (1.75 + machBoost) * lenK + kick * 0.6 * this.abLevel + (this.x99Hyper || 0) * 4.5) * flick * Math.sqrt(f.r / 0.5); ab = Math.max(this.abLevel, this.x99Hyper || 0); power = sp; }
           const wr = f.r * (1 + ab * 0.18 * widK + kick * 0.15) * (f.rocket || f.small ? 1 : widK);
           f.flame.scale.set(wr, wr, Math.max(0.01, s));
           // variable nozzle: open at idle, closed down at military power, flared wide when the burner lights

@@ -188,6 +188,7 @@
       x.globalAlpha = 1;
     }
     x.shadowBlur = 0;
+    if (pl.alive && pl.spec.x99 && RJ.x99 && RJ.settings.hud) RJ.x99.hud(x, W, Hh, pl, cam, proj);
   };
 
   function ladder(cam, C) {

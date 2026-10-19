@@ -252,6 +252,7 @@
     const sp = RJ.clamp((focus.speed - 260) / 700, 0, 1);
     const low = 1 - RJ.smooth(30, 450, focus.agl);
     let motion = (camMode === "chase" || camMode === "cockpit") && focus.state === "flying" ? sp * (0.012 + 0.022 * low) : 0;
+    if (focus.spec.x99 && focus.state === "flying") motion += RJ.smooth(400, 1100, focus.speed) * 0.01 + (focus.x99Hyper || 0) * 0.03;
     if (focus.spec.flight.model === "space" && focus.state === "flying") motion += RJ.smooth(800, 2300, focus.speed) * 0.012 + (focus.hyperK || 0) * 0.05;
     P.motion = RJ.damp(P.motion, motion, 3, dt);
     const ahead = tv.copy(focus.pos).addScaledVector(focus.vel, 3).project(camera);
@@ -596,7 +597,8 @@
       RJ.lever.apply(pl, dt);
       RJ.nav.control(pl, dt);
       if (RJ.glocActive) { pl.input.pitch = 0; pl.input.roll = 0; pl.input.yaw = 0; } // unconscious: hands off
-      if (I.action("hyper")) { if (pl.spec.flight.model === "space") RJ.vehicles.toggleHyper(pl); else RJ.ui.flash("HYPERSONIC: STAR WARS CRAFT ONLY", null, 0.9); }
+      if (pl.spec.x99 && RJ.x99) RJ.x99.update(pl, dt, I); // hyperboost, vector-dodge, weapon select, Phantom lock
+      else if (I.action("hyper")) { if (pl.spec.flight.model === "space") RJ.vehicles.toggleHyper(pl); else RJ.ui.flash("HYPERSONIC: STAR WARS CRAFT ONLY", null, 0.9); }
       if (I.action("autopilot")) RJ.nav.toggleAuto(pl);
       if (I.action("gear")) { pl.toggleGear(); if (!pl.spec.flight.model) RJ.ui.flash(pl.gearDown ? "GEAR DOWN" : "GEAR UP", null, 0.8); }
       if (mode.kind === "fight" || mode.armed) { // Free Flight with living airspace: missiles and targeting work too
@@ -604,7 +606,8 @@
         if (I.action("target")) RJ.combat.cycleTarget(pl);
         if (!pl.target || !pl.target.alive) RJ.combat.autoTarget(pl);
         if ((!pl.target || !pl.target.alive) && mode.armed && RJ.airspace.noseTarget) { const t = RJ.airspace.noseTarget(pl); if (t) { pl.target = t; pl.lockT = 0; pl.locked = false; } }
-        if (I.action("missile")) {
+        if (pl.spec.x99 && RJ.x99) { if (I.action("missile")) RJ.x99.fire(pl, false); }
+        else if (I.action("missile")) {
           if (!pl.spec.msl.n) RJ.ui.flash("NO MISSILES ON THIS AIRCRAFT", null, 1);
           else if (pl.missiles <= 0) RJ.ui.flash("WINCHESTER", "Out of missiles", 1);
           else if (!RJ.combat.fireMissile(pl)) { RJ.audio.beep(300, 0.12); if (!pl.locked) RJ.ui.flash("NO LOCK", "Keep the target in the seeker cone", 0.9); }
