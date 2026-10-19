@@ -1,7 +1,7 @@
 /* Ridgeline Jets — the album monuments around the Ye Monument.
- * Fifteen mega-structures in a 6.8 km ring around the statue, one per album, in release order: covers 620–900 m
- * square, raised 220–650 m on twin pylons, a central column or an A-frame, with gilded/accent-lit frames, title
- * plaques, night uplights and aviation beacons, linked to the statue's plaza by lit avenues.
+ * Fifteen mega-structures in a 7.8 km ring around the statue, one per album, in release order: covers 840–1,200 m
+ * square, raised 260–810 m on twin pylons, a central column or an A-frame, with gilded/accent-lit frames, title
+ * plaques, night uplights, aviation beacons and a sky beam in the album colour, linked to the plaza by lit avenues.
  * Artwork: the official covers are copyrighted, so the game does not ship them. Each monument shows a labelled title
  * card until the player adds their own copy of the cover (Settings ▸ Album art); those images are kept in this
  * browser only (IndexedDB) and are never uploaded or published. */
