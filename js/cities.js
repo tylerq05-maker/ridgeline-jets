@@ -52,7 +52,22 @@
       best.px = -best.sz; best.pz = best.sx; // along the coast
       CI.sites[id] = best;
       taken.push([best.x, best.z, 30000]);
-      sites.push({ type: "flat", kind: id, x: best.x, z: best.z, r: SPEC[id].R, fall: 700, elev: best.elev });
+      sites.push(best.siteRef = { type: "flat", kind: id, x: best.x, z: best.z, r: SPEC[id].R, fall: 700, elev: best.elev, urban: (STYLE[id] && STYLE[id].metro) || 0, plain: { chicago: 17000, tokyo: 15000, dubai: 16000 }[id] || 0, plainK: { chicago: 0.12, tokyo: 0.3, dubai: 0.22 }[id] });
+    }
+    CI.bounds(gen);
+  };
+  /** Megacity bounds: each metro ring stops short of its neighbours (half way to another city, 2 km off the NYC / SF zones). */
+  CI.bounds = function (gen) {
+    const zones = Object.values(gen.zones || {}), ids = Object.keys(CI.sites);
+    for (const id of ids) {
+      const S = CI.sites[id], T = STYLE[id], others = [];
+      for (const j of ids) if (j !== id) others.push({ x: CI.sites[j].x, z: CI.sites[j].z, city: true });
+      for (const zn of zones) others.push({ x: zn.x, z: zn.z, r: zn.r });
+      S.others = others;
+      let cap = (T && T.metro) || 7000;
+      for (const o of others) { const D = Math.hypot(o.x - S.x, o.z - S.z); cap = Math.min(cap, o.city ? D / 2 - 500 : D - o.r - 2000); }
+      S.metroCap = Math.max(SPEC[id].R + 1500, cap);
+      if (S.siteRef) { S.siteRef.urban = Math.min(S.siteRef.urban, S.metroCap); if (S.siteRef.plain) S.siteRef.plain = Math.min(S.siteRef.plain, S.metroCap); }
     }
   };
   CI.spawn = function (id) {
@@ -134,6 +149,9 @@
       trees: { kind: "tree", cols: [0x3f6e33, 0x4f7d38, 0x5c8a3e] }, parks: [{ s: -2500, p: -2500, rs: 300, rp: 380, name: "Yoyogi Park" }, { s: -600, p: -250, rs: 140, rp: 190, name: "Hibiya Park" }],
      
       block: 64, street: 12, aveEvery: 4, outer: 6800, base: (d) => RJ.lerp(46, 10, RJ.smooth(600, 6500, d)),
+      metro: 16000, rail: { A: -2600, B: 1300 },
+      districts: [{ s: -7600, p: -6200, r: 1500, kind: "cbd", h: [130, 300] }, { s: -6800, p: 7200, r: 1300, kind: "cbd", h: [110, 250] }, { s: 1200, p: -11000, r: 2600, kind: "industrial" }, { s: -4500, p: 3000, r: 2200, kind: "residential" }, { s: -11500, p: 500, r: 3500, kind: "suburb" }],
+      metroStyle: { house: [8, 11], houseH: [6, 9], perBlock: 6, res: [10, 32], resForms: ["box", "slab", "box"], green: 0.62 },
       bumps: [{ s: -1800, p: -1300, r: 900, h: 330 }, { s: -300, p: 300, r: 700, h: 240 }, { s: 300, p: -2200, r: 600, h: 180 }, { s: -900, p: 1700, r: 600, h: 160 }],
       canyon: { s: -1100, half: 1900, width: 175, h: [180, 360] }, slalom: { n: 7, gap: 360, off: 0.27, h: [300, 460], w: 34 },
       neon: [{ s: -600, p: -1800, r: 650 }, { s: -1500, p: -650, r: 500 }, { s: 250, p: 700, r: 420 }],
@@ -152,6 +170,9 @@
       trees: { kind: "palm", cols: [0x5d7a32, 0x6e8a3a] }, parks: [{ s: -300, p: -1750, rs: 240, rp: 260, name: "Safa Park" }],
       highway: [[-2200, -4200, -2200, 4200]],
       block: 110, street: 22, aveEvery: 3, outer: 6500, base: (d) => RJ.lerp(22, 8, RJ.smooth(800, 6000, d)), sparse: 0.35,
+      metro: 16000, rail: { A: -3000, B: 1700 },
+      districts: [{ s: -6200, p: -8200, r: 1800, kind: "cbd", h: [200, 430] }, { s: -9000, p: 5200, r: 1400, kind: "cbd", h: [120, 300] }, { s: -3000, p: 11500, r: 3000, kind: "industrial" }, { s: -10000, p: -3000, r: 3500, kind: "suburb" }],
+      metroStyle: { house: [12, 16], houseH: [6, 9], perBlock: 4, flat: true, pool: 0.4, res: [15, 45], resForms: ["box", "podium", "slab"], green: 0.48 },
       bumps: [{ s: -900, p: 0, r: 1300, h: 280 }, { s: -1500, p: -2600, r: 900, h: 380 }],
       canyon: { s: -700, half: 2600, width: 170, h: [260, 420] }, slalom: { n: 6, gap: 420, off: 0.28, h: [360, 520], w: 40 },
       neon: [],
@@ -167,6 +188,9 @@
       trees: { kind: "mix", cols: [0x3f7a2e, 0x4f8a36, 0x5d9a3e] }, parks: [{ s: -450, p: -1650, rs: 230, rp: 380, name: "Aterro do Flamengo" }],
       highway: [[-650, -4200, -650, 300]],
       block: 72, street: 14, aveEvery: 4, outer: 6000, base: (d) => RJ.lerp(30, 9, RJ.smooth(600, 5500, d)),
+      metro: 13000, rail: { A: -2600, B: -900 },
+      districts: [{ s: -6500, p: 4800, r: 1300, kind: "cbd", h: [90, 220] }, { s: -4000, p: -6500, r: 2200, kind: "residential" }, { s: -1000, p: -10000, r: 2200, kind: "industrial" }, { s: -9000, p: -1500, r: 3000, kind: "suburb" }],
+      metroStyle: { house: [7, 10], houseH: [5, 8], perBlock: 6, res: [20, 60], resForms: ["slab", "box", "slab"], green: 0.6 },
       bumps: [{ s: -1200, p: 1500, r: 700, h: 260 }, { s: 0, p: -600, r: 600, h: 120 }],
       beach: { h: [70, 150], depth: 450 },
       canyon: { s: -1300, half: 1500, width: 140, h: [150, 280] }, slalom: { n: 6, gap: 380, off: 0.26, h: [220, 340], w: 30 },
@@ -180,6 +204,9 @@
       trees: { kind: "tree", cols: [0x2f6a2c, 0x3d7a33] }, parks: [{ s: -700, p: 1000, rs: 170, rp: 210, name: "Hong Kong Park" }],
       highway: [[450, -3600, 450, 3600]],
       block: 58, street: 11, aveEvery: 4, outer: 5600, base: (d) => RJ.lerp(170, 55, RJ.smooth(400, 4500, d)), spikes: 0.14, spikeMax: 480,
+      metro: 12500, rail: { A: -600, B: 1300 },
+      districts: [{ s: -7200, p: -5200, r: 1500, kind: "newtown" }, { s: -6200, p: 6600, r: 1500, kind: "newtown" }, { s: -9800, p: 300, r: 1800, kind: "newtown" }, { s: 1500, p: -8800, r: 2000, kind: "industrial" }],
+      metroStyle: { house: [8, 11], houseH: [6, 9], perBlock: 4, res: [40, 110], resForms: ["slab", "box", "oct"], green: 0.55 },
       bumps: [{ s: 400, p: 0, r: 1000, h: 360 }, { s: -400, p: -1400, r: 900, h: 280 }, { s: -300, p: 1500, r: 900, h: 260 }],
       canyon: { s: -200, half: 2000, width: 130, h: [220, 380] }, slalom: { n: 7, gap: 320, off: 0.27, h: [280, 420], w: 30 },
       neon: [{ s: 0, p: -900, r: 700 }, { s: 300, p: 900, r: 600 }],
@@ -197,6 +224,9 @@
       trees: { kind: "tree", cols: [0x4f7a34, 0x5f8a3a, 0x8a7a30] }, parks: [{ s: "coast", p: -1000, rs: 230, rp: 620, name: "Grant Park" }],
       highway: [[-2500, -4200, -2500, 4200]],
       block: 100, street: 20, aveEvery: 2, outer: 6400, base: (d) => RJ.lerp(60, 10, RJ.smooth(500, 6000, d)),
+      metro: 16000, rail: { A: -2400, B: 1500 },
+      districts: [{ s: -7200, p: -7200, r: 1200, kind: "cbd", h: [100, 210] }, { s: 800, p: -11200, r: 3200, kind: "industrial" }, { s: -5000, p: 5000, r: 2400, kind: "residential" }, { s: -11000, p: 0, r: 4500, kind: "suburb" }],
+      metroStyle: { house: [9, 12], houseH: [7, 10], perBlock: 6, res: [12, 30], resForms: ["box", "box", "slab"], green: 0.6 },
       bumps: [{ s: -600, p: 0, r: 1100, h: 300 }, { s: -300, p: 1400, r: 600, h: 200 }],
       canyon: { s: -1000, half: 2200, width: 160, h: [200, 340] }, slalom: { n: 6, gap: 380, off: 0.27, h: [300, 420], w: 34 },
       neon: [],
@@ -217,6 +247,7 @@
   function buildCity(id, S, X) {
     const K = RJ.cityKit, T = STYLE[id], W = RJ.world, B = new K.Batch(), Pal = T.P;
     const pick = (a, r) => a[Math.floor(r() * a.length)];
+    const yaw0 = Math.atan2(S.px, S.pz), at = (x, z, ox, oz) => [x + Math.cos(yaw0) * ox + Math.sin(yaw0) * oz, z - Math.sin(yaw0) * ox + Math.cos(yaw0) * oz];
     const treeKind = (r) => T.trees.kind === "mix" ? (r() < 0.4 ? "palm" : "tree") : T.trees.kind;
     const r = W.gen.mulberry32(id.split("").reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) >>> 0);
     const { grp, c, groundAt, keep, peakH } = X;
@@ -258,7 +289,45 @@
     const parks = (T.parks || []).map((k) => Object.assign({}, k, { s: k.s === "coast" ? (edgeAt(k.p) != null ? edgeAt(k.p) - k.rs - 40 : S.coast - 400) : k.s }));
     const inPark = (s, p) => parks.find((k) => Math.abs(s - k.s) < k.rs && Math.abs(p - k.p) < k.rp);
     const hwL = (T.highway || []).map(([s0, p0, s1, p1]) => [Math.round(s0 / g) * g, Math.round(p0 / g) * g, Math.round(s1 / g) * g, Math.round(p1 / g) * g]);
-    const nearHw = (s, p, m) => hwL.some(([s0, p0, s1, p1]) => { const dx = s1 - s0, dp = p1 - p0, t = RJ.clamp(((s - s0) * dx + (p - p0) * dp) / (dx * dx + dp * dp), 0, 1); return Math.hypot(s - s0 - dx * t, p - p0 - dp * t) < m; });
+    // ---------- the metro road and rail network (in s/p): a ring road round the core, radial expressways out to the
+    // suburbs, two elevated rail lines on street lines; dry runs only (short water gaps are bridged) ----------
+    const MR = T.metro || T.outer, foreign = (x, z) => S.others && S.others.some((o) => o.city ? Math.hypot(o.x - x, o.z - z) < Math.hypot(S.x - x, S.z - z) : Math.hypot(o.x - x, o.z - z) < o.r + 2000);
+    const dryAt = (ss, pp) => { const [x, z] = c(ss, pp); return groundAt(x, z) > 1.2 && peakH(x, z) < groundAt(x, z) + 30 && !foreign(x, z); };
+    const runsOf = (poly, minLen) => { // split a polyline into dry runs, bridging water gaps under 500 m
+      const pts = []; for (let i = 0; i < poly.length - 1; i++) { const [s0, p0] = poly[i], [s1, p1] = poly[i + 1], L = Math.hypot(s1 - s0, p1 - p0); for (let t = 0; t < L; t += 60) pts.push([s0 + (s1 - s0) * t / L, p0 + (p1 - p0) * t / L]); } pts.push(poly[poly.length - 1]);
+      const ok = pts.map(([a, b]) => dryAt(a, b)), n = pts.length;
+      for (let i = 0; i < n;) { if (ok[i]) { i++; continue; } let j = i; while (j < n && !ok[j]) j++; if (i > 0 && j < n && (j - i) * 60 <= 500) for (let k = i; k < j; k++) ok[k] = true; i = j; }
+      const out = []; let cur = null; for (let i = 0; i < n; i++) { if (ok[i]) { if (!cur) out.push(cur = []); cur.push(pts[i]); } else cur = null; }
+      return out.filter((r) => r.length * 60 >= minLen);
+    };
+    const ringR = T.outer * 0.93, ring = []; for (let k = 0; k <= 48; k++) { const a = (k / 48) * TAU; ring.push([Math.cos(a) * ringR, Math.sin(a) * ringR]); }
+    const radials = [Math.PI, Math.PI * 0.72, Math.PI * 1.28, Math.PI * 0.5, Math.PI * 1.5].map((a) => [[Math.cos(a) * (coreR + 400), Math.sin(a) * (coreR + 400)], [Math.cos(a) * MR * 0.97, Math.sin(a) * MR * 0.97]]);
+    const roadRuns = [...runsOf(ring, 1500), ...radials.flatMap((pl) => runsOf(pl, 1500))];
+    const sn = (v) => Math.round(v / g) * g;
+    const railRuns = T.rail ? [...runsOf([[sn(T.rail.A), -MR * 0.9], [sn(T.rail.A), MR * 0.9]], 2000), ...runsOf([[-MR * 0.9, sn(T.rail.B)], [Math.min(S.coast - 350, MR), sn(T.rail.B)]], 2000)] : [];
+    // spatial hash of every corridor segment (s/p) for clearing lots
+    const SEG = new Map(), SH = 250, segKey = (a, b) => a * 9973 + b;
+    const addSeg = (s0, p0, s1, p1, m) => { for (let a = Math.floor((Math.min(s0, s1) - m) / SH); a <= Math.floor((Math.max(s0, s1) + m) / SH); a++) for (let b = Math.floor((Math.min(p0, p1) - m) / SH); b <= Math.floor((Math.max(p0, p1) + m) / SH); b++) { const k = segKey(a, b); if (!SEG.has(k)) SEG.set(k, []); SEG.get(k).push([s0, p0, s1, p1, m]); } };
+    for (const [s0, p0, s1, p1] of hwL) addSeg(s0, p0, s1, p1, 12);
+    for (const R of roadRuns) for (let i = 0; i < R.length - 1; i++) addSeg(R[i][0], R[i][1], R[i + 1][0], R[i + 1][1], 14);
+    for (const R of railRuns) for (let i = 0; i < R.length - 1; i++) addSeg(R[i][0], R[i][1], R[i + 1][0], R[i + 1][1], 8);
+    const nearHw = (s, p, m) => { const L = SEG.get(segKey(Math.floor(s / SH), Math.floor(p / SH))); if (!L) return false; return L.some(([s0, p0, s1, p1, mm]) => { const dx = s1 - s0, dp = p1 - p0, t = RJ.clamp(((s - s0) * dx + (p - p0) * dp) / (dx * dx + dp * dp || 1), 0, 1); return Math.hypot(s - s0 - dx * t, p - p0 - dp * t) < m - 12 + mm; }); };
+    X.lm.network = { roadRuns, railRuns, c };
+    // Victoria Peak behind Hong Kong
+    if (T.peak) {
+      const [px, pz] = c(T.peak.s, T.peak.p), py = Math.max(groundAt(px, pz), S.elev);
+      const hp = (u) => Math.pow(1 - u, 1.5);
+      const geo = (function () { const pts = []; for (let i = 0; i <= 30; i++) { const u = i / 30; pts.push(new THREE.Vector2(Math.max(u * T.peak.R, 0.01), hp(u) * T.peak.H)); } const lg = new THREE.LatheGeometry(pts.reverse(), 48); lg.computeVertexNormals(); return lg; })();
+      const pm = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x3f5e36, roughness: 0.95 })); pm.position.set(px, py - 5, pz); pm.castShadow = pm.receiveShadow = true; grp.add(pm);
+      X.peaks.push({ x: px, z: pz, R: T.peak.R, H: T.peak.H, hp, base: py - 5, sx: 1, sz: 1 });
+      // towers climbing the Peak's lower slopes
+      for (let i = 0; i < 500; i++) {
+        const a = r() * TAU, rr = RJ.lerp(0.45, 0.85, r()) * T.peak.R, x = px + Math.cos(a) * rr, z = pz + Math.sin(a) * rr;
+        if (Math.cos(a) * S.sx + Math.sin(a) * S.sz < 0.2) continue;
+        const y = Math.max(peakH(x, z), groundAt(x, z)); if (y < 2) continue;
+        K.tower(B, { x, z, y: y - 4, w: RJ.lerp(22, 32, r()), d: RJ.lerp(22, 32, r()), h: RJ.lerp(60, 170, r()), ry: yaw, glassP: 0.2, P: Pal, form: "box" }, r);
+      }
+    }
     const special = []; // park / plaza / parking blocks, filled after the towers
     if (T.river) T.river.from = S.coast + 30; // the river runs out into the lake
     // the bridge / island / river lanes are kept open
@@ -306,6 +375,87 @@
       }
     }
     const opts = (L) => ({ x: L.x, z: L.z, y: L.y, w: L.w, d: L.d, h: L.h, ry: yaw, glassP: RJ.lerp(0.1, 0.85, RJ.smooth(40, 220, L.h)), P: Pal });
+    // ---------- the metro ring: miles of districts beyond the core, each with its own character ----------
+    // secondary downtowns (cbd), high-rise new towns (Hong Kong), apartment belts (residential), suburbs of houses,
+    // industry (warehouses, tank farms, chimneys), and green belts of open ground and woods between them
+    const M = T.metroStyle || {}, metroCount = { blocks: 0 };
+    const vn = (a, b) => { const i = Math.floor(a), j = Math.floor(b), fa = a - i, fb = b - j, H = (u, v) => { const q = Math.sin(u * 127.1 + v * 311.7 + id.length * 17.3) * 43758.5453; return q - Math.floor(q); }, sm = (t) => t * t * (3 - 2 * t); return RJ.lerp(RJ.lerp(H(i, j), H(i + 1, j), sm(fa)), RJ.lerp(H(i, j + 1), H(i + 1, j + 1), sm(fa)), sm(fb)); };
+    const districtAt = (s, p, d) => {
+      for (const D of T.districts || []) { const q = Math.hypot(s - D.s, p - D.p) / D.r; if (q < 1) return { D, q }; }
+      return { D: { kind: d < T.outer + 3500 ? "residential" : "suburb" }, q: 1 };
+    };
+    if (T.metro) {
+      const G2 = Math.max(96, g * 1.5), ST2 = 16, half2 = (G2 - ST2) / 2;
+      for (let i = -Math.ceil(MR / G2); i <= MR / G2; i++) for (let j = -Math.ceil(MR / G2); j <= MR / G2; j++) {
+        const bs = (i + 0.5) * G2, bp = (j + 0.5) * G2, bd = Math.hypot(bs, bp);
+        if (bd > MR || bd < T.outer - G2 * 0.25) continue;
+        const { D, q } = districtAt(bs, bp, bd), kind = D.kind;
+        // density: fades toward the edge; green belts follow a low-frequency field (not salt and pepper)
+        const green = vn(bs / 1700, bp / 1700) * 0.65 + vn(bs / 600, bp / 600) * 0.35;
+        if (kind !== "cbd" && kind !== "newtown" && green > (M.green || 0.6) - RJ.smooth(T.outer, MR, bd) * 0.12) {
+          if (green > (M.green || 0.6) + 0.06 && r() < 0.5) { const [x, z] = c(bs, bp), gy = groundAt(x, z); if (gy > 2) for (let t = 0; t < 6; t++) { const [tx, tz] = at(x, z, (r() - 0.5) * G2, (r() - 0.5) * G2), ty = groundAt(tx, tz); if (ty > 1.5) { B.seed = r() * 97; B.base = ty; B.treeAt(tx, ty - 0.3, tz, RJ.lerp(9, 17, r()), pick(T.trees.cols, r), T.trees.kind === "palm" ? "tree" : treeKind(r)); } } B.seed = null; B.base = null; }
+          continue;
+        }
+        if (r() < RJ.smooth(T.outer + 2000, MR, bd) * 0.5) continue;
+        if (nearHw(bs, bp, half2 + 14) || riverAt(bs, bp) || inPort(bs, bp)) continue;
+        const [x, z] = c(bs, bp), gy = groundAt(x, z);
+        if (S.others && S.others.some((o) => o.city ? Math.hypot(o.x - x, o.z - z) < bd : Math.hypot(o.x - x, o.z - z) < o.r + 2000)) continue; // a neighbour's ground
+        if (gy < 1.6 || keep.some(([kx, kz, kr]) => Math.hypot(kx - x, kz - z) < kr + 60)) continue;
+        if (peakH(x, z) > gy - 3 && peakH(x, z) > -1e9) continue;
+        let lo = gy, hi = gy; for (const [ox, oz] of [[-half2, -half2], [half2, -half2], [half2, half2], [-half2, half2]]) { const yy = groundAt(...at(x, z, ox, oz)); lo = Math.min(lo, yy); hi = Math.max(hi, yy); }
+        if (lo < 1 || hi - lo > (kind === "suburb" ? 18 : 12)) continue;
+        metroCount.blocks++;
+        const base = lo - 1;
+        const pad = (col, st) => { B.seed = r() * 97; B.base = base; B.add("box", false, x, base, z, G2 - ST2 + 4, gy - base + 0.3, G2 - ST2 + 4, yaw, col, st, 0, 0); B.seed = null; B.base = null; };
+        if (kind === "cbd") {
+          pad(0x8c8a84, 11);
+          const hmax = RJ.lerp(D.h[1], D.h[0], q) * RJ.lerp(0.45, 1.05, Math.pow(r(), 0.6));
+          const n = r() < 0.4 ? 2 : 1;
+          for (let k2 = 0; k2 < n; k2++) {
+            const [tx, tz] = n === 2 ? at(x, z, (k2 ? 1 : -1) * half2 * 0.5, 0) : [x, z], w = n === 2 ? half2 * 0.85 : half2 * RJ.lerp(1.1, 1.6, r());
+            K.tower(B, { x: tx, z: tz, y: base, w, d: n === 2 ? half2 * 1.6 : w, h: Math.max(40, hmax * (k2 ? 0.7 : 1)), ry: yaw, glassP: 0.85, P: Pal }, r);
+          }
+        } else if (kind === "newtown") {
+          pad(0x9a978f, 11);
+          const h = RJ.lerp(110, 190, r()) * RJ.lerp(1, 0.7, q);
+          for (const sd of [-1, 1]) { const [tx, tz] = at(x, z, sd * half2 * 0.48, 0); K.tower(B, { x: tx, z: tz, y: base, w: half2 * 0.8, d: half2 * 1.5, h: h * RJ.lerp(0.85, 1.1, r()), ry: yaw, glass: false, st: pick([4, 4, 5], r), form: pick(["box", "notch", "slab"], r), P: Pal, crown: 0, spire: 0 }, r); }
+        } else if (kind === "industrial") {
+          pad(0x77756f, 11);
+          const roll = r();
+          if (roll < 0.62) K.tower(B, { x, z, y: base, w: half2 * 1.8, d: half2 * RJ.lerp(0.9, 1.6, r()), h: RJ.lerp(9, 17, r()), ry: yaw, glass: false, st: 3, form: "box", P: { stone: [0x9aa0a6, 0xb8b4ac, 0x7d8a96, 0x8a7d6a, 0xa8aeb4] }, lit: 0.12 }, r);
+          else if (roll < 0.85) { B.seed = r() * 97; B.base = gy; for (let t = 0; t < 4; t++) { const [tx, tz] = at(x, z, (t % 2 ? 1 : -1) * half2 * 0.5, (t < 2 ? 1 : -1) * half2 * 0.5), dd = RJ.lerp(14, 26, r()), th = RJ.lerp(10, 18, r()); B.add("cyl", false, tx, gy, tz, dd, th, dd, 0, pick([0xe4e4e0, 0xd8d4c8, 0xc0c4c8], r), 9, 0, 0); B.foot2(tx, tz, dd / 2, gy + th); } B.seed = null; B.base = null; }
+          else { // power plant / factory with chimneys
+            K.tower(B, { x, z, y: base, w: half2 * 1.4, d: half2 * 1.2, h: RJ.lerp(18, 30, r()), ry: yaw, glass: false, st: 3, form: "box", P: { stone: [0x8a8f94, 0x9a8f80] }, lit: 0.2 }, r);
+            B.seed = r() * 97; B.base = gy;
+            for (const sd of [-1, 1]) { const [cx, cz] = at(x, z, sd * half2 * 0.75, half2 * 0.7), chH = RJ.lerp(55, 110, r()); B.add("cyl", false, cx, gy, cz, 5.5, chH, 5.5, 0, 0xb8b0a4, 9, 0, 0); B.add("cyl", false, cx, gy + chH - 6, cz, 5.8, 3, 5.8, 0, 0xb22b20, 9, 0, 0); B.lights.push(cx, gy + chH + 1, cz); B.foot2(cx, cz, 4, gy + chH); }
+            B.seed = null; B.base = null;
+          }
+        } else if (kind === "residential") {
+          pad(0x8c8a84, 11);
+          const [h0, h1] = M.res || [12, 40], n = r() < 0.5 ? 2 : 1;
+          for (let k2 = 0; k2 < n; k2++) {
+            const [tx, tz] = n === 2 ? at(x, z, (k2 ? 1 : -1) * half2 * 0.5, 0) : [x, z];
+            K.tower(B, { x: tx, z: tz, y: base, w: n === 2 ? half2 * 0.8 : half2 * 1.6, d: half2 * RJ.lerp(0.7, 1.5, r()), h: RJ.lerp(h0, h1, Math.pow(r(), 1.3)) * RJ.lerp(1, 0.75, RJ.smooth(T.outer, MR, bd)), ry: yaw, glass: r() < 0.15, P: Pal, form: pick(M.resForms || ["box"], r), crown: 0, spire: 0 }, r);
+          }
+          if (r() < 0.6) { const [tx, tz] = at(x, z, half2 * 0.9, half2 * 0.9); B.seed = r() * 97; B.treeAt(tx, gy, tz, RJ.lerp(6, 11, r()), pick(T.trees.cols, r), treeKind(r)); B.seed = null; }
+        } else { // suburb: a street block of houses with gardens
+          pad(0x5d7e45, 12);
+          const nb = M.perBlock || 6, cols = nb >= 9 ? 3 : 2, rows = Math.ceil(nb / cols), [hw0, hw1] = M.house || [9, 12], [hh0, hh1] = M.houseH || [6, 9];
+          for (let a2 = 0; a2 < cols; a2++) for (let b2 = 0; b2 < rows; b2++) {
+            if (r() < 0.12) continue;
+            const ox = ((a2 + 0.5) / cols - 0.5) * (G2 - ST2) * 0.95, oz = ((b2 + 0.5) / rows - 0.5) * (G2 - ST2) * 0.95;
+            const [hx, hz] = at(x, z, ox, oz), hy = groundAt(hx, hz), hw = RJ.lerp(hw0, hw1, r()), hh2 = RJ.lerp(hh0, hh1, r());
+            B.seed = r() * 97; B.base = hy;
+            if (M.flat) { B.add("box", false, hx, hy - 0.5, hz, hw, hh2 * 0.8, hw * 0.85, yaw, pick([0xf2ebe0, 0xe8dcc8, 0xf6f2ea, 0xd9c9a8], r), 0, 0.5, 0); if (r() < (M.pool || 0)) { const [px2, pz2] = at(hx, hz, hw * 0.75, 0); B.add("box", false, px2, hy - 0.2, pz2, 4, 0.5, 7, yaw, 0x2f9ad0, 9, 0, 0); } }
+            else B.add("gable", false, hx, hy - 0.4, hz, hw, hh2, hw * RJ.lerp(0.8, 1.2, r()), yaw + (r() < 0.5 ? 0 : Math.PI / 2), pick(Pal.stone, r), 0, RJ.lerp(0.3, 0.6, r()), 0);
+            if (r() < 0.7) B.treeAt(...at(hx, hz, hw * 0.75, hw * 0.6).flatMap((v, ii) => ii ? [hy, v] : [v]), RJ.lerp(5, 10, r()), pick(T.trees.cols, r), treeKind(r));
+            B.seed = null; B.base = null;
+            B.foot2(hx, hz, hw * 0.55, hy + hh2);
+          }
+        }
+      }
+    }
+    X.lm.metroBlocks = metroCount.blocks;
     const roofCols = [Pal.roof || 0x8a4a32, Pal.roof2 || 0x5a5c60];
     for (const L of lots) {
       if (L.outer) {
@@ -339,7 +489,6 @@
     }
     // ---------- parks, plazas and parking: the breathing spaces between the towers ----------
     const blockIn = g - T.street - 6;
-    const at = (x, z, ox, oz) => [x + Math.cos(yaw) * ox + Math.sin(yaw) * oz, z - Math.sin(yaw) * ox + Math.cos(yaw) * oz];
     for (const sp of special) {
       B.seed = r() * 97; B.base = sp.y;
       if (sp.kind === "park") {
@@ -366,6 +515,7 @@
         }
       }
       B.seed = null; B.base = null;
+      if (RJ.living && (sp.kind === "plaza" || sp.big)) RJ.living.addZone({ x: sp.x, z: sp.z, y: sp.y + 0.45, r: blockIn * 0.42, n: sp.kind === "plaza" ? 90 : 60 });
     }
     // ---------- waterfront: seawall and promenade, a container port with gantry cranes, a marina ----------
     const coastal = [...edge.keys()].sort((a, b) => a - b);
@@ -479,6 +629,21 @@
       const hw = K.highway(grp, pts, { Y: S.elev + 22, ground: S.elev + 0.4, width: 22, lamp: id === "dubai" ? 0xffc870 : 0xffd9a0 });
       solids.push(...hw.solids); paths.push(...hw.paths); hws.push(hw);
     }
+    // the metro network: ring road and radial expressways on viaducts following the ground, elevated rail lines with stations
+    const gAll = (x, z) => Math.max(groundAt(x, z), peakH(x, z));
+    const toW = (R) => R.map(([a, b]) => { const [x, z] = c(a, b); return { x, z }; });
+    for (const R of roadRuns) {
+      const hw = K.highway(grp, toW(R), { groundAt: gAll, clear: 11, width: 24, ramp: 380, lamp: id === "dubai" ? 0xffc870 : 0xffd9a0 });
+      solids.push(...hw.solids); paths.push(...hw.paths); hws.push(hw);
+    }
+    const rails = [], trains = [];
+    for (const R of railRuns) {
+      const rl = K.rail(grp, toW(R), { groundAt: gAll, clear: 13, ramp: 420, stationEvery: 1400 });
+      solids.push(...rl.solids); rails.push(rl);
+      trains.push(K.trains(grp, rl, { speed: 24, cars: 6, headway: 240, livery: T.trainLivery || (id === "tokyo" ? 0xd8e0d0 : id === "hk" ? 0xc8102e : id === "chicago" ? 0xb8bcc0 : id === "dubai" ? 0xd6d0c4 : 0xe0e4e8) }));
+    }
+    X.lm.rails = rails;
+    if (RJ.living) for (const rl of rails) for (const d of rl.stations) { const o = {}; rl.track.sample(d, 7.2, o); RJ.living.addZone({ x: o.x, z: o.z, y: o.y + 1.1, r: 45, n: 40 }); }
     // street-level traffic along the avenues of the core
     const stR = Math.min(coreR, S.coast - 250);
     for (let i = -Math.floor(stR / g); i <= stR / g; i++) {
@@ -521,21 +686,6 @@
         paths.push(K.path(ax, az, bx2, bz2, T.bridge.deck + 0.4));
       }
     }
-    // Victoria Peak behind Hong Kong
-    if (T.peak) {
-      const [px, pz] = c(T.peak.s, T.peak.p), py = Math.max(groundAt(px, pz), S.elev);
-      const hp = (u) => Math.pow(1 - u, 1.5);
-      const geo = (function () { const pts = []; for (let i = 0; i <= 30; i++) { const u = i / 30; pts.push(new THREE.Vector2(Math.max(u * T.peak.R, 0.01), hp(u) * T.peak.H)); } const lg = new THREE.LatheGeometry(pts.reverse(), 48); lg.computeVertexNormals(); return lg; })();
-      const pm = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x3f5e36, roughness: 0.95 })); pm.position.set(px, py - 5, pz); pm.castShadow = pm.receiveShadow = true; grp.add(pm);
-      X.peaks.push({ x: px, z: pz, R: T.peak.R, H: T.peak.H, hp, base: py - 5, sx: 1, sz: 1 });
-      // towers climbing the Peak's lower slopes
-      for (let i = 0; i < 500; i++) {
-        const a = r() * TAU, rr = RJ.lerp(0.45, 0.85, r()) * T.peak.R, x = px + Math.cos(a) * rr, z = pz + Math.sin(a) * rr;
-        if (Math.cos(a) * S.sx + Math.sin(a) * S.sz < 0.2) continue;
-        const y = Math.max(peakH(x, z), groundAt(x, z)); if (y < 2) continue;
-        K.tower(B, { x, z, y: y - 4, w: RJ.lerp(22, 32, r()), d: RJ.lerp(22, 32, r()), h: RJ.lerp(60, 170, r()), ry: yaw, glassP: 0.2, P: Pal, form: "box" }, r);
-      }
-    }
     // Chicago River with its low bridges (raised so you can fly the river), Navy Pier and its Ferris wheel
     if (T.river) {
       const [ax, az] = c(T.river.from, T.river.p), [bx, bz] = c(T.river.to, T.river.p), L = Math.hypot(bx - ax, bz - az);
@@ -574,13 +724,15 @@
     if (X.lm.favela) for (const [x, z] of X.lm.favela) { const y = peakH(x, z); if (y > 0) K.tower(B, { x, z, y: y - 1.5, w: RJ.lerp(5, 9, r()), d: RJ.lerp(5, 9, r()), h: RJ.lerp(4, 9, r()), ry: r() * TAU, glassP: 0, P: { stone: [0xe8b04a, 0xd9563a, 0x4f9ad8, 0x6fbf73, 0xe9e0cf, 0xc74a8e], glass: [0x888888] }, form: "box", st: 0, lit: 0.5 }, r); }
     if (id === "dubai") for (const rc of X.rects) if (rc.top === 2 && rc.hw < 40) for (let k = -rc.hl + 20; k < rc.hl - 10; k += 34) for (const sg2 of [-1, 1]) K.tower(B, { x: rc.x + rc.ux * k - rc.uz * sg2 * 16, z: rc.z + rc.uz * k + rc.ux * sg2 * 16, y: 2, w: 12, d: 12, h: RJ.lerp(6, 10, r()), ry: Math.atan2(rc.ux, rc.uz), glassP: 0, P: { stone: [0xf2ebe0, 0xe8dcc8], glass: [0x9fb6c4] }, form: "box", st: 0 }, r);
 
-    X.lm.stats = { edge: edge.size, special: special.length, port: T.port, marina: T.marina, hw: hws.length };
+    X.lm.stats = { special: special.length, port: !!T.port, marina: T.marina != null, hw: hws.length, rails: rails.length, metroBlocks: X.lm.metroBlocks, inst: Object.values(B.L).reduce((a, L) => a + L.length / 13, 0) };
     const meshes = K.meshes(B, grp, Pal);
     const heightAt = K.grid(B);
     const far = K.farSkyline(B, W.scene, W.BACK);
     const streets = K.streets(grp, S, { R: stR, block: g, aveEvery: T.aveEvery || 4, street: T.street, lamp: id === "dubai" ? 0xffc870 : id === "tokyo" || id === "hk" ? 0xfff0e0 : 0xffb066 });
-    const traffic = K.traffic(grp, S, { cars: id === "dubai" ? 380 : 650 }, paths);
+    for (const hw of hws) for (const hp of hw.paths) { hp.lanes = [2.6, 6.2, 9.4]; hp.speed = [22, 30]; }
+    const traffic = K.traffic(grp, paths, { cars: 1100, leftHand: id === "tokyo" || id === "hk", density: (P, d) => P.prof ? 0.8 : 0.55 + 0.3 * Math.random() * 0 });
     const nn = K.neon(grp, neon);
+    const netMeshes = [...hws.flatMap((h) => h.meshes), ...rails.flatMap((h) => h.meshes)];
     const av = K.avLights(B, grp);
 
     /* ---------- the race route: sea approach, under the bridge, down the canyon, the slalom, up the hero ---------- */
@@ -608,26 +760,46 @@
       meshes, far, count: B.foot.length / 4,
       heightAt: (x, z) => heightAt(x, z),
       update(dt, cam, d) {
-        traffic.update(dt, d < 9000);
+        traffic.update(dt, cam, d < (MR + 3000));
+        for (const tn of trains) tn.update(dt, cam, d < MR + 6000);
         if (nn) nn.update();
         if (av) av.update(performance.now() / 1000);
-        for (const hw of hws) hw.update();
+        for (const hw of hws) { hw.update(); }
+        for (const m of netMeshes) { const bs = m.geometry.boundingSphere; m.visible = bs.center.distanceTo(cam.position) - bs.radius < 14000; }
         streets.visible = d < 16000;
         if (X.lm.wheel) { X.lm.wheel.rotation.z += dt * 0.05; X.lm.wheel.material.emissiveIntensity = K.NIGHT.value * 1.5; }
       }
     };
   }
-  CI.route = (id) => (CI.built[id] && CI.built[id].route ? CI.built[id].route.map((v) => v.clone()) : null);
+  CI.route = (id) => (CI.ensure(id), CI.built[id] && CI.built[id].route ? CI.built[id].route.map((v) => v.clone()) : null);
 
   /* ======================= build ======================= */
-  CI.build = function (id) {
+  /** Cities build lazily: a light stand-in until the camera comes within 50 km (or a flight or route needs it). */
+  CI.lazy = function (id) {
+    const S = CI.sites[id]; if (!S) return null;
+    const lm = { group: null, cx: S.x, cz: S.z, s: S, marker: V3(S.x, S.elev + 500, S.z), far: [], lazy: true,
+      heightAt: () => -Infinity, solidAt: () => false,
+      update: (dt, cam) => { if (Math.hypot(cam.position.x - S.x, cam.position.z - S.z) < 50000) CI.ensure(id); } };
+    CI.stub[id] = lm;
+    return lm;
+  };
+  CI.stub = {};
+  CI.ensure = function (id) {
+    if (CI.built[id] || !CI.sites[id]) return CI.built[id] || null;
+    const t0 = performance.now();
+    const lm = CI.build(id, CI.stub[id]);
+    if (lm && lm.group && !lm.group.parent) RJ.world.scene.add(lm.group);
+    console.log("City built: " + id + " in " + Math.round(performance.now() - t0) + " ms");
+    return lm;
+  };
+  CI.build = function (id, target) {
     const S = CI.sites[id]; if (!S) return null;
     const W = RJ.world;
     const grp = new THREE.Group(); W.scene.add(grp);
     const c = (s, p) => [S.x + S.sx * s + S.px * p, S.z + S.sz * s + S.pz * p]; // sea-axis / coast-axis coords
-    const groundAt = (x, z) => W.ground(x, z);
+    const groundAt = (x, z) => (RJ.living && RJ.living.blocked && RJ.living.blocked(x, z) ? -5 : W.ground(x, z)); // airports keep their platforms clear
     const rects = [], peaks = [], keep = [];
-    const lm = { group: grp, cx: S.x, cz: S.z, marker: V3(S.x, S.elev + 500, S.z), s: S, far: [] };
+    const lm = Object.assign(target || {}, { group: grp, cx: S.x, cz: S.z, marker: V3(S.x, S.elev + 500, S.z), s: S, far: [] }, { lazy: false });
     P.length = 0;
     const solid = (mesh) => { mesh.castShadow = true; mesh.receiveShadow = true; grp.add(mesh); return mesh; };
     const vmat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0.05 });
@@ -753,7 +925,7 @@
     lm.update = (dt, cam) => {
       const d = Math.hypot(cam.position.x - S.x, cam.position.z - S.z);
       grp.visible = d < 60000;
-      for (const m of city.meshes) { const t = m.userData.tile; m.visible = Math.hypot(cam.position.x - t.x, cam.position.z - t.z) < 15000; } // beyond: the far skyline twin
+      for (const m of city.meshes) { const t = m.userData.tile; m.visible = Math.hypot(cam.position.x - t.x, cam.position.z - t.z) - t.TI * 0.7 < t.far * (RJ.settings.quality === "low" ? 0.7 : 1); } // beyond: the far skyline twin
       RJ.cityKit.NIGHT.value = RJ.clamp(1 - RJ.smooth(-4, 8, W.sunElev), 0, 1);
       // wet streets and facades follow the local rain, drying slowly after it stops
       RJ.cityKit.wetTick(dt);

@@ -302,8 +302,10 @@
     }
     function applySites(o, x, z) {
       for (const st of SITES) {
-        const dx = x - st.x, dz = z - st.z, R = (st.r || st.len) + (st.fall || 400);
+        const dx = x - st.x, dz = z - st.z, R = Math.max((st.r || st.len) + (st.fall || 400), (st.plain || 0) * 1.1);
         if (dx * dx + dz * dz > R * R) continue;
+        // a megacity's plain: hills above the city level are pressed down toward it (lowland and sea untouched)
+        if (st.plain && o.h > st.elev) { const d = Math.sqrt(dx * dx + dz * dz), k = 1 - smooth(st.plain * 0.75, st.plain * 1.1, d); if (k > 0) o.h = st.elev + (o.h - st.elev) * (1 - k * (1 - (st.plainK || 0.2))); }
         const m = siteMask(st, x, z);
         if (m <= 0) continue;
         if (st.type === "plateau") {
@@ -609,6 +611,8 @@
       if (SITES.length) for (const st of SITES) {
         if (st.type !== "plateau" && st.type !== "flat" && st.type !== "pad") continue;
         const dx = x - st.x, dz = z - st.z, R = (st.r || st.len) + 50;
+        // the megacities' metro rings: concrete, asphalt and roofs between the buildings, fading out at the city edge
+        if (st.urban && h > 0.8) { const d = Math.sqrt(dx * dx + dz * dz); if (d < st.urban * 1.06) { mix3(T1, C.urbanA, C.urbanB, clamp(0.5 + v2 * 0.7, 0, 1)); mix3(out, out, T1, (1 - smooth(st.urban * 0.8, st.urban * 1.06, d)) * 0.5 * smooth(0.8, 3, h)); } }
         // Dubai sits in desert: sand and dry scrub for ~9 km around the city
         if (st.kind === "dubai") { const d = Math.sqrt(dx * dx + dz * dz), w = 1 - smooth(st.r + 1500, st.r + 9000, d); if (w > 0 && h > 0.5) mix3(out, out, C.sand, w * 0.85 * smooth(0.5, 4, h)); } if (dx * dx + dz * dz > R * R * 4) continue;
         const m = siteMask(st, x, z); if (m > 0.97) { mix3(out, out, C.dryGrass, 0.3); mix3(out, out, C.rock, st.type === "plateau" ? 0.25 : 0.1); }

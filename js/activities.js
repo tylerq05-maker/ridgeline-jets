@@ -237,7 +237,7 @@
   ACT.paper = {
     name: "Paper Plane", desc: "Launch a paper dart off the top of the city's tallest tower and land it in the target circle far below.", aircraft: "paperplane",
     start() {
-      const C = RJ.cities, lm = C && (C.built.dubai || C.built.tokyo);
+      const C = RJ.cities, lm = C && (C.ensure("dubai") || C.ensure("tokyo"));
       if (C && C.built.dubai) { const S = C.sites.dubai, x = S.x - S.sx * 800, z = S.z - S.sz * 800, y = RJ.world.terrainHeight(x, z) + 590; return { pos: V3(x + S.sx * 55, y, z + S.sz * 55), yaw: Math.atan2(-S.sx, -S.sz), speed: 14, tower: "Burj Khalifa (585 m deck)" }; }
       if (RJ.nyc) { const [x, z] = RJ.nyc.esbWorld(); return { pos: V3(x + 30, 400, z), yaw: 0, speed: 14, tower: "Empire State Building" }; }
       return null;

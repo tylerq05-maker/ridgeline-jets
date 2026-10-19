@@ -479,7 +479,7 @@
     if (RJ.realms) RJ.realms.build(add);
     if (RJ.cannon && RJ.cannon.site) tryB("cannon", () => RJ.cannon.build(), RJ.cannon.site);
     if (RJ.ye && RJ.ye.site) tryB("ye", () => RJ.ye.build(), RJ.ye.site);
-    if (RJ.cities) for (const id in RJ.cities.sites) tryB(id, () => RJ.cities.build(id), RJ.cities.sites[id]);
+    if (RJ.cities) for (const id in RJ.cities.sites) tryB(id, () => RJ.cities.lazy(id), RJ.cities.sites[id]);
     if (RJ.sf) try { RJ.sf.register(add); } catch (e) { console.warn("San Francisco failed", e); }
     if (RJ.nyc) {
       // New York builds lazily: the first time the camera comes within 45 km (or a flight starts there)
@@ -488,13 +488,16 @@
         update: (dt, cam) => { if (!RJ.nyc.ready) { if (Math.hypot(cam.position.x - cx, cam.position.z - cz) < 45000) RJ.nyc.ensure(); else return; } RJ.nyc.update(dt, cam); } });
     }
     A.built = true;
+    if (RJ.living) try { RJ.living.plan(); } catch (e) { console.warn("Living world failed", e); }
   };
   A.heightAt = function (x, z) {
     let h = -Infinity;
     for (const lm of A.list) if (lm.heightAt && lm.id !== "castle") { const v = lm.heightAt(x, z); if (v > h) h = v; }
+    if (RJ.living && RJ.living.airports.length) { const v = RJ.living.heightAt(x, z); if (v > h) h = v; }
     return h;
   };
   A.solidAt = function (p) {
+    if (RJ.living && RJ.living.solidAt(p)) return true;
     for (const lm of A.list) if (lm.solidAt && lm.solidAt(p)) return true;
     return false;
   };

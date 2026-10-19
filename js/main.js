@@ -493,24 +493,24 @@
     RJ.state.mode = "loading";
     RJ.ui.gameChrome(false);
     RJ.ui.show("scr-loading");
-    setLoad(0, kind === "mp" ? "Joining your squad…" : kind === "fight" ? "Briefing pilots and generating the arena…" : kind === "challenge" ? "Laying out the course…" : "Generating terrain…");
+    setLoad(0, kind === "mp" ? "Joining your squad…" : kind === "fight" ? "Briefing pilots and generating the arena…" : kind === "combatsim" ? "Fuelling both jets and clearing the airspace…" : kind === "drag" ? "Preparing the strip…" : kind === "challenge" ? "Laying out the course…" : "Generating terrain…");
     RJ.fx.clear();
-    const mode = kind === "mp" ? new RJ.mp.Multi(opts) : kind === "free" ? new RJ.modes.FreeFlight(opts) : kind === "challenge" ? new RJ.challenges.Challenge(opts) : RJ.modes.isMission(opts.match) ? new RJ.modes.Mission(opts) : opts.match === "war" && RJ.modes.AirWar ? new RJ.modes.AirWar(opts) : new RJ.modes.Dogfight(opts);
+    const mode = kind === "combatsim" ? new RJ.combatsim.CombatSim(opts) : kind === "drag" ? new RJ.drag.DragRace(opts) : kind === "mp" ? new RJ.mp.Multi(opts) : kind === "free" ? new RJ.modes.FreeFlight(opts) : kind === "challenge" ? new RJ.challenges.Challenge(opts) : RJ.modes.isMission(opts.match) ? new RJ.modes.Mission(opts) : opts.match === "war" && RJ.modes.AirWar ? new RJ.modes.AirWar(opts) : new RJ.modes.Dogfight(opts);
     RJ.game.mode = mode;
     try { await mode.setup((p) => setLoad(p)); }
     catch (e) { console.error(e); RJ.ui.toast("Couldn't start the flight: " + e.message); RJ.quitToMenu(); return; }
     RJ.ui.hideAll();
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     RJ.ui.gameChrome(true);
-    cam.set(RJ.settings.cam, true);
-    cam.reset(mode.player);
-    RJ.lever.reset(mode.player); RJ.nav.reset(); RJ.sim.reset();
+    if (mode.player) { cam.set(RJ.settings.cam, true); cam.reset(mode.player); RJ.lever.reset(mode.player); }
+    RJ.nav.reset(); RJ.sim.reset();
     cam.fov = RJ.settings.fov;
     RJ.state.mode = "playing";
     RJ.input.keys.clear();
     clock.getDelta();
     RJ.audio.welcome(kind);
-    if (RJ.companion) RJ.companion.start(kind);
+    if (RJ.companion && !mode.spectator && !mode.customFrame) RJ.companion.start(kind);
+    if (RJ.lever.el && !mode.spectator && !mode.customFrame) RJ.lever.el.style.display = "";
   };
   RJ.restartGame = function () { const c = RJ.game.config; if (c) RJ.startGame(c.kind, c.opts); };
   RJ.quitToMenu = async function () {
@@ -532,6 +532,8 @@
     const back = RJ.ui.returnTo; RJ.ui.returnTo = null;
     if (back === "scr-chal") { RJ.ui.renderChal(); RJ.ui.show("scr-chal"); }
     else if (back === "scr-mp" || RJ.mp.inLobby()) { RJ.ui.renderMP(); RJ.ui.show("scr-mp"); }
+    else if (back === "scr-drag" && RJ.drag) RJ.drag.open();
+    else if (back === "scr-csim" && RJ.combatsim) RJ.combatsim.open();
     else RJ.ui.show("scr-main");
   };
   RJ.pause = function () {
@@ -540,7 +542,7 @@
     RJ.audio.setGun(false); RJ.audio.tone(null); RJ.audio.warn(null);
     if (RJ.audio.ctx) RJ.audio.ctx.suspend();
     const m = RJ.game.mode;
-    $("pz-info").textContent = m ? (m.kind === "free" ? "Free Flight" : m.kind === "challenge" ? m.def.name : "Dogfight") + " · " + m.player.spec.name : "";
+    $("pz-info").textContent = m ? (m.kind === "combatsim" ? "Jet Combat Simulator · " + m.A.spec.short + " vs " + m.B.spec.short : m.kind === "drag" ? "Drag Race Simulator" : (m.kind === "free" ? "Free Flight" : m.kind === "challenge" ? m.def.name : "Dogfight") + " · " + m.player.spec.name) : "";
     RJ.ui.show("scr-pause");
   };
   RJ.resume = function () {
@@ -582,6 +584,9 @@
     restoreSim();
     const mode = RJ.game.mode, pl = mode.player, I = RJ.input;
     if (I.action("pause")) { RJ.pause(); return; }
+    if (mode.customFrame) { mode.frame(dt); return; } // the drag race runs its own simulation, camera and render
+    const spect = !!mode.spectator;
+    if (spect) mode.input(I);
     if (I.action("retry") && mode.kind === "challenge") { RJ.restartGame(); return; }
     if (I.action("replay")) { if (RJ.replay.start("playing")) return; }
     if (I.action("photo")) { RJ.photo.start("playing"); return; }
@@ -591,7 +596,7 @@
     if (I.action("map")) RJ.nav.toggle();
     if (I.action("hud")) { RJ.settings.hud = !RJ.settings.hud; RJ.saveSettings(); }
     if (I.action("mute")) { RJ.settings.muted = !RJ.settings.muted; RJ.saveSettings(); RJ.ui.flash(RJ.settings.muted ? "SOUND OFF" : "SOUND ON", null, 0.8); }
-    if (pl.alive) {
+    if (pl.alive && !spect) {
       const ax = I.axes();
       Object.assign(pl.input, { pitch: ax.pitch, roll: ax.roll, yaw: ax.yaw, thr: ax.thr, thrAbs: ax.thrAbs, ab: ax.ab, brake: ax.brake, guns: ax.guns });
       RJ.lever.apply(pl, dt);
@@ -615,7 +620,7 @@
       } else { I.action("missile"); I.action("target"); }
       if (I.action("flares")) RJ.combat.dropFlares(pl);
     }
-    simAcc += dt;
+    simAcc += dt * (mode.timeScale || 1);
     let steps = 0;
     while (simAcc >= SIM_DT && steps < SIM_MAX) {
       snapPrev();
@@ -632,15 +637,15 @@
     if (RJ.combat.crowd) RJ.combat.drawCrowd(camera);
     if (RJ.airspace && RJ.airspace.on) RJ.airspace.draw(camera);
     const player = RJ.game.mode.player;
-    const focus = !player.alive && mode.spectate && mode.spectate.alive ? mode.spectate : player;
+    const focus = spect ? (mode.focus && mode.focus.alive ? mode.focus : player.alive ? player : mode.B || player) : !player.alive && mode.spectate && mode.spectate.alive ? mode.spectate : player;
     // continuous shake sources: transonic buffet and low, fast turbulence
     const m = focus.mach;
     const buffet = focus.state === "flying" ? RJ.smooth(0.86, 0.98, m) * (1 - RJ.smooth(1.0, 1.06, m)) : 0;
     const turb = focus.state === "flying" ? RJ.clamp((focus.speed - 120) / 400, 0, 1) * (1 - RJ.smooth(40, 600, focus.agl)) : focus.onGround ? RJ.clamp(focus.speed / 120, 0, 1) * 0.3 : 0;
     cam.base = buffet * 0.4 + turb * 0.35 + (RJ.world.inCloud || 0) * 0.25 + (focus.buffet || 0) * 0.45 + (focus.turb || 0) * 0.12;
     RJ.audio.buffet(focus === player ? buffet * 0.8 + turb * 0.25 + (focus.buffet || 0) * 0.6 : 0);
-    RJ.lever.frame(player, camera, dt);
-    const camMode = cam.update(dt, focus);
+    if (!spect) RJ.lever.frame(player, camera, dt); else if (RJ.lever.el) RJ.lever.el.style.display = "none";
+    const camMode = spect ? mode.camera(camera, dt) : cam.update(dt, focus);
     RJ.nav.update(player, camera, dt);
     RJ.world.update(dt, camera, focus.pos, focus.vel, focus.agl);
     RJ.fx.update(dt, camera, renderer);
@@ -669,16 +674,17 @@
     const missileIn = player.alive && player.incoming.length > 0;
     const lockedOn = player.alive && player.lockedByT > 0;
     RJ.audio.warn(missileIn ? "missile" : lockedOn ? "lock" : null);
-    RJ.ui.banner(missileIn ? "missile" : lockedOn ? "lock" : null);
-    if (RJ.companion) RJ.companion.update(dt, player, turb);
+    RJ.ui.banner(spect ? null : missileIn ? "missile" : lockedOn ? "lock" : null);
+    if (RJ.companion && !spect) RJ.companion.update(dt, player, turb);
     // G-effects
     // G tolerance: sustained high G narrows the view to a tunnel, then G-LOC (the pilot blacks out for a few
     // seconds and the stick goes slack). Negative G reddens the view. Starfighters have inertial dampers.
     const fighter = player.spec.flight.gmax > 5 && player.spec.flight.model !== "space";
-    if (player.alive && fighter && player.g > 7) gStress += (player.g - 7) * 0.1 * dt;
+    if (spect) gStress = 0;
+    else if (player.alive && fighter && player.g > 7) gStress += (player.g - 7) * 0.1 * dt;
     else gStress = Math.max(0, gStress - dt * (gloc > 0 ? 0.2 : 0.6));
     gStress = Math.min(gStress, 1.3);
-    if (gStress >= 1.25 && gloc <= 0 && player.alive) { gloc = 3; RJ.ui.flash("G-LOC", "Ease off the pull", 2.5, true); }
+    if (gStress >= 1.25 && gloc <= 0 && player.alive && !spect) { gloc = 3; RJ.ui.flash("G-LOC", "Ease off the pull", 2.5, true); }
     gloc = Math.max(0, gloc - dt);
     RJ.glocActive = gloc > 0.6;
     const neg = player.alive && player.g < -1.8;
@@ -702,6 +708,7 @@
     if (player.alive && player.state === "flying" && player.vel.y < -5) pullUp = player.agl / -player.vel.y < 4;
     if (player.alive && player.state === "flying" && player.agl < 25 && player.speed > 60 && player.gearT < 0.9) pullUp = pullUp || player.vel.y < 0;
     const extras = mode.hudExtras();
+    if (spect) { RJ.hud.clear(); mode.hud(dt); RJ.ui.status(mode.status()); RJ.ui.objective(""); return; }
     RJ.hud.draw(Object.assign({ player: focus === player ? player : focus, camera, camMode: camMode === "boom" ? "cinematic" : camMode, cockpit3d: !!overlays, others: RJ.combat.aircraft, pullUp }, focus === player ? extras : {}));
     RJ.ui.status(mode.status());
     RJ.ui.objective(camMode === "cinematic" ? `Cinematic camera · ${RJ.keyLabel(RJ.settings.keys.camera)} to change view` : mode.objective());

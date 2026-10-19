@@ -393,13 +393,18 @@
     shapes();
     const mats = { G: facadeMat(true, P), S: facadeMat(false, P) }, out = [];
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), c = new THREE.Color(), Y = V3(0, 1, 0), p = V3(), s = V3();
-    // split every shape/material list into 2.5 km tiles so whole districts can be frustum- and distance-culled
-    const TILE = 2500, tiles = {};
+    // three detail tiers, each split into tiles so districts are frustum- and distance-culled:
+    //   clutter (trees, roof plant, cars, boats, containers, paving)  1.5 km tiles, shown within 3.5 km
+    //   low buildings (houses, sheds, low blocks under 22 m)           3 km tiles, shown within 10 km
+    //   towers                                                         4 km tiles, shown within 24 km (the far skyline twin takes over)
+    const TIERS = [{ T: 1500, far: 3500, shadow: false }, { T: 3000, far: 10000, shadow: true }, { T: 4000, far: 24000, shadow: true }], tiles = {};
+    const tierOf = (L, i) => { const st = L[i + 8], h = L[i + 4]; if (st > 9.5 || h < 3 || (st > 8.5 && st < 9.5 && h < 9 && L[i + 3] < 8)) return 0; return h + L[i + 1] - L[i + 12] < 22 ? 1 : 2; };
     for (const k in B.L) {
       const L = B.L[k];
       for (let i = 0; i < L.length; i += 13) {
-        const key = k + ":" + Math.floor(L[i] / TILE) + "," + Math.floor(L[i + 2] / TILE);
-        const t = tiles[key] || (tiles[key] = { k, L: [], x: (Math.floor(L[i] / TILE) + 0.5) * TILE, z: (Math.floor(L[i + 2] / TILE) + 0.5) * TILE });
+        const tr = tierOf(L, i), TI = TIERS[tr].T;
+        const key = k + ":" + tr + ":" + Math.floor(L[i] / TI) + "," + Math.floor(L[i + 2] / TI);
+        const t = tiles[key] || (tiles[key] = { k, L: [], tier: tr, far: TIERS[tr].far, TI, x: (Math.floor(L[i] / TI) + 0.5) * TI, z: (Math.floor(L[i + 2] / TI) + 0.5) * TI });
         for (let j = 0; j < 13; j++) t.L.push(L[i + j]);
       }
     }
@@ -415,10 +420,11 @@
       }
       geo.setAttribute("aWin", new THREE.InstancedBufferAttribute(win, 4));
       geo.setAttribute("aBase", new THREE.InstancedBufferAttribute(bas, 1));
-      im.castShadow = true; im.receiveShadow = true;
+      im.castShadow = TIERS[T.tier].shadow; im.receiveShadow = true;
+      if (T.tier < 2) im.layers.set(5); // small stuff: main camera and shadows only, not the water reflection
       // bounding sphere for culling: the tile's footprint and its tallest piece
       let top = 0; for (let i = 0; i < n; i++) top = Math.max(top, L[i * 13 + 1] + L[i * 13 + 4]);
-      geo.boundingSphere = new THREE.Sphere(V3(T.x, top / 2, T.z), Math.hypot(TILE * 0.75, top / 2) + 120);
+      geo.boundingSphere = new THREE.Sphere(V3(T.x, top / 2, T.z), Math.hypot(T.TI * 0.75, top / 2) + 120);
       im.userData.tile = T;
       grp.add(im); out.push(im);
     }
@@ -543,34 +549,84 @@
     return mesh;
   };
 
-  /** Cars as light points moving along the street grid (and any extra paths: highways, bridges). */
-  K.traffic = function (grp, S, o, paths) {
-    const N = o.cars || 500, geo = new THREE.BoxGeometry(1.9, 1.4, 4.6); geo.translate(0, 0.7, 0);
-    const mat = new THREE.MeshBasicMaterial({ toneMapped: false });
-    const im = new THREE.InstancedMesh(geo, mat, N); im.frustumCulled = false;
-    const cars = [], col = new THREE.Color();
-    for (let i = 0; i < N; i++) {
-      const path = paths[Math.floor(Math.random() * paths.length)];
-      const dir = Math.random() < 0.5 ? 1 : -1;
-      cars.push({ path, t: Math.random(), v: RJ.rand(11, 22) / path.len, dir, lane: dir * RJ.rand(2, 4.5) });
-      im.setColorAt(i, col.setHex(dir > 0 ? 0xfff2d8 : 0xff3020));
+  /* Traffic: vehicles flow in lanes along paths (straight streets from K.path, or sampled roads from K.highway). Each lane
+   * is a steady stream: car k sits at k * spacing + speed * t, so cars never overlap, and a hash per car picks its type,
+   * paint and whether that slot is empty (busy downtown, thinner on the edges). Only the stretch of each road near the
+   * camera is turned into instances; headlights, tail lights and brake-light flicker show at night. */
+  const VEH = [ // length, width, height scale, share
+    { n: "car", s: [1, 1, 1], w: 0.5 }, { n: "suv", s: [1.05, 1.08, 1.25], w: 0.2 }, { n: "van", s: [1.2, 1.1, 1.55], w: 0.1 },
+    { n: "taxi", s: [1, 1, 1], w: 0.06, col: 0xf2c21b }, { n: "bus", s: [2.6, 1.3, 1.95], w: 0.06, col: 0xd8dde0 }, { n: "truck", s: [3.6, 1.3, 2.3], w: 0.08 }
+  ];
+  const PAINT = [0xe8e8e8, 0x1c1d20, 0x8a8f96, 0xb8bcc0, 0x9a1c1c, 0x1c3a7a, 0x2f5d3a, 0xc8c2b4, 0x4a4e52, 0xd06a1a, 0x5a1a1a, 0x24476b];
+  let VGEO = null;
+  function vehGeo() {
+    if (VGEO) return VGEO;
+    const parts = [], lights = [];
+    const add = (arr, w, h, d, x, y, z, c) => { const g = new THREE.BoxGeometry(w, h, d).toNonIndexed(); g.translate(x, y, z); const n = g.attributes.position.count, C = new Float32Array(n * 3), cc = new THREE.Color(c); for (let i = 0; i < n; i++) { C[i * 3] = cc.r; C[i * 3 + 1] = cc.g; C[i * 3 + 2] = cc.b; } g.setAttribute("color", new THREE.BufferAttribute(C, 3)); arr.push(g); };
+    add(parts, 1.8, 0.62, 4.4, 0, 0.62, 0, 0xffffff);              // body (instance paint)
+    add(parts, 1.6, 0.5, 2.2, 0, 1.18, 0.25, 0x2a3440);            // cabin glass
+    add(parts, 1.62, 0.06, 1.9, 0, 1.45, 0.3, 0xffffff);           // roof
+    for (const sx of [-1, 1]) for (const sz of [-1.35, 1.35]) add(parts, 0.26, 0.62, 0.62, sx * 0.82, 0.31, sz, 0x101010); // wheels
+    for (const sx of [-0.6, 0.6]) { add(lights, 0.34, 0.14, 0.05, sx, 0.72, -2.22, 0xfff4dc); add(lights, 0.36, 0.12, 0.05, sx, 0.78, 2.22, 0xff1a10); }
+    const merge = (arr) => { let n = 0; for (const g of arr) n += g.attributes.position.count; const P = new Float32Array(n * 3), N = new Float32Array(n * 3), C = new Float32Array(n * 3); let o = 0; for (const g of arr) { P.set(g.attributes.position.array, o * 3); N.set(g.attributes.normal.array, o * 3); C.set(g.attributes.color.array, o * 3); o += g.attributes.position.count; } const G = new THREE.BufferGeometry(); G.setAttribute("position", new THREE.BufferAttribute(P, 3)); G.setAttribute("normal", new THREE.BufferAttribute(N, 3)); G.setAttribute("color", new THREE.BufferAttribute(C, 3)); return G; };
+    return (VGEO = { body: merge(parts), lights: merge(lights) });
+  }
+  const hh = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
+  K.traffic = function (grp, paths, o) {
+    o = o || {};
+    const N = o.cars || 900, G = vehGeo();
+    const bodyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.45 });
+    const lightMat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
+    const im = new THREE.InstancedMesh(G.body, bodyMat, N), lm = new THREE.InstancedMesh(G.lights, lightMat, N);
+    im.frustumCulled = lm.frustumCulled = false; im.castShadow = false; im.count = lm.count = 0;
+    im.setColorAt(0, new THREE.Color()); grp.add(im); grp.add(lm); im.layers.set(5); lm.layers.set(5);
+    const lanes = o.lanes || [2.0, 5.2], R = o.range || 2600, spd = o.speed || [11, 17], gap = o.gap || [26, 60];
+    // per path: lane streams (both directions)
+    for (const P of paths) {
+      P.streams = [];
+      const LN = P.lanes || lanes, SP = P.speed || spd, side = o.leftHand ? 1 : -1;
+      LN.forEach((ln, i) => { for (const dir of [1, -1]) P.streams.push({ lane: ln * dir * side, dir, v: RJ.lerp(SP[0], SP[1], hh(i + 1, dir + P.len * 0.001)) * (i === LN.length - 1 ? 0.85 : 1), sp: RJ.lerp(gap[0], gap[1], hh(dir, i * 3.1 + P.len * 0.01)), id: i * 2 + (dir > 0 ? 0 : 1), slow: i === LN.length - 1 }); });
+      if (!P.sample) { // straight street from K.path
+        P.sample = (d, lane, out) => { const f = (((d % P.len) + P.len) % P.len) / P.len; out.x = P.ax + (P.bx - P.ax) * f + P.nx * lane; out.z = P.az + (P.bz - P.az) * f + P.nz * lane; out.y = P.y0 + (P.y1 - P.y0) * f; out.yaw = P.yaw + Math.PI; out.tun = false; return out; };
+        P.nearest = (x, z) => { const ux = (P.bx - P.ax) / P.len, uz = (P.bz - P.az) / P.len, t = RJ.clamp((x - P.ax) * ux + (z - P.az) * uz, 0, P.len); return { d: t, dist: Math.hypot(P.ax + ux * t - x, P.az + uz * t - z) }; };
+      } else if (!P.nearest) {
+        P.nearest = (x, z) => { const pr = P.prof; let bi = 0, bd = Infinity; for (let i = 0; i < pr.length; i += 8) { const d = (pr[i].x - x) ** 2 + (pr[i].z - z) ** 2; if (d < bd) { bd = d; bi = i; } } for (let i = Math.max(0, bi - 8); i < Math.min(pr.length, bi + 9); i++) { const d = (pr[i].x - x) ** 2 + (pr[i].z - z) ** 2; if (d < bd) { bd = d; bi = i; } } return { d: pr[bi].d, dist: Math.sqrt(bd) }; };
+      }
     }
-    grp.add(im);
-    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = V3(), s = V3(1, 1, 1), Y = V3(0, 1, 0);
+    const density = o.density || (() => 0.75);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = V3(), sc = V3(), Y = V3(0, 1, 0), c = new THREE.Color(), out = {};
+    let t = Math.random() * 1000;
     return {
-      im,
-      update(dt, near) {
-        im.visible = near;
-        if (!near) return;
-        const k = 0.35 + NIGHT.value * 1.8; mat.color.setRGB(k, k, k);
-        for (let i = 0; i < N; i++) {
-          const c = cars[i], P = c.path;
-          c.t = (c.t + c.v * dt * c.dir + 1) % 1;
-          const x = P.ax + (P.bx - P.ax) * c.t + P.nx * c.lane, z = P.az + (P.bz - P.az) * c.t + P.nz * c.lane;
-          p.set(x, P.y0 + (P.y1 - P.y0) * c.t, z); q.setFromAxisAngle(Y, P.yaw + (c.dir < 0 ? Math.PI : 0));
-          m4.compose(p, q, s); im.setMatrixAt(i, m4);
+      im, lm,
+      update(dt, cam, near) {
+        im.visible = lm.visible = near && !K.quiet; // quiet: a road closed for an event (the drag race)
+        if (!near || K.quiet) return;
+        t += dt;
+        const k = 0.25 + NIGHT.value * 2.2; lightMat.color.setRGB(k, k, k);
+        let n = 0;
+        for (const P of paths) {
+          const nr = P.nearest(cam.position.x, cam.position.z); if (nr.dist > R) continue;
+          const span = Math.sqrt(R * R - nr.dist * nr.dist);
+          for (const S of P.streams) {
+            const shift = S.v * t * S.dir;
+            const k0 = Math.floor((nr.d - span - shift) / S.sp), k1 = Math.floor((nr.d + span - shift) / S.sp);
+            for (let kk = k0; kk <= k1 && n < N; kk++) {
+              const hk = hh(kk, S.id * 7.3 + P.len * 0.0007);
+              const d = kk * S.sp + shift + (hh(kk, S.id) - 0.5) * S.sp * 0.3;
+              if (d < 0 || d > P.len) { if (!P.loop) continue; }
+              if (hk > density(P, d)) continue;
+              P.sample(d, S.lane, out); if (out.tun) continue;
+              let r = hh(kk * 1.7, S.id + 0.5), ty = VEH[0]; for (const v of VEH) { if ((r -= v.w) <= 0) { ty = v; break; } }
+              if ((ty.n === "truck" || ty.n === "bus") && !S.slow) ty = VEH[0];
+              p.set(out.x, out.y, out.z); q.setFromAxisAngle(Y, out.yaw + (S.dir > 0 ? 0 : Math.PI) + Math.PI);
+              sc.set(ty.s[1], ty.s[2], ty.s[0]); m4.compose(p, q, sc); im.setMatrixAt(n, m4); lm.setMatrixAt(n, m4);
+              im.setColorAt(n, c.setHex(ty.col || PAINT[Math.floor(hh(kk, S.id * 2.1) * PAINT.length)]));
+              n++;
+            }
+          }
         }
-        im.instanceMatrix.needsUpdate = true;
+        im.count = lm.count = n;
+        im.instanceMatrix.needsUpdate = true; lm.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
       }
     };
   };
@@ -588,57 +644,206 @@
   };
 
   /* ======================= elevated expressways ======================= */
-  /** Elevated road along pts [{x, z}] at deck height Y with ramps down to the street at both ends: deck, barriers,
-   *  edge lines, T-pillars, lamp posts. One merged mesh plus a lamp mesh; returns oriented solids and traffic paths. */
+  /** Road along pts [{x, z}]. Two profiles:
+   *   · elevated (o.Y fixed deck, or o.groundAt + o.clear): a viaduct over the city with ramps down at both ends
+   *   · at grade (o.grade): follows the smoothed ground, bridges water and valleys on piers, tunnels through ridges
+   *  Deck, girder, barriers, edge and centre lines, piers, lamp posts and tunnel portals go into one merged mesh
+   *  (plus a lamp mesh). Returns oriented solids, the sampled profile and traffic paths. */
   K.highway = function (grp, pts, o) {
-    const W = o.width || 22, Y = o.Y, gy = o.ground, ramp = o.ramp || 320, solids = [], paths = [];
+    const W = o.width || 22, ramp = o.ramp || 320, solids = [], paths = [], STEP = o.step || 30;
     const pos = [], nor = [], col = [], lamp = [], m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), cc = new THREE.Color();
     const box = (out, x, y, z, sx, sy, sz, yaw, pitch, hex) => {
       const g = new THREE.BoxGeometry(sx, sy, sz).toNonIndexed(); e.set(pitch, yaw, 0, "YXZ"); m4.compose(V3(x, y, z), q.setFromEuler(e), V3(1, 1, 1)); g.applyMatrix4(m4);
       const P = g.attributes.position.array, Nn = g.attributes.normal.array; cc.setHex(hex);
       for (let i = 0; i < P.length; i++) { out.p.push(P[i]); out.n.push(Nn[i]); } for (let i = 0; i < P.length / 3; i++) out.c.push(cc.r, cc.g, cc.b);
+      g.dispose();
     };
     const D = { p: pos, n: nor, c: col }, Lm = { p: lamp, n: [], c: [] };
-    // the profile: up the ramp, along at deck height, down again
-    const segs = [];
-    for (let i = 0; i < pts.length - 1; i++) segs.push([pts[i], pts[i + 1]]);
-    const total = segs.reduce((a, [p0, p1]) => a + Math.hypot(p1.x - p0.x, p1.z - p0.z), 0);
-    const hAt = (t) => gy + (Y - gy) * RJ.smooth(0, ramp, t) * RJ.smooth(total, total - ramp, t);
-    let t0 = 0;
-    for (const [p0, p1] of segs) {
-      const L = Math.hypot(p1.x - p0.x, p1.z - p0.z), ux = (p1.x - p0.x) / L, uz = (p1.z - p0.z) / L, yaw = Math.atan2(ux, uz), STEP = 30;
-      for (let t = 0; t < L - 0.1; t += STEP) {
-        const l = Math.min(STEP, L - t), ta = t0 + t, tb = ta + l, ya = hAt(ta), yb = hAt(tb), ym = (ya + yb) / 2, pitch = -Math.atan2(yb - ya, l);
-        const x = p0.x + ux * (t + l / 2), z = p0.z + uz * (t + l / 2), sl = Math.hypot(l, yb - ya) + 0.3;
-        box(D, x, ym - 0.8, z, W, 1.6, sl, yaw, pitch, 0x3a3c40);                                       // deck
-        box(D, x, ym - 1.9, z, W * 0.7, 1.2, sl, yaw, pitch, 0x8d8f92);                                 // girder
-        for (const sd of [-1, 1]) {
-          box(D, x + uz * sd * (W / 2 - 0.3), ym + 0.55, z - ux * sd * (W / 2 - 0.3), 0.5, 1.1, sl, yaw, pitch, 0xb8b8b4);  // barriers
-          box(D, x + uz * sd * (W / 2 - 1.4), ym + 0.01, z - ux * sd * (W / 2 - 1.4), 0.18, 0.04, sl, yaw, pitch, 0xd8d8d0); // edge lines
-        }
-        if (Math.round(ta / STEP) % 3 === 0) box(D, x, ym + 0.01, z, 0.15, 0.04, sl * 0.5, yaw, pitch, 0xd8d8d0); // dashed centre
-        if (ym - gy > 5 && Math.round(ta / STEP) % 2 === 0) {                                           // T-pillar
-          box(D, x, (gy + ym - 2.5) / 2, z, 2.6, ym - 2.5 - gy, 2.6, yaw, 0, 0x9a9c9e);
-          box(D, x, ym - 3.2, z, W * 0.85, 1.4, 2.8, yaw, 0, 0x9a9c9e);
-        }
-        if (Math.round(ta / STEP) % 2 === 1) {                                                          // lamp posts, alternating sides
-          const sd = Math.round(ta / STEP) % 4 === 1 ? 1 : -1, lx = x + uz * sd * (W / 2 - 0.3), lz = z - ux * sd * (W / 2 - 0.3);
-          box(D, lx, ym + 5, lz, 0.25, 9, 0.25, yaw, 0, 0x777a7e);
-          box(Lm, lx - uz * sd * 1.2, ym + 9.4, lz + ux * sd * 1.2, 2.4, 0.3, 0.7, yaw, 0, 0xffffff);
-        }
-        solids.push({ x, z, ux, uz, hl: l / 2 + 0.2, hw: W / 2, y0: ym - 2.6, y1: ym + 1.2 });
-      }
-      paths.push(K.path(p0.x, p0.z, p1.x, p1.z, hAt(t0) + 0.2, hAt(t0 + L) + 0.2));
-      t0 += L;
+    // sample the polyline every STEP metres
+    const S = []; let tot = 0;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1], L = Math.hypot(b.x - a.x, b.z - a.z);
+      for (let t = 0; t < L; t += STEP) S.push({ x: a.x + (b.x - a.x) * t / L, z: a.z + (b.z - a.z) * t / L, d: tot + t });
+      tot += L;
     }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
-    const mesh = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0.05 }));
-    mesh.castShadow = mesh.receiveShadow = true; grp.add(mesh);
-    const lg = new THREE.BufferGeometry(); lg.setAttribute("position", new THREE.Float32BufferAttribute(lamp, 3));
-    const lmat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false }), lmesh = new THREE.Mesh(lg, lmat); grp.add(lmesh);
-    const lc = new THREE.Color(o.lamp || 0xffc070);
-    return { mesh, solids, paths, update() { lmat.color.copy(lc).multiplyScalar(0.15 + NIGHT.value * 2.2); } };
+    const last = pts[pts.length - 1]; S.push({ x: last.x, z: last.z, d: tot });
+    const G = o.groundAt || (() => o.ground);
+    for (const p of S) p.g = G(p.x, p.z);
+    // deck profile
+    if (o.Y != null && !o.groundAt) { for (const p of S) p.y = o.ground + (o.Y - o.ground) * RJ.smooth(0, ramp, p.d) * RJ.smooth(tot, tot - ramp, p.d); }
+    else {
+      const win = Math.max(1, Math.round((o.grade ? 260 : 360) / STEP));
+      const base = S.map((p) => o.grade ? Math.max(p.g, o.sea != null ? o.sea : 9) : Math.max(p.g, 2));
+      for (let i = 0; i < S.length; i++) { let sum = 0, n = 0; for (let k = -win; k <= win; k++) { const j = i + k; if (j < 0 || j >= S.length) continue; sum += base[j]; n++; } S[i].y = sum / n; }
+      // grade limit (6 %) both ways, then the clearance
+      for (let i = 1; i < S.length; i++) S[i].y = Math.max(S[i].y, S[i - 1].y - STEP * 0.06);
+      for (let i = S.length - 2; i >= 0; i--) S[i].y = Math.max(S[i].y, S[i + 1].y - STEP * 0.06);
+      const cl = o.grade ? 0.8 : (o.clear || 20);
+      for (const p of S) p.y += cl;
+      if (!o.grade) for (const p of S) { const k = RJ.smooth(0, ramp, p.d) * RJ.smooth(tot, tot - ramp, p.d); p.y = p.g + 0.4 + (p.y - p.g - 0.4) * k; }
+    }
+    for (const p of S) p.tun = p.g - p.y > 7; // under a ridge: in a tunnel
+    const hex = o.color || 0x3a3c40, pier = o.pier || 0x9a9c9e;
+    let lastTun = S[0].tun;
+    for (let i = 0; i < S.length - 1; i++) {
+      const A = S[i], B = S[i + 1], l = B.d - A.d; if (l < 0.5) continue;
+      const ux = (B.x - A.x) / l, uz = (B.z - A.z) / l, yaw = Math.atan2(ux, uz), pitch = -Math.atan2(B.y - A.y, l);
+      const x = (A.x + B.x) / 2, z = (A.z + B.z) / 2, ym = (A.y + B.y) / 2, sl = Math.hypot(l, B.y - A.y) + 0.3, gm = (A.g + B.g) / 2;
+      const tun = A.tun && B.tun;
+      if (A.tun !== lastTun) { // tunnel portal
+        box(D, x, ym + 4, z, W + 6, 9, 3, yaw, 0, 0x8a8680); box(D, x, ym + 3.4, z + 0, W - 2, 6.6, 3.4, yaw, 0, 0x0c0c0e); lastTun = A.tun;
+      }
+      if (!tun) {
+        box(D, x, ym - 0.8, z, W, 1.6, sl, yaw, pitch, hex);
+        if (ym - gm > 3) box(D, x, ym - 1.9, z, W * 0.7, 1.2, sl, yaw, pitch, 0x8d8f92);
+        for (const sd of [-1, 1]) {
+          box(D, x + uz * sd * (W / 2 - 0.3), ym + 0.55, z - ux * sd * (W / 2 - 0.3), 0.5, 1.1, sl, yaw, pitch, 0xb8b8b4);
+          box(D, x + uz * sd * (W / 2 - 1.4), ym + 0.01, z - ux * sd * (W / 2 - 1.4), 0.18, 0.04, sl, yaw, pitch, 0xd8d8d0);
+          if (W > 18) box(D, x + uz * sd * W * 0.12, ym + 0.01, z - ux * sd * W * 0.12, 0.15, 0.04, sl * 0.45, yaw, pitch, 0xd8d8d0); // lane dashes
+        }
+        box(D, x, ym + 0.45, z, 0.6, 0.9, sl, yaw, pitch, 0xb0b0ac);                                          // median barrier
+        if (ym - gm > 5 && i % 2 === 0) { const ph = ym - 2.5 - Math.min(gm, ym - 3); box(D, x, ym - 2.5 - ph / 2, z, 2.6, ph, 2.6, yaw, 0, pier); box(D, x, ym - 3.2, z, W * 0.85, 1.4, 2.8, yaw, 0, pier); }
+        if (!o.noLamps && i % 2 === 1) { const sd = i % 4 === 1 ? 1 : -1, lx = x + uz * sd * (W / 2 - 0.3), lz = z - ux * sd * (W / 2 - 0.3); box(D, lx, ym + 5, lz, 0.25, 9, 0.25, yaw, 0, 0x777a7e); box(Lm, lx - uz * sd * 1.2, ym + 9.4, lz + ux * sd * 1.2, 2.4, 0.3, 0.7, yaw, 0, 0xffffff); }
+        if (!o.noSolids && ym - gm > 3) solids.push({ x, z, ux, uz, hl: l / 2 + 0.2, hw: W / 2, y0: ym - 2.6, y1: ym + 1.2 });
+      }
+    }
+    // traffic paths: one per sample segment run (cars follow the deck, through the tunnels)
+    const prof = S;
+    paths.push({ prof, len: tot, sample(d, lane, out) { // position on the road at distance d, lane offset (m, + = right)
+      d = ((d % tot) + tot) % tot; let lo = 0, hi = prof.length - 1;
+      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (prof[mid].d <= d) lo = mid; else hi = mid; }
+      const A = prof[lo], B = prof[hi], f = (d - A.d) / Math.max(1e-3, B.d - A.d), L = Math.max(1e-3, B.d - A.d), ux = (B.x - A.x) / L, uz = (B.z - A.z) / L;
+      out.x = A.x + (B.x - A.x) * f + uz * lane; out.z = A.z + (B.z - A.z) * f - ux * lane; out.y = A.y + (B.y - A.y) * f; out.yaw = Math.atan2(ux, uz); out.tun = A.tun && B.tun;
+      return out;
+    } });
+    // split the mesh into ~3 km pieces so far stretches can be culled
+    const meshes = [], CH = 108 * 3 * 100; // vertices per box = 36 → ~3 km of road
+    const mat = o.mat || (K._roadMat || (K._roadMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.82, metalness: 0.05 })));
+    for (let i0 = 0; i0 < pos.length; i0 += CH) {
+      const i1 = Math.min(pos.length, i0 + CH);
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute(pos.slice(i0, i1), 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(nor.slice(i0, i1), 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col.slice(i0, i1), 3));
+      g.computeBoundingSphere();
+      const mesh = new THREE.Mesh(g, mat); mesh.castShadow = !o.grade; mesh.receiveShadow = true; mesh.layers.set(5); grp.add(mesh); meshes.push(mesh);
+    }
+    let lmesh = null; const lmat = K._lampMat || (K._lampMat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false }));
+    if (lamp.length) { const lg = new THREE.BufferGeometry(); lg.setAttribute("position", new THREE.Float32BufferAttribute(lamp, 3)); lmesh = new THREE.Mesh(lg, lmat); grp.add(lmesh); }
+    const lc = new THREE.Color(o.lamp || 0xffd9a0);
+    return { mesh: meshes[0], meshes, solids, paths, prof, len: tot, update() { lmat.color.copy(lc).multiplyScalar(0.15 + NIGHT.value * 2.2); } };
+  };
+
+  /* ======================= railways and trains ======================= */
+  /** Double-track railway along pts: viaduct (o.clear above the smoothed ground) or at grade, ballast, rails,
+   *  catenary masts, tunnels through ridges, stations every o.stationEvery metres (platforms, canopies, a lit hall).
+   *  Returns the profile (same sampler as K.highway) and the station distances. */
+  K.rail = function (grp, pts, o) {
+    const hw = K.highway(grp, pts, Object.assign({ width: 11, noLamps: true, color: 0x55524c, pier: 0x8e9094, ramp: 1 }, o));
+    const P = hw.paths[0], pos = [], nor = [], col = [], cc = new THREE.Color(), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), out = {};
+    const box = (x, y, z, sx, sy, sz, yaw, pitch, hex) => { const g = new THREE.BoxGeometry(sx, sy, sz).toNonIndexed(); e.set(pitch, yaw, 0, "YXZ"); m4.compose(V3(x, y, z), q.setFromEuler(e), V3(1, 1, 1)); g.applyMatrix4(m4); const A = g.attributes.position.array, N = g.attributes.normal.array; cc.setHex(hex); for (let i = 0; i < A.length; i++) { pos.push(A[i]); nor.push(N[i]); } for (let i = 0; i < A.length / 3; i++) col.push(cc.r, cc.g, cc.b); g.dispose(); };
+    const L = hw.len, step = 30, pr = hw.prof;
+    for (let i = 0; i < pr.length - 1; i++) {
+      const A = pr[i], Bp = pr[i + 1], l = Bp.d - A.d; if (l < 0.5 || (A.tun && Bp.tun)) continue;
+      const ux = (Bp.x - A.x) / l, uz = (Bp.z - A.z) / l, yaw = Math.atan2(ux, uz), pitch = -Math.atan2(Bp.y - A.y, l), x = (A.x + Bp.x) / 2, z = (A.z + Bp.z) / 2, y = (A.y + Bp.y) / 2, sl = Math.hypot(l, Bp.y - A.y) + 0.2;
+      for (const tr of [-2.3, 2.3]) {
+        box(x + uz * tr, y + 0.15, z - ux * tr, 2.8, 0.3, sl, yaw, pitch, 0x6a645c);                       // ballast bed
+        for (const rl of [-0.72, 0.72]) box(x + uz * (tr + rl), y + 0.42, z - ux * (tr + rl), 0.12, 0.16, sl, yaw, pitch, 0x9a9da2); // rails
+      }
+      if (i % 2 === 0) { box(x + uz * 5.2, y + 3.6, z - ux * 5.2, 0.3, 7.2, 0.3, yaw, 0, 0x7a7d80); box(x + uz * 2.6, y + 6.9, z - ux * 2.6, 5.4, 0.18, 0.18, yaw, 0, 0x7a7d80); } // catenary mast
+    }
+    // stations: two side platforms with canopies and a glazed hall over the line
+    const stations = [], every = o.stationEvery || 1500;
+    for (let d = Math.min(600, L * 0.2); d < L - 300; d += every) {
+      P.sample(d, 0, out); if (out.tun) continue;
+      stations.push(d);
+      const ux = Math.sin(out.yaw), uz = Math.cos(out.yaw);
+      for (const sd of [-1, 1]) {
+        box(out.x + uz * sd * 7.2, out.y + 0.55, out.z - ux * sd * 7.2, 4, 1.1, 130, out.yaw, 0, 0xb8b4aa);       // platform
+        box(out.x + uz * sd * 7.2, out.y + 5.2, out.z - ux * sd * 7.2, 5, 0.35, 120, out.yaw, 0, 0xdedede);      // canopy
+        for (let k = -2; k <= 2; k++) box(out.x + uz * sd * 8.6 + ux * k * 26, out.y + 2.9, out.z - ux * sd * 8.6 + uz * k * 26, 0.3, 4.6, 0.3, out.yaw, 0, 0x6a6d70);
+      }
+      box(out.x, out.y + 9.5, out.z, 19, 0.6, 60, out.yaw, 0, 0x8fa6b4);                                             // hall roof
+      box(out.x, out.y - 4, out.z, 8, 8, 14, out.yaw, 0, 0xc8c4bc);                                                  // entrance / stairs block
+    }
+    if (pos.length) {
+      const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute("normal", new THREE.Float32BufferAttribute(nor, 3)); g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3)); g.computeBoundingSphere();
+      const m = new THREE.Mesh(g, K._roadMat); m.receiveShadow = true; m.layers.set(5); grp.add(m); hw.meshes.push(m);
+    }
+    return Object.assign(hw, { stations, track: P });
+  };
+
+  /** Scheduled trains on a railway from K.rail: each track runs one way, trains leave every `headway` seconds,
+   *  accelerate, cruise, brake into each station, dwell, and run to the end of the line. Cars follow the curve
+   *  (each car is placed between its own two bogies) and windows light at night. */
+  let TGEO = null;
+  function trainGeo() {
+    if (TGEO) return TGEO;
+    const parts = [], add = (w, h, d, x, y, z, c) => { const g = new THREE.BoxGeometry(w, h, d).toNonIndexed(); g.translate(x, y, z); const n = g.attributes.position.count, C = new Float32Array(n * 3), cc = new THREE.Color(c); for (let i = 0; i < n; i++) { C[i * 3] = cc.r; C[i * 3 + 1] = cc.g; C[i * 3 + 2] = cc.b; } g.setAttribute("color", new THREE.BufferAttribute(C, 3)); parts.push(g); };
+    add(3.0, 3.1, 19.4, 0, 2.15, 0, 0xffffff);          // body (instance livery)
+    add(3.04, 0.9, 17.5, 0, 2.6, 0, 0x1c2630);         // window band
+    add(3.04, 0.22, 19.4, 0, 1.45, 0, 0x404448);       // stripe
+    add(2.4, 0.5, 19, 0, 3.85, 0, 0xb0b4b8);           // roof
+    add(2.2, 0.8, 3, 0, 0.6, 6.5, 0x202224); add(2.2, 0.8, 3, 0, 0.6, -6.5, 0x202224); // bogies
+    let n = 0; for (const g of parts) n += g.attributes.position.count;
+    const P = new Float32Array(n * 3), N = new Float32Array(n * 3), C = new Float32Array(n * 3); let o = 0;
+    for (const g of parts) { P.set(g.attributes.position.array, o * 3); N.set(g.attributes.normal.array, o * 3); C.set(g.attributes.color.array, o * 3); o += g.attributes.position.count; }
+    const G = new THREE.BufferGeometry(); G.setAttribute("position", new THREE.BufferAttribute(P, 3)); G.setAttribute("normal", new THREE.BufferAttribute(N, 3)); G.setAttribute("color", new THREE.BufferAttribute(C, 3));
+    const wg = new THREE.BoxGeometry(3.08, 0.8, 17.3); wg.translate(0, 2.6, 0);
+    return (TGEO = { body: G, win: wg });
+  }
+  K.trains = function (grp, line, o) {
+    o = o || {};
+    const L = line.len, st = line.stations.slice(), v = o.speed || 22, acc = o.acc || 0.9, dwell = o.dwell || 22, cars = o.cars || 6, CL = 20 * (o.carScale || 1);
+    // one-way timetable: distance as a function of time since departure
+    const stops = [0, ...st.filter((d) => d > 50 && d < L - 50), L];
+    const legs = []; let t = 0;
+    for (let i = 0; i < stops.length - 1; i++) {
+      const a = stops[i], b = stops[i + 1], D = b - a, ta = v / acc, da = 0.5 * acc * ta * ta;
+      const T = D > 2 * da ? 2 * ta + (D - 2 * da) / v : 2 * Math.sqrt(D / acc), vp = D > 2 * da ? v : Math.sqrt(D * acc);
+      legs.push({ a, b, D, t0: t, T, vp }); t += T + (i < stops.length - 2 ? dwell : 0);
+    }
+    const Tc = t, head = o.headway || 300, nT = Math.max(1, Math.ceil(Tc / head));
+    const distAt = (tau) => {
+      for (const g of legs) {
+        if (tau < g.t0) return g.a; // dwelling at the previous stop
+        if (tau <= g.t0 + g.T) { const u = tau - g.t0, ta = g.vp / acc; if (u < ta) return g.a + 0.5 * acc * u * u; if (u > g.T - ta) { const w = g.T - u; return g.b - 0.5 * acc * w * w; } return g.a + 0.5 * acc * ta * ta + g.vp * (u - ta); }
+      }
+      return L;
+    };
+    const N = nT * 2 * cars, G = trainGeo();
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.4, metalness: 0.5 });
+    const wmat = new THREE.MeshBasicMaterial({ color: 0x000000, toneMapped: false });
+    const im = new THREE.InstancedMesh(G.body, mat, N), wm = new THREE.InstancedMesh(G.win, wmat, N);
+    im.frustumCulled = wm.frustumCulled = false; im.castShadow = true;
+    const liv = new THREE.Color(o.livery || 0xd8dadc); for (let i = 0; i < N; i++) im.setColorAt(i, liv);
+    grp.add(im); grp.add(wm); im.layers.set(5); wm.layers.set(5);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), pA = {}, pB = {}, P = V3(), S1 = V3(1, 1, o.carScale || 1), Y = V3(0, 1, 0), dirV = V3();
+    let time = (o.phase || 0) + Math.random() * Tc;
+    const tr = line.track;
+    return {
+      im, Tc,
+      update(dt, cam, near) {
+        im.visible = wm.visible = near; if (!near) return;
+        time += dt;
+        const k = NIGHT.value; wmat.color.setRGB(1.0 * k * 1.4 + 0.02, 0.9 * k * 1.4 + 0.02, 0.7 * k * 1.4 + 0.02);
+        let n = 0;
+        for (let side = 0; side < 2; side++) for (let j = 0; j < nT; j++) {
+          const tau = (((time - j * head) % Tc) + Tc) % Tc, d0 = distAt(tau);
+          for (let cI = 0; cI < cars; cI++) {
+            let df = d0 - cI * (CL + 0.8), db = df - CL * 0.75;
+            if (db < 0) { continue; }
+            if (side) { df = L - df; db = L - db; }
+            tr.sample(df, side ? 2.3 : -2.3, pA); tr.sample(db, side ? 2.3 : -2.3, pB);
+            if (pA.tun && pB.tun) continue;
+            P.set((pA.x + pB.x) / 2, (pA.y + pB.y) / 2 + 0.3, (pA.z + pB.z) / 2);
+            if (P.distanceToSquared(cam.position) > 6500 * 6500) continue;
+            dirV.set(pA.x - pB.x, pA.y - pB.y, pA.z - pB.z).normalize();
+            q.setFromUnitVectors(V3(0, 0, 1), dirV);
+            m4.compose(P, q, S1); im.setMatrixAt(n, m4); wm.setMatrixAt(n, m4); n++;
+          }
+        }
+        im.count = wm.count = n; im.instanceMatrix.needsUpdate = true; wm.instanceMatrix.needsUpdate = true;
+      }
+    };
   };
 
   /* ======================= bridges ======================= */

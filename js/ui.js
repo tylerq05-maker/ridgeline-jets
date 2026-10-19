@@ -96,6 +96,9 @@
     el.onclick = (e) => { const b = e.target.closest("[data-v]"); if (!b) return; UI.click(); onPick(b.dataset.v); };
   }
   const TIMES = () => Object.entries(RJ.world.TIMES).map(([id, t]) => ({ id, name: t.label }));
+  // shared with the spectator modes (combatsim.js, dragrace.js), which add their own setup screens
+  UI.chips = chips; UI.opts = opts; UI.TIMES = TIMES; UI.esc = esc;
+  UI.registerScreen = (id) => { if (!SCREENS.includes(id)) SCREENS.push(id); };
   const WEATHERS = () => RJ.world.WEATHER_MENU.map((id) => ({ id, name: RJ.world.WEATHER[id].label })).concat([{ id: "dynamic", name: "Dynamic (changes)" }]);
 
   /* ---------------- main menu ---------------- */

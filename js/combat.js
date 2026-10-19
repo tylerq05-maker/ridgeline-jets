@@ -613,7 +613,8 @@
         return;
       }
       // avoid head-on collisions
-      if (dist < 350 && closing > 150) this.desired.addScaledVector(ac.up, 0.7).normalize();
+      // avoid head-on collisions: break up and to the right (both jets doing it means a left-to-left pass)
+      if (dist < 600 && closing > 120) this.desired.addScaledVector(ac.up, 0.45).addScaledVector(ac.right, 0.9).normalize();
       // energy management by style
       if (st.name === "turner") { this.ab = dist > st.closeAB || ac.speed < corner * 0.95; this.thr = ac.speed > corner * 1.25 && dist < 1500 ? 0.55 : 0.95; }
       else if (st.name === "brawler") { this.ab = dist > st.closeAB || ac.speed < corner; this.thr = dist < 500 && closing > 80 ? 0.4 : 1; }

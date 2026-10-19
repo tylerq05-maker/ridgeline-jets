@@ -585,7 +585,7 @@
     if (type === "nyc" && RJ.nyc) { const s = RJ.nyc.spawn(); return { x: s.x, z: s.z, yaw: s.yaw, alt: s.alt }; }
     if (type === "sf" && RJ.sf) return RJ.sf.spawn();
     if (type === "ye" && RJ.ye && RJ.ye.spawn()) return RJ.ye.spawn();
-    if (RJ.cities && RJ.cities.SPEC[type]) { const s = RJ.cities.spawn(type); if (s) return s; }
+    if (RJ.cities && RJ.cities.SPEC[type]) { const s = RJ.cities.spawn(type); if (s) { RJ.cities.ensure(type); return s; } }
     if (regionCache[type]) return regionCache[type];
     const test = REGION_TEST[type] || REGION_TEST.mountains;
     const step = type === "canyon" ? 600 : 1500;
@@ -1731,6 +1731,7 @@
     } else { W.hemi.intensity = W.hemiIntensity; W.skyMat.uniforms.flash.value = 0; }
     if (W.castleGroup) RJ.castle.update(dt, W.castleGroup);
     if (RJ.atlas && RJ.atlas.built) RJ.atlas.update(dt, cam);
+    if (RJ.living && RJ.living.planned) RJ.living.update(dt, cam);
     updateRain(dt, cam, focusVel);
     // waterfall mist near the camera
     fallFxT += dt;
