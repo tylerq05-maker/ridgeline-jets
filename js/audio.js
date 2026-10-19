@@ -265,8 +265,29 @@
   AU.EngineVoice = EngineVoice; // exposed for offline renders and tests
 
   /* ---------------- buses ---------------- */
+  /** Called on every tap, click and key press until sound is running: browsers only start audio from a user
+   *  gesture, and a context created or interrupted outside one stays "suspended" (silent) until resumed. On iPhone
+   *  and iPad, Web Audio also follows the ring/silent switch; playing a silent media element (and asking for the
+   *  "playback" audio session) routes the game through the media channel so it plays with the switch on silent. */
+  AU.unlock = function () {
+    if (!AU.ctx) return;
+    if (AU.ctx.state !== "running") AU.ctx.resume().catch(() => {});
+    try { if (navigator.audioSession && navigator.audioSession.type !== "playback") navigator.audioSession.type = "playback"; } catch (e) { /* not supported */ }
+    if (!AU._silent) {
+      try {
+        // 0.1 s of silence as an 8 kHz, 8-bit mono WAV
+        const n = 800, b = new Uint8Array(44 + n), v = new DataView(b.buffer), w = (o, s) => { for (let i = 0; i < s.length; i++) b[o + i] = s.charCodeAt(i); };
+        w(0, "RIFF"); v.setUint32(4, 36 + n, true); w(8, "WAVEfmt "); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+        v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); w(36, "data"); v.setUint32(40, n, true); b.fill(128, 44);
+        const el = new Audio(URL.createObjectURL(new Blob([b], { type: "audio/wav" })));
+        el.loop = true; el.volume = 0.01; el.setAttribute("playsinline", "");
+        const p = el.play(); if (p && p.catch) p.catch(() => { AU._silent = null; });
+        AU._silent = el;
+      } catch (e) { /* media element unavailable */ }
+    }
+  };
   AU.init = function () {
-    if (AU.ctx) { if (AU.ctx.state === "suspended") AU.ctx.resume(); return; }
+    if (AU.ctx) { AU.unlock(); return; }
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       AU.ctx = ctx;

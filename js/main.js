@@ -837,7 +837,13 @@
     const back = { "scr-free": "free-back", "scr-fight": "fight-back", "scr-hangar": "hg-back", "scr-settings": "set-back", "scr-career": "car-back", "scr-chal": "chal-back", "scr-atlas": "atlas-back", "scr-mp": "mp-back" }[cur];
     if (back) { e.preventDefault(); $(back).click(); RJ.input.edges.delete("escape"); }
   });
-  ["pointerdown", "keydown"].forEach((ev) => addEventListener(ev, () => RJ.audio.init(), { once: true }));
+  // start (or wake) sound on any gesture: kept registered, because a context can be suspended again later
+  // (tab in the background, phone call, Bluetooth switch) and needs a fresh gesture to resume
+  const wake = () => { RJ.audio.init(); if (RJ.audio.ctx && RJ.audio.ctx.state === "running" && RJ.audio._silent && !RJ.audio._silent.paused) return; RJ.audio.unlock && RJ.audio.unlock(); };
+  ["pointerdown", "keydown", "touchend", "click"].forEach((ev) => addEventListener(ev, wake, { passive: true }));
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && RJ.audio.ctx && RJ.audio.ctx.state !== "running") RJ.audio.ctx.resume().catch(() => {}); });
+  // a muted game or a zero master volume looks exactly like broken sound: say so once at start-up
+  setTimeout(() => { if (RJ.settings.muted) RJ.ui.toast("Sound is muted · press " + RJ.keyLabel(RJ.settings.keys.mute) + " (or Settings ▸ Audio) to turn it on", 7000); else if (!(RJ.settings.master > 0)) RJ.ui.toast("Master volume is at 0 · raise it in Settings ▸ Audio", 7000); }, 2500);
   // multiplayer scoreboard: hold Tab in a match
   const board = (show) => {
     const el = $("mp-board"), m = RJ.game.mode;
