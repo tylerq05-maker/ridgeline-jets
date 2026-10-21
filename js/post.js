@@ -3,7 +3,9 @@
  * Falls back to direct rendering when disabled or unsupported. */
 (function (RJ) {
   "use strict";
-  const P = { enabled: false, ok: false };
+  // cinematic: optional restrained filmic grade (teal shadows / warm highlights, soft S-curve, deeper vignette,
+  // a touch more bloom), eased in and out. Off by default; the Combat Simulator spectator turns it on.
+  const P = { enabled: false, ok: false, cinematic: false, _cine: 0 };
   RJ.post = P;
 
   const VERT = "varying vec2 vUv; void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }";
@@ -63,7 +65,7 @@
       for (let i = 0; i < 4; i++) heat.push(new THREE.Vector4());
       for (let i = 0; i < 3; i++) shock.push(new THREE.Vector4());
       P.comp = mk([
-        "uniform sampler2D tScene; uniform sampler2D tDepth; uniform sampler2D tBloom1; uniform sampler2D tBloom2; uniform sampler2D tBlur;",
+        "uniform sampler2D tScene; uniform sampler2D tDepth; uniform sampler2D tBloom1; uniform sampler2D tBloom2; uniform sampler2D tBlur; uniform float cine;",
         "uniform vec2 resolution; uniform float time; uniform float aspect;",
         "uniform float exposure; uniform float bloomStrength; uniform float saturation; uniform float contrast; uniform vec3 tint;",
         "uniform float vignette; uniform float grain; uniform float flash; uniform vec3 flashCol;",
@@ -133,7 +135,14 @@
         "  col = mix(vec3(l), col, saturation);",
         "  col = (col - 0.5) * contrast + 0.5;",
         "  col *= tint;",
-        "  vec2 v = vUv - 0.5; col *= 1.0 - dot(v, v) * vignette;",
+        "  if (cine > 0.001) {",
+        "    vec3 lw = vec3(0.2126, 0.7152, 0.0722); float lc = dot(col, lw);",
+        "    vec3 g2 = col + vec3(-0.03, 0.008, 0.04) * (1.0 - smoothstep(0.0, 0.5, lc)) + vec3(0.045, 0.012, -0.035) * smoothstep(0.42, 1.0, lc);",
+        "    g2 = clamp(g2, 0.0, 1.0); g2 = mix(g2, g2 * g2 * (3.0 - 2.0 * g2), 0.2);",
+        "    g2 = mix(vec3(dot(g2, lw)), g2, 1.04);",
+        "    col = mix(col, g2, cine);",
+        "  }",
+        "  vec2 v = vUv - 0.5; col *= 1.0 - dot(v, v) * (vignette + cine * 0.22) * (1.0 + cine * 0.4 * dot(v, v));",
         "  col += (hash(vUv * resolution + fract(time * 7.13)) - 0.5) * grain;",
         "  gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);",
         "}"
@@ -145,7 +154,7 @@
         motion: { value: 0 }, motionCenter: { value: new THREE.Vector2(0.5, 0.5) }, chroma: { value: 0 },
         heat: { value: heat }, shock: { value: shock }, shockWidth: { value: 0.035 },
         useDepth: { value: 0 }, dof: { value: new THREE.Vector3(100, 200, 0) }, camNear: { value: 0.5 }, camFar: { value: 20000 },
-        sunP: { value: new THREE.Vector3() }, sunC: { value: new THREE.Vector3(1, 0.9, 0.8) }, rays: { value: 0 }, flare: { value: 0 }
+        sunP: { value: new THREE.Vector3() }, sunC: { value: new THREE.Vector3(1, 0.9, 0.8) }, rays: { value: 0 }, flare: { value: 0 }, cine: { value: 0 }
       });
       P.fxaa = mk([
         "uniform sampler2D tDiffuse; uniform vec2 resolution; varying vec2 vUv;",
@@ -280,7 +289,10 @@
     U.time.value += dt || 0.016;
     const g = grade || {};
     U.exposure.value = (g.exposure || 1) * (S.exposure || 1);
-    U.bloomStrength.value = bloomOn ? (g.bloom != null ? g.bloom : 0.6) : 0;
+    P._cine += ((P.cinematic ? 1 : 0) - P._cine) * Math.min(1, (dt || 0.016) * 2.5);
+    if (P._cine < 0.002 && !P.cinematic) P._cine = 0;
+    U.cine.value = P._cine;
+    U.bloomStrength.value = bloomOn ? (g.bloom != null ? g.bloom : 0.6) * (1 + P._cine * 0.12) : 0;
     U.saturation.value = g.sat || 1.05; U.contrast.value = g.contrast || 1.04;
     const tn = g.tint || [1, 1, 1]; U.tint.value.set(tn[0], tn[1], tn[2]);
     U.motion.value = S.motionBlur !== false ? fx.motion : 0;

@@ -551,18 +551,7 @@
       const g = Math.abs(this.g);
       const gThresh = F.gmax > 5 ? 4.5 : 1.8;
       const hum = RJ.sonic ? RJ.sonic.humidity(this) : 0.5;
-      if (g > gThresh && this.speed > 110 && alt < 12000) {
-        const a = RJ.clamp((g - gThresh) / 4, 0, 0.7) * (0.4 + hum * 0.8);
-        for (const tp of vis.tips) for (let k = 0; k < 2; k++) RJ.fx.vapor(m.localToWorld(tv.copy(tp)), this.vel, 0.7, a);
-        // condensation sheets across the upper wing surfaces in hard pulls
-        if (g > gThresh + 1.8 && F.gmax > 5 && vis.tips[0]) {
-          const tp = vis.tips[0];
-          for (let k = 0; k < 5; k++) {
-            const lp = tv.set(RJ.rand(-tp.x, tp.x) * 0.85, 0.5 + Math.random() * 0.4, tp.z - 2.5 + RJ.rand(-1.5, 1.5));
-            RJ.fx.vapor(m.localToWorld(lp), this.vel, 1.8 + Math.random(), a * 0.55);
-          }
-        }
-      }
+      if (RJ.fx.wingVapor) RJ.fx.wingVapor(this); // wingtip vortices and over-wing vapor in hard pulls (fx.js)
       const hpF = this.hp / this.maxHp;
       if (hpF < 0.5) {
         const n = vis.nozzles[0] || V3(0, 0, 4);

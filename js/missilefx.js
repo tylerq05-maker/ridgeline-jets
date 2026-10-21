@@ -13,11 +13,11 @@
    * core/flame: exhaust colours · trail: smoke life (s), size, spacing (m), brightness · boom: warhead size · g: turn limit */
   const TYPES = {
     ir: { name: "heat", len: 2.9, r: 0.064, fins: 0.42, can: true, body: 0xe9e9e4, band: 0xd6a51c, nose: 0x2b3440, core: 0xfff4d8, flame: 0xff8a30,
-      trail: { life: 9, s0: 1.0, s1: 9, step: 3, gray: 0.92, alpha: 0.52 }, boom: 0.85, g: 38, ign: 0.07, boost: 1.0, glow: 0xffb35a, ball: 0xff6a12 },
+      trail: { life: 12, s0: 1.1, s1: 11, step: 3, gray: 0.92, alpha: 0.58 }, boom: 0.85, g: 38, ign: 0.07, boost: 1.0, glow: 0xffb35a, ball: 0xff6a12 },
     radar: { name: "radar", len: 3.65, r: 0.09, fins: 0.5, mid: true, body: 0xc9ccce, band: 0xd6a51c, nose: 0xb9bcbf, core: 0xfff8e8, flame: 0xffa040,
-      trail: { life: 12, s0: 1.3, s1: 13, step: 3.5, gray: 0.95, alpha: 0.56 }, boom: 1.0, g: 30, ign: 0.2, boost: 1.4, glow: 0xffc070, ball: 0xff8a1e },
+      trail: { life: 15, s0: 1.4, s1: 16, step: 3.5, gray: 0.95, alpha: 0.6 }, boom: 1.0, g: 30, ign: 0.2, boost: 1.4, glow: 0xffc070, ball: 0xff8a1e },
     heavy: { name: "heavy", len: 4.0, r: 0.19, fins: 0.9, mid: true, body: 0xdedfdb, band: 0x8a5a2b, nose: 0xc9cbc6, core: 0xffe9c0, flame: 0xff7020,
-      trail: { life: 14, s0: 2.2, s1: 20, step: 4, gray: 0.88, alpha: 0.62 }, boom: 1.6, g: 22, ign: 0.32, boost: 1.8, glow: 0xff9a40, ball: 0xff5200 },
+      trail: { life: 17, s0: 2.4, s1: 24, step: 4, gray: 0.88, alpha: 0.66 }, boom: 1.6, g: 22, ign: 0.32, boost: 1.8, glow: 0xff9a40, ball: 0xff5200 },
     exp: { name: "experimental", len: 3.2, r: 0.11, fins: 0.5, body: 0x30343a, band: 0x3ad7ff, nose: 0x1a1d22, core: 0xe8fbff, flame: 0x39c8ff,
       trail: { life: 4.5, s0: 0.8, s1: 6, step: 3, gray: 0.6, alpha: 0.28 }, boom: 1.25, g: 34, ign: 0.05, boost: 0.8, glow: 0x5ad8ff, ball: 0x1f9dff, ion: [0.35, 0.8, 1.0] }
   };
@@ -180,6 +180,11 @@
         "#ifdef TINT",
         "  col = col * tint * 1.15;",                                            // coloured display smoke
         "#endif",
+        "#elif defined(WRECK)",
+        "  col = col * 0.3 + vec3(0.025, 0.022, 0.02);",                         // oily black smoke pouring off a burning wreck
+        "  float heat = exp(-vAge * 1.7);",
+        "  vec3 fire = mix(vec3(0.9, 0.28, 0.05), vec3(1.7, 1.0, 0.45), exp(-vAge * 5.0)) * 2.2;",
+        "  col = mix(col, fire, heat * 0.92 * edge); alpha = max(alpha, heat * edge * 0.9);",
         "#else",
         "  float heat = exp(-vAge * 9.0);",                                      // white-hot exhaust right behind the motor
         "  col = mix(col, hot * 3.2, heat * 0.85); alpha = max(alpha, heat * edge * 0.95 * vA0 * 1.6);",
@@ -196,12 +201,17 @@
     if (!conMat) { const b = ribbonMaterial(); conMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false, uniforms: b.uniforms, vertexShader: b.vertexShader, fragmentShader: b.fragmentShader, defines: { CONTRAIL: 1 } }); }
     return conMat;
   }
+  let wreckMat = null;
+  function wreckMaterial() {
+    if (!wreckMat) { const b = ribbonMaterial(); wreckMat = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false, uniforms: b.uniforms, vertexShader: b.vertexShader, fragmentShader: b.fragmentShader, defines: { WRECK: 1 } }); }
+    return wreckMat;
+  }
   const tintMats = {};
   function tintMaterial(hex) {
     if (!tintMats[hex]) { const b = ribbonMaterial(); tintMats[hex] = new THREE.ShaderMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false, uniforms: Object.assign({}, b.uniforms, { tint: { value: new THREE.Color(hex) } }), vertexShader: b.vertexShader, fragmentShader: b.fragmentShader, defines: { CONTRAIL: 1, TINT: 1 } }); }
     return tintMats[hex];
   }
-  function newRibbon(T, contrail, tint) {
+  function newRibbon(T, contrail, tint, mat) {
     const g = new THREE.BufferGeometry(), N = RIB_N * 2;
     g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(N * 3), 3));
     g.setAttribute("born", new THREE.BufferAttribute(new Float32Array(N), 1));
@@ -212,7 +222,7 @@
     for (let i = 0; i < RIB_N - 1; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
     g.setIndex(idx);
     for (let i = 0; i < N; i++) g.attributes.side.array[i] = i % 2 ? 1 : -1;
-    const mesh = new THREE.Mesh(g, tint != null ? tintMaterial(tint) : contrail ? contrailMaterial() : ribbonMaterial());
+    const mesh = new THREE.Mesh(g, mat || (tint != null ? tintMaterial(tint) : contrail ? contrailMaterial() : ribbonMaterial()));
     mesh.frustumCulled = false; mesh.renderOrder = 6; mesh.layers.set(RJ.LATE);
     RJ.scene.add(mesh);
     const r = { mesh, g, pts: [], T, dead: false, contrail: !!contrail };
@@ -294,7 +304,7 @@
       if (f.halo) f.halo.material.opacity = on ? 0.75 + 0.2 * wob : 0;
     }
     // the glow stays a readable dot at any range: grow it with distance, fade it when the motor burns out
-    if (U.halo) { U.halo.visible = on; U.halo.scale.setScalar(Math.max(T.r * 60 + 3, d * 0.03) * boost * (0.88 + 0.24 * wob)); }
+    if (U.halo) { U.halo.visible = on; U.halo.scale.setScalar(Math.max(T.r * 70 + 3.5, d * 0.036) * boost * (0.88 + 0.24 * wob)); }
     // a slow roll (and a slight coning wobble just after ignition) so the airframe never looks bolted to a rail
     msl.roll = (msl.roll || 0) + (msl.rollW || 0) * dt;
     M.quaternion.multiply(_rq.setFromAxisAngle(ZAX, msl.roll));
@@ -337,10 +347,10 @@
   const CON_T = { trail: { life: 14, s0: 5, s1: 40, step: 35, gray: 0.97, alpha: 0.4 } };
   const CWIND = new THREE.Vector3(1.2, 0, 0.8);
   /** Continuous trail owned by ac under ac[key] (contrails, display smoke); p = emitter, or null to end it. */
-  function ownedTrail(ac, key, p, T, tint) {
+  function ownedTrail(ac, key, p, T, tint, mat) {
     let r = ac[key];
     if (!p) { if (r) { r.dead = true; ac[key] = null; } return; }
-    if (!r) { r = ac[key] = newRibbon(T, true, tint); ribbonPush(r, p, CWIND, 1); ribbonPush(r, p, CWIND, 1); }
+    if (!r) { r = ac[key] = newRibbon(T, true, tint, mat); ribbonPush(r, p, CWIND, 1); ribbonPush(r, p, CWIND, 1); }
     const h = r.pts[0], q = r.pts[1];
     if (q && (p.x - q.x) ** 2 + (p.y - q.y) ** 2 + (p.z - q.z) ** 2 > T.trail.step ** 2) ribbonPush(r, p, CWIND, 1); // fix the old head, start a new one
     else if (h) { h.x = p.x; h.y = p.y; h.z = p.z; h.t = RJ.fx.time || 0; }
@@ -410,7 +420,8 @@
     "             mix(mix(h(i + vec3(0,0,1)), h(i + vec3(1,0,1)), f.x), mix(h(i + vec3(0,1,1)), h(i + vec3(1,1,1)), f.x), f.y), f.z); }"
   ].join("\n");
   let ballGeo = null;
-  const BALLS = [], RINGS = [], POPS = [];
+  const BALLS = [], RINGS = [], POPS = [], WRECKS = [];
+  const WRECK_T = { trail: { life: 16, s0: 3, s1: 34, step: 7, gray: 0.2, alpha: 0.5 } };
   function fireballMat() {
     return new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, fog: false,
@@ -470,8 +481,11 @@
   MF.jetBlast = function (ac) {
     const p = ac.pos, s = 1.3 + ac.radius / 10, cam = RJ.camera, far = cam && cam.position.distanceTo(p) > 9000;
     MF.explosion(p, s, ac.vel);
-    MF.debris(p, ac.vel, 8 + Math.round(ac.radius / 2));
+    MF.debris(p, ac.vel, (RJ.settings.quality === "low" ? 6 : 12) + Math.round(ac.radius / 2));
+    // the wreck trails a thick black smoke ribbon with a burning head all the way down (readable from 10 km)
+    if (WRECKS.indexOf(ac) < 0) { if (WRECKS.length >= 8) { const o = WRECKS.shift(); ownedTrail(o, "_wrib", null); } WRECKS.push(ac); }
     if (far) return; // beyond 9 km the particle blast reads the same; skip the meshes
+    RJ.fx.smokeColumn && RJ.fx.smokeColumn(p, s * 0.8);
     MF.fireball(p, 12 * s, 1.6, ac.vel, 1.15);
     MF.fireball(p.clone().add(V3(R(4), R(4), R(4))), 8 * s, 2.2, ac.vel, 0.85); // a slower second lobe that rolls out of the first
     MF.shockRing(p, 30 * s);
@@ -494,6 +508,11 @@
     ac._hitFx = ac.time; MF.hitFlash(ac);
   });
   function tickBlasts(dt) {
+    for (let i = WRECKS.length - 1; i >= 0; i--) {
+      const ac = WRECKS[i];
+      if (ac.state === "falling" && ac.mesh && ac.mesh.visible !== false) ownedTrail(ac, "_wrib", ac.pos, WRECK_T, null, wreckMaterial());
+      else { ownedTrail(ac, "_wrib", null); WRECKS.splice(i, 1); }
+    }
     for (const b of BALLS) {
       if (b.k >= 1) continue;
       b.t += dt; b.k = Math.min(1, b.t / b.life);
@@ -533,10 +552,10 @@
       d.m.position.addScaledVector(d.v, dt);
       d.m.rotation.x += d.w.x * dt; d.m.rotation.y += d.w.y * dt; d.m.rotation.z += d.w.z * dt;
       d.fxT -= dt;
-      if (d.fxT <= 0 && d.t < 4) {
-        d.fxT = 0.05;
-        RJ.fx.smoke(d.m.position, tv.set(0, 1, 0), 1.2 + d.t * 0.5, 0.15, 3, 0.55);
-        if (d.burn && d.t < 2.5) RJ.fx.fire(d.m.position, tv.copy(d.v).multiplyScalar(0.1), 1.5);
+      if (d.fxT <= 0 && d.t < (d.burn ? 7 : 3.5)) {
+        d.fxT = RJ.settings.quality === "low" ? 0.09 : 0.05;
+        RJ.fx.smoke(d.m.position, tv.set(0, 1, 0), 1.2 + d.t * 0.5, 0.13, d.burn ? 4 : 3, 0.55);
+        if (d.burn && d.t < 4) RJ.fx.fire(d.m.position, tv.copy(d.v).multiplyScalar(0.1), 1.7 - d.t * 0.25);
       }
       const g = RJ.world.ground(d.m.position.x, d.m.position.z);
       if (d.m.position.y < g + 0.3 || d.t > d.life) { if (d.m.position.y < g + 2) RJ.fx.dust(d.m.position, 0.25); RJ.scene.remove(d.m); DEB.splice(i, 1); }
@@ -606,5 +625,6 @@
     for (const b of BALLS) { b.k = 1; b.m.visible = false; } for (const r of RINGS) { r.k = 1; r.s.visible = false; } POPS.length = 0;
     for (const d of DEB) RJ.scene.remove(d.m); DEB.length = 0;
     for (const r of RIBBONS) { RJ.scene.remove(r.mesh); r.g.dispose(); } RIBBONS.length = 0; MF.nCon = 0;
+    for (const ac of WRECKS) ac._wrib = null; WRECKS.length = 0;
   };
 })(window.RJ);

@@ -666,7 +666,7 @@
       abL.distance = (60 + focus.vis.dims.len * 4) * (swc ? 2.5 : 1);
     } else abL.intensity = 0;
     // audio
-    RJ.audio.update(player, camera, camMode === "cockpit", RJ.combat.aircraft);
+    RJ.audio.update(spect && mode.sel ? mode.sel : player, camera, camMode === "cockpit", RJ.combat.aircraft); // spectator: engine audio follows the selected jet
     RJ.sonic.listen(camera, RJ.audio._camV, RJ.combat.aircraft);
     RJ.audio.setGun(player.firing && player.alive);
     if (player.alive && player.target && player.target.alive && player.spec.msl.n && player.missiles > 0 && player.lockT > 0) RJ.audio.tone(player.locked ? "locked" : "locking");

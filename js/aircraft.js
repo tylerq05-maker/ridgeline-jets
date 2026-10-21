@@ -87,7 +87,7 @@
     "uniform float time; uniform float ab; uniform float seed; uniform float layer;",
     "varying vec2 vUv; varying float vFres;",
     "void main(){ vUv = uv; vec3 p = position; float t = clamp(uv.y, 0.0, 1.0);",
-    "  float tb = (0.35 + ab * 0.65) * (layer > 0.5 ? 0.45 : 1.0);",
+    "  float tb = (0.35 + ab * 0.65) * (layer > 1.5 ? 1.7 : layer > 0.5 ? 0.45 : 1.0);",
     "  float w = sin(t * 9.0 - time * 28.0 + seed) * 0.5 + sin(t * 17.0 - time * 41.0 + seed * 1.7) * 0.5;",
     "  p.xy *= 1.0 + w * 0.13 * t * tb;",
     "  p.xy += vec2(sin(time * 23.0 + seed + t * 5.0), cos(time * 19.0 + seed * 2.0 + t * 4.0)) * 0.16 * t * t * tb;",
@@ -96,7 +96,7 @@
     "  gl_Position = projectionMatrix * mv; }"
   ].join("\n");
   const FLAME_FRAG = [
-    "uniform float time; uniform float power; uniform float ab; uniform vec3 hot; uniform vec3 mid; uniform float seed; uniform float layer; uniform float kick; uniform float dsp; uniform float dvis;",
+    "uniform float time; uniform float power; uniform float ab; uniform vec3 hot; uniform vec3 mid; uniform float seed; uniform float layer; uniform float kick; uniform float dsp; uniform float dvis; uniform float night;",
     "varying vec2 vUv; varying float vFres;",
     "float fh(vec2 p){ p = mod(p, 289.0); return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }",
     "float fn(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);",
@@ -107,12 +107,18 @@
     "  float n = fn(vec2(vUv.x * 9.0 + seed, t * 7.0 - time * 14.0)) * 0.6 + fn(vec2(vUv.x * 21.0, t * 16.0 - time * 23.0)) * 0.4;",
     "  float ctr = pow(vFres, 1.4);", // 1 looking through the middle of the plume, 0 at its silhouette edge
     "  vec3 col; float a;",
-    "  if (layer > 0.5) {",
+    "  if (layer > 1.5) {",
+    // heat shimmer: a wider, longer sheath of faint, rippling warm wisps around the burner plume
+    "    float r = fn(vec2(vUv.x * 13.0 + seed, t * 9.0 - time * 8.0)) * 0.65 + fn(vec2(vUv.x * 29.0 - seed, t * 21.0 - time * 15.0)) * 0.35;",
+    "    float band = smoothstep(0.55, 0.95, r);",
+    "    col = mix(mid, vec3(1.0, 0.82, 0.62), 0.45) * (0.5 + band);",
+    "    a = band * smoothstep(0.0, 0.12, t) * (1.0 - smoothstep(0.3, 1.0, t)) * (1.0 - 0.6 * pow(vFres, 2.0)) * 0.09 * ab * (1.0 + night * 0.9);",
+    "  } else if (layer > 0.5) {",
     // core: blue-white at the nozzle, warming to yellow; Mach diamonds = bright standing bands that fade downstream
     "    vec3 blueW = vec3(0.72, 0.84, 1.0);",
     "    col = mix(blueW, hot, smoothstep(0.0, 0.75, t));",
     "    float dia = pow(0.5 + 0.5 * cos(t * 31.4 * dsp - 0.9), 9.0) * exp(-t * 1.3 / dsp) * (0.9 + 0.1 * n) * dvis;",
-    "    col = col * (0.55 + kick * 1.2) + vec3(1.0, 0.95, 0.82) * dia * (3.2 + kick * 2.0);",
+    "    col = col * (0.55 + kick * 1.2) + vec3(1.0, 0.95, 0.82) * dia * (4.1 + kick * 2.0 + night * 1.6);",
     "    a = (1.0 - smoothstep(0.6, 1.0, t)) * (0.5 + 0.5 * ctr) * (0.12 + dia * 1.1) * ab;",
     "  } else {",
     // envelope: hot yellow-white in the middle and near the nozzle, orange at the edges, red-orange at the tail
@@ -121,22 +127,30 @@
     "    col = mix(body, tail, smoothstep(0.35, 1.0, t));",
     "    col += vec3(0.35, 0.5, 1.0) * exp(-t * 14.0) * (0.3 + ab * 0.9);", // flame-holder blue at the exit
     "    float dia = ab * pow(0.5 + 0.5 * cos(t * 30.0 * dsp - 0.6), 10.0) * exp(-t * 2.4 / dsp) * (0.7 + 0.3 * n) * dvis;",
-    "    col += hot * dia * 0.8;",
+    "    col += hot * dia * (1.15 + night * 0.5);",
     "    col *= 0.75 + ab * 0.55 + kick * 1.2;",
     "    a = pow(1.0 - t, 1.2) * (0.35 + 0.65 * n) * pow(vFres, 1.1) * 0.8;",
     "    a *= mix(0.2 + power * 0.3, 1.0, ab);",
     "  }",
+    "  col *= 1.0 + night * 0.35 * step(layer, 1.5);",            // dusk / night: the plume reads hotter against the dark
     "  gl_FragColor = vec4(col, a);",
     "}"
   ].join("\n");
+  // dusk/night factor shared by every exhaust material (driven by fx.update from the sun elevation)
+  const FLAME_NIGHT = (RJ.FLAME_NIGHT = RJ.FLAME_NIGHT || { value: 0 });
   function flameMaterial(o, layer = 0) {
     return new THREE.ShaderMaterial({
       vertexShader: FLAME_VERT, fragmentShader: FLAME_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false,
       uniforms: {
         time: { value: Math.random() * 10 }, power: { value: 0.5 }, ab: { value: 0 }, seed: { value: Math.random() * 50 }, layer: { value: layer }, kick: { value: 0 }, dsp: { value: 1 }, dvis: { value: 1 },
-        hot: { value: new THREE.Color(o.core || 0xfff1d0) }, mid: { value: new THREE.Color(o.color || 0xff7a26) }
+        hot: { value: new THREE.Color(o.core || 0xfff1d0) }, mid: { value: new THREE.Color(o.color || 0xff7a26) }, night: FLAME_NIGHT
       }
     });
+  }
+  /** Heat-shimmer sheath: same shader (layer 2) sharing the core's animated uniforms, so no extra per-frame work. */
+  function shimmerMaterial(coreMat) {
+    const u = Object.assign({}, coreMat.uniforms, { layer: { value: 2 } });
+    return new THREE.ShaderMaterial({ vertexShader: FLAME_VERT, fragmentShader: FLAME_FRAG, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false, uniforms: u });
   }
   let haloTex = null;
   function haloTexture() {
@@ -168,11 +182,19 @@
     const core = new THREE.Mesh(FLAME_GEO, coreMat);
     core.scale.set(0.5, 0.5, 0.62); core.renderOrder = 10; core.visible = false;
     flame.add(core);
+    // heat shimmer around the afterburner plume (child of the core: visible only with the burner lit and nearby)
+    let shimmer = null;
+    if (!o.rocket && !o.small && RJ.settings.quality !== "low") {
+      shimmer = new THREE.Mesh(FLAME_GEO, shimmerMaterial(coreMat));
+      shimmer.scale.set(3.1, 3.1, 2.3); shimmer.renderOrder = 8;
+      core.add(shimmer);
+    }
     // camera-facing halo for the bloom around the nozzle (child of the glow disc)
     const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: haloTexture(), color: o.rocket ? 0xffd8a8 : 0xffb070, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
     halo.scale.setScalar(r * 3.2); halo.position.z = 0.05;
     glow.add(halo);
     for (const m of [flame, glow, core, halo]) m.layers.set(RJ.LATE);
+    if (shimmer) shimmer.layers.set(RJ.LATE);
     g.add(flame, glow);
     g.userData.flames.push({ flame, glow, mat, core, coreMat, halo, r, small: !!o.small, rocket: !!o.rocket, nozzle, lip });
     g.userData.nozzles.push(V3(x, y, z + r * 0.3));
@@ -1153,18 +1175,20 @@
       a.cat === "airliner" || a.cat === "civil" ? 0.35 : a.cat === "future" ? 0.25 : a.cat === "historic" ? 1.15 : stealthy ? 0.55 : a.cat === "space" ? 0.6 : 0.9,
       a.cat === "airliner" || a.cat === "civil" ? 0.55 : PJ && PJ.metal > 0.7 ? 0.3 : 0) } };
     const pm = (m) => { if (pat) m.userData.rjPat = pat; m.userData.rjAir = air; return panelize(m); };
+    // reflections by finish: glossy airliner paint and bare metal mirror the sky, stealth coatings stay dull
+    const eB = stealthy ? 0.7 : a.cat === "airliner" || a.cat === "civil" ? 1.35 : 1.15;
     const M = {
-      body: pm(std(body, rB, mB)),
-      trim: pm(std(trim, PJ && PJ.rough != null ? PJ.rough + 0.06 : stealthy ? 0.74 : 0.55, PJ && PJ.metal != null ? PJ.metal : stealthy ? 0.12 : 0.3)),
+      body: pm(std(body, rB, mB, { envMapIntensity: eB })),
+      trim: pm(std(trim, PJ && PJ.rough != null ? PJ.rough + 0.06 : stealthy ? 0.74 : 0.55, PJ && PJ.metal != null ? PJ.metal : stealthy ? 0.12 : 0.3, { envMapIntensity: eB * 0.95 })),
       facet: pm(std(body, 0.62, 0.2, { flatShading: true })),
       glass: new THREE.MeshStandardMaterial({ color: a.colors.glass, roughness: 0.04, metalness: 1.0, transparent: true, opacity: 0.6, envMapIntensity: 1.7 }),
       dark: std(0x1c1e21, 0.82, 0.2),
-      metal: std(0x707176, 0.3, 0.9, { emissive: 0x000000 }),
-      white: std(0xe8e8e4, 0.45, 0.08),
+      metal: std(0x707176, 0.3, 0.9, { emissive: 0x000000, envMapIntensity: 1.45 }),
+      white: std(0xe8e8e4, 0.45, 0.08, { envMapIntensity: 1.1 }),
       accent: std(PJ && PJ.accent != null ? PJ.accent : a.colors.accent || trim, 0.45, 0.3),
       glow: new THREE.MeshBasicMaterial({ color: a.colors.accent || 0x3d7dff }),
       rubber: std(0x151515, 0.92, 0),
-      strut: std(0xb9bdc2, 0.32, 0.85)
+      strut: std(0xb9bdc2, 0.32, 0.85, { envMapIntensity: 1.35 })
     };
     BUILDERS[a.build](g, M, a.buildOpts || {});
     addSurfaces(g, M, a);

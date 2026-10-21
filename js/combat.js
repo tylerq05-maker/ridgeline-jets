@@ -311,6 +311,13 @@
         // proximity fuse
         if (dist < (m.decoyed ? 10 : 14 + (m.target ? m.target.radius * 0.4 : 0))) { detonate(m, i, m.decoyed ? null : m.target); continue; }
       }
+      // defeated (seduced by a flare or the seeker lost the target): no longer a threat, self-destructs shortly
+      if ((m.lost || m.decoyed) && !m._defeated && m.target && m.target.alive) {
+        m._defeated = m.decoyed ? "flares" : "evaded";
+        m.life = Math.min(m.life, m.decoyed ? 3.2 : 2.2);
+        const k = m.target.incoming.indexOf(m); if (k >= 0) m.target.incoming.splice(k, 1);
+        RJ.emit("missileDefeated", { msl: m, by: m.owner, target: m.target, how: m._defeated });
+      }
       m.vel.copy(dir).multiplyScalar(m.speed);
       m.pos.addScaledVector(m.vel, dt);
       m.mesh.position.copy(m.pos);
@@ -331,6 +338,7 @@
     RJ.emit("explosion", { pos: m.pos.clone(), big: 0.6 * (m.boom || 1) });
     if (m.owner && m.owner.remote) { /* cosmetic copy of another player's missile: their game scores it */ }
     else if (hit && hit.alive) {
+      m._csHit = true; // the spectator modes read this to tell a hit from a defeated missile
       hit.damage(m.dmg * RJ.rand(0.85, 1.15), m.owner, "missile");
       m.owner.stats.mslHits++;
       if (m.owner.isPlayer) RJ.emit("hitmarker", hit);
@@ -422,20 +430,37 @@
     ace: { react: 0.12, gUse: 0.97, aim: 1.6 * DEG, flare: 0.95, mslRate: 0.8, evade: 0.95, lead: 1.0, minAgl: 150 }
   };
   C.DIFF = DIFF;
-  /* Fighting styles: how a pilot likes to win the merge. */
+  /* Fighting styles: how a pilot likes to win the merge.
+   * vert: liking for the vertical (yo-yos, zooms, oblique loops) · scissor: willingness to scissor when overshot
+   * merge: what it does at a head-on pass (vertical | flat | slice | extend). */
   const STYLES = {
-    turner: { name: "turner", mslMul: 0.8, gunRange: 1100, closeAB: 2200 },     // rate fight at corner speed
-    brawler: { name: "brawler", mslMul: 0.6, gunRange: 1300, closeAB: 1400 },   // presses in for guns
-    boomer: { name: "boomer", mslMul: 1.0, gunRange: 900, closeAB: 2600 },      // boom-and-zoom: dive, shoot, extend, climb
-    sniper: { name: "sniper", mslMul: 1.6, gunRange: 800, closeAB: 3000 }       // keeps missile range, cranks away when close
+    turner: { name: "turner", mslMul: 0.8, gunRange: 1100, closeAB: 2200, vert: 0.25, scissor: 1, merge: "flat" },       // rate fight at corner speed
+    brawler: { name: "brawler", mslMul: 0.6, gunRange: 1300, closeAB: 1400, vert: 0.45, scissor: 0.8, merge: "slice" },  // presses in for guns
+    boomer: { name: "boomer", mslMul: 1.0, gunRange: 900, closeAB: 2600, vert: 1, scissor: 0.2, merge: "vertical" },     // boom-and-zoom: dive, shoot, extend, climb
+    sniper: { name: "sniper", mslMul: 1.6, gunRange: 800, closeAB: 3000, vert: 0.5, scissor: 0.1, merge: "extend" }      // keeps missile range, cranks away when close
   };
-  const pickStyle = (ac) => {
-    const big = ["f15c", "f15ex", "f22", "yf23", "f14", "sr71", "yf12", "xb70"].includes(ac.id);
-    const r = Math.random();
-    return big ? (r < 0.4 ? "boomer" : r < 0.75 ? "sniper" : "turner") : (r < 0.55 ? "turner" : r < 0.85 ? "brawler" : "boomer");
+  /** What the airframe is good at: thrust/weight, g, roll rate, stealth, missiles. */
+  function capsOf(ac) {
+    const s = ac.spec, F = s.flight || {};
+    return { tw: (F.ab || F.mil || 8) / RJ.G0, gmax: F.gmax || 7, roll: F.roll || 180, stealth: s.stealth || 1,
+      msl: (s.msl && s.msl.n) || 0, mrange: (s.msl && s.msl.range) || 0, gun: !!s.gun, vmax: F.vmax || 300 };
+  }
+  /* Personality from capabilities (with some randomness): high-T/W jets go vertical, high-g agile jets turn,
+   * missile-heavy / stealthy jets snipe from range, rugged gun platforms brawl. */
+  const pickStyle = (ac, cap) => {
+    cap = cap || capsOf(ac);
+    const sc = {
+      turner: Math.max(0, cap.gmax - 7) * 0.8 + cap.roll / 260 + (cap.tw < 1.4 ? 0.3 : 0),
+      boomer: Math.max(0, cap.tw - 1.2) * 3.2 + (cap.vmax > 650 ? 0.35 : 0),
+      sniper: cap.msl / 9 + (cap.mrange >= 9000 ? 0.45 : 0) + (cap.stealth - 1) * 1.1,
+      brawler: (cap.gun ? 0.45 : 0) + (ac.spec.hp || 120) / 400
+    };
+    let best = "turner", bs = -1;
+    for (const k in sc) { const v = sc[k] + Math.random() * 0.75; if (v > bs) { bs = v; best = k; } }
+    return best;
   };
   C.STYLES = STYLES;
-  const UPV = V3(0, 1, 0);
+  const UPV = V3(0, 1, 0), _a = V3(), _b = V3(), _c = V3(), _los = V3();
   /** Lowest clearance (m) along a straight path from p in direction d for the given distances. */
   function pathClear(p, d, dists, climb) {
     let m = Infinity;
@@ -455,7 +480,11 @@
       this.desired = V3().copy(ac.fwd); this.thr = 0.85; this.ab = false; this.fireWish = false;
       this.mslWait = RJ.rand(2, 5);
       this.role = opts.role || "fighter";
-      this.style = STYLES[opts.style || pickStyle(ac)];
+      this.cap = capsOf(ac);
+      this.style = STYLES[opts.style] || STYLES[pickStyle(ac, this.cap)];
+      // personal liking for the vertical: the style's, pushed by the jet's thrust/weight
+      this.vert = RJ.clamp(this.style.vert * 0.6 + (this.cap.tw - 1.15) * 0.9 + Math.random() * 0.15, 0, 1);
+      this.circleT = 0; this.defT = 0; this.mergeT = -99; this.clock = 0; this.tactic = ""; this.brake = false;
       this.order = opts.order || (this.role === "wingman" ? "cover" : null);
       this.leader = opts.leader || null;
       this.route = opts.route || null; this.wp = 0; this.loop = !!opts.loop;
@@ -467,7 +496,7 @@
     get done() { return !!this.route && this.wp >= this.route.length && !this.loop; }
     think() {
       const ac = this.ac, sk = this.sk, dtT = sk.react;
-      this.phaseT -= dtT;
+      this.phaseT -= dtT; this.clock += dtT; this.brake = false;
       // scripted break (formation split, flank): hold a heading for a moment, terrain permitting
       if (this.overT > 0) { this.overT -= dtT; this.mode = "break"; this.desired.copy(this.overDir); this.thr = 1; this.ab = true; this.fireWish = false; this.avoidTerrain(); return; }
       // ---------- target selection by role / order ----------
@@ -480,33 +509,28 @@
       else if (this.role === "strike" || this.role === "route" || this.role === "runner") ac.target = null;
       const tgt = ac.target && ac.target.alive ? ac.target : null;
       // ---------- threats ----------
-      let threat = null, td = 1e9;
-      for (const m of ac.incoming) { const d = m.pos.distanceTo(ac.pos); if (d < td) { td = d; threat = m; } }
-      let gunner = null;
+      // the most urgent missile (shortest time to go), ignoring ones already defeated
+      let threat = null, td = 1e9, tgo = 1e9;
+      for (const m of ac.incoming) {
+        if (m.lost || m.decoyed) continue;
+        const rel = tv.copy(ac.pos).sub(m.pos), d = rel.length();
+        const cl = tv2.copy(m.vel).sub(ac.vel).dot(rel) / Math.max(d, 1);
+        const tg = d / Math.max(cl, 40);
+        if (tg < tgo) { tgo = tg; td = d; threat = m; }
+      }
+      let gunner = null, gd = 1e9;
       for (const e of C.enemiesOf(ac)) {
         const rel = tv.copy(ac.pos).sub(e.pos); const d = rel.length();
-        if (d < 1100 && rel.dot(e.fwd) / d > 0.96 && tv2.copy(e.pos).sub(ac.pos).dot(ac.fwd) < 0) { gunner = e; break; }
+        if (d < 1200 && d < gd && rel.dot(e.fwd) / d > (d < 600 ? 0.93 : 0.96) && tv2.copy(e.pos).sub(ac.pos).dot(ac.fwd) < 0.3 * d) { gunner = e; gd = d; }
       }
       this.fireWish = false;
       const F = ac.spec.flight, corner = F.vstall * Math.sqrt(F.gmax) * 1.05;
-      if (threat && td < 3200 && Math.random() < sk.evade) {
-        this.mode = "evade";
-        // beam the missile: turn perpendicular to its line of sight, dive slightly
-        const los = tv.copy(threat.pos).sub(ac.pos).normalize();
-        const side = tv2.copy(los).cross(UPV).normalize();
-        if (side.dot(ac.fwd) < 0) side.negate();
-        this.desired.copy(side).addScaledVector(UPV, -0.25).normalize();
-        this.thr = 1; this.ab = true;
-        if (td < 1800 && Math.random() < sk.flare) C.dropFlares(ac);
-      } else if (gunner && this.role !== "route" && Math.random() < sk.evade) {
-        this.mode = "defend";
-        this.jinkT -= dtT;
-        if (this.jinkT <= 0) { this.jinkT = RJ.rand(0.8, 2); this.jinkDir = Math.random() < 0.5 ? -1 : 1; }
-        const away = tv.copy(ac.right).multiplyScalar(this.jinkDir).addScaledVector(ac.up, 0.6).addScaledVector(ac.fwd, 0.3).normalize();
-        this.desired.copy(away);
-        this.thr = 1; this.ab = true;
-        if (ac.lockedByT > 0 && Math.random() < sk.flare * 0.3) C.dropFlares(ac);
-      } else if (this.role === "route" || this.role === "strike" || this.role === "runner") this.flyRoute();
+      this.corner = corner;
+      const wasDef = this.mode === "evade" || this.mode === "defend";
+      if (threat && (td < 3200 || tgo < 7) && (wasDef || Math.random() < sk.evade)) this.defendMissile(threat, td, tgo, corner);
+      else if (this.phase === "splitS") this.splitS(corner);
+      else if (gunner && this.role !== "route" && (wasDef || Math.random() < sk.evade)) this.defendGuns(gunner, gd, corner);
+      else if (this.role === "route" || this.role === "strike" || this.role === "runner") this.flyRoute();
       else if (this.role === "wingman" && this.order === "form" && this.leader && this.leader.alive && !tgt) this.formUp(0);
       else if (this.role === "wingman" && this.order === "defend" && !tgt && this.objective) this.orbit(this.objective, 1300);
       else if (tgt) this.attack(tgt, corner);
@@ -574,45 +598,228 @@
         ac.target = shooter; return;
       }
     }
+    /** Missile defence: drag IR shots, beam/notch radar shots, flares on time, a hard break at the last second. */
+    defendMissile(m, td, tgo, corner) {
+      const ac = this.ac, sk = this.sk;
+      this.mode = "evade"; this.phase = null; this.thr = 1; this.ab = true;
+      const los = _los.copy(m.pos).sub(ac.pos).normalize(); // toward the missile
+      const ir = m.type === "ir" || m.type === "heat";
+      const low = ac.agl < sk.minAgl * 3 + 300;
+      if (tgo < 2.1 || td < 600) {
+        // last-ditch: pull hard across the missile's flight path in our own lift plane, dumping flares
+        if (this.ldM !== m) {
+          this.ldM = m;
+          const mv = _a.copy(m.vel).normalize(), d = (this.ldDir = this.ldDir || V3());
+          d.copy(ac.up).addScaledVector(mv, -ac.up.dot(mv));
+          if (d.lengthSq() < 1e-3) d.copy(ac.right);
+          if (low && d.y < 0.2) d.y = 0.2 + Math.abs(d.y) * 0.5;
+          d.normalize();
+        }
+        this.tactic = "last-ditch break";
+        this.desired.copy(this.ldDir).addScaledVector(ac.fwd, 0.15).normalize();
+        if (Math.random() < sk.flare) C.dropFlares(ac);
+        return;
+      }
+      this.ldM = null;
+      if (ir && tgo > 4) {
+        // drag: put the missile on the tail and make it chase until its motor burns out
+        this.tactic = "drag";
+        this.desired.copy(los).negate();
+        this.desired.y = low ? Math.max(0.08, this.desired.y) : RJ.clamp(this.desired.y, -0.3, 0.1);
+        this.desired.normalize();
+        if (tgo < 5.5 && Math.random() < sk.flare * 0.5) C.dropFlares(ac);
+      } else {
+        // beam (IR) / notch (radar, nose low into the clutter): perpendicular to the line of sight so the seeker must lead hard
+        this.tactic = ir ? "beam" : "notch";
+        const side = _a.copy(los).cross(UPV).normalize();
+        if (side.dot(ac.fwd) < 0) side.negate();
+        this.desired.copy(side).addScaledVector(UPV, low ? 0.06 : ir ? -0.12 : -0.3).normalize();
+        if ((ir ? tgo < 4 : tgo < 3) && Math.random() < sk.flare * (ir ? 0.9 : 0.6)) C.dropFlares(ac);
+      }
+    }
+    /** Guns defence: break into the attacker (forcing an overshoot), jink out of plane inside guns range. */
+    defendGuns(e, d, corner) {
+      const ac = this.ac, sk = this.sk;
+      this.mode = "defend"; this.thr = 1;
+      if (this.phase !== "splitS") this.phase = null;
+      const rel = _a.copy(e.pos).sub(ac.pos);
+      const lat = _b.copy(rel).addScaledVector(ac.fwd, -rel.dot(ac.fwd));
+      if (lat.lengthSq() < 1) lat.copy(ac.right).multiplyScalar(this.side);
+      lat.normalize();
+      this.jinkT -= sk.react;
+      if (d < 500) {
+        this.tactic = "guns jink";
+        if (this.jinkT <= 0) { this.jinkT = RJ.rand(0.7, 1.4); this.jinkDir = Math.random() < 0.5 ? -1 : 1; }
+        const oop = _c.copy(ac.fwd).cross(lat).multiplyScalar(this.jinkDir);
+        this.desired.copy(lat).multiplyScalar(0.6).add(oop).addScaledVector(ac.fwd, 0.2).normalize();
+      } else {
+        this.tactic = "break into";
+        this.desired.copy(lat).addScaledVector(ac.fwd, 0.2).addScaledVector(UPV, ac.speed < corner * 0.85 ? -0.25 : 0.08).normalize();
+      }
+      this.ab = ac.speed < corner * 1.15;
+      if (ac.speed > corner * 1.35) this.thr = 0.6;
+      this.defT += sk.react;
+      if (this.defT > 4 && d > 450 && this.canSplitS() && Math.random() < 0.3) { this.startSplitS(); this.mode = "defend"; }
+      if (ac.lockedByT > 0 && Math.random() < sk.flare * 0.3) C.dropFlares(ac);
+    }
+    /** Enough height (and not too fast) to roll inverted and pull through a half loop downward? */
+    canSplitS() {
+      const ac = this.ac, F = ac.spec.flight, n = Math.max(3, F.gmax * this.sk.gUse * 0.8);
+      const r = (ac.speed * ac.speed) / (RJ.G0 * n);
+      return ac.agl > 2.4 * r + this.sk.minAgl * 2.5 + 400 && ac.speed < F.vmax * 0.7;
+    }
+    startSplitS() {
+      this.phase = "splitS"; this.phaseT = 8; this.ssStage = 0; this.defT = 0;
+      this.phaseDir = (this.phaseDir || V3()).copy(this.ac.fwd).setY(0);
+      if (this.phaseDir.lengthSq() < 1e-4) this.phaseDir.copy(this.ac.up).negate().setY(0);
+      this.phaseDir.normalize();
+    }
+    /** Split-S: half-roll, pull through the bottom of a half loop, then a diving extension away. */
+    splitS() {
+      const ac = this.ac;
+      this.mode = "splitS"; this.tactic = "split-S"; this.thr = 0.55; this.ab = false; this.fireWish = false;
+      if (this.ssStage === 0) {
+        this.desired.copy(this.phaseDir).multiplyScalar(0.25).addScaledVector(UPV, -1).normalize();
+        if (ac.fwd.y < -0.55) this.ssStage = 1;
+      } else {
+        const back = _a.copy(this.phaseDir).negate();
+        this.desired.copy(back).addScaledVector(UPV, -0.1).normalize();
+        this.thr = 0.8;
+        if (ac.fwd.dot(back) > 0.6 && ac.fwd.y > -0.35) { this.setPhase("extend", RJ.rand(3, 5)); return; } // dive escape: keep running
+      }
+      if (this.phaseT <= 0) this.endPhase();
+    }
+    setPhase(name, t) { this.phase = name; this.phaseT = t; this.tactic = name; }
+    endPhase() { this.phase = null; this.phaseT = 0; this.lastPhaseEnd = this.clock; }
     attack(tgt, corner) {
-      const ac = this.ac, sk = this.sk, st = this.style;
+      const ac = this.ac, sk = this.sk, st = this.style, F = ac.spec.flight, G = RJ.G0;
       this.mode = "attack";
       const rel = tv.copy(tgt.pos).sub(ac.pos);
       const dist = rel.length();
+      const los = _los.copy(rel).multiplyScalar(1 / Math.max(dist, 1));
       const g = ac.spec.gun;
       const bspeed = g ? g.speed : 1000;
       const tof = dist / (bspeed + ac.speed * 0.5);
-      const aim = tv2.copy(tgt.pos).addScaledVector(tgt.vel, tof * sk.lead).sub(ac.pos);
-      if (dist > 2500) aim.copy(tgt.pos).addScaledVector(tgt.vel, Math.min(8, dist / Math.max(100, ac.speed))).sub(ac.pos);
-      this.desired.copy(aim).normalize();
       const closing = -tv3.copy(tgt.vel).sub(ac.vel).dot(rel) / Math.max(dist, 1);
-      const off = Math.acos(RJ.clamp(tv3.copy(aim).normalize().dot(ac.fwd), -1, 1));
-      // ---- stalemate breaker: circling with the nose well off the target for too long ----
-      if (dist < 3000 && off > 1.2) this.stuckT += sk.react; else this.stuckT = Math.max(0, this.stuckT - sk.react * 2);
-      if (this.stuckT > 11 && !this.phase) { this.phase = st.name === "turner" || st.name === "brawler" ? "vertical" : "extend"; this.phaseT = this.phase === "extend" ? RJ.rand(5, 7) : RJ.rand(3, 4.5); this.stuckT = 0; }
-      // ---- boom-and-zoom: trade height for speed, then climb away again ----
-      if (st.name === "boomer" && !this.phase && dist < 3200 && ac.pos.y < tgt.pos.y + 300 && ac.speed > corner * 1.05 && off > 0.5) { this.phase = "zoom"; this.phaseT = RJ.rand(4, 6); }
-      if (st.name === "sniper" && !this.phase && dist < 1300 && off > 0.6) { this.phase = "extend"; this.phaseT = RJ.rand(4, 6); }
-      if (this.phase && this.phaseT <= 0) this.phase = null;
-      if (this.phase === "extend") {
-        this.mode = "extend";
-        // run away from the fight, unloaded and in burner, then come back around
-        this.desired.copy(rel).negate().setY(0).normalize().addScaledVector(UPV, 0.05).normalize();
-        this.thr = 1; this.ab = true; return;
+      const ata = Math.acos(RJ.clamp(los.dot(ac.fwd), -1, 1)); // our nose off the bandit
+      const tail = los.dot(tgt.fwd);                               // > 0: we're behind the bandit (it flies away from us); < 0: it points at us
+      const eDiff = (ac.pos.y - tgt.pos.y) + (ac.speed * ac.speed - tgt.speed * tgt.speed) / (2 * G); // specific-energy edge (m)
+      const need = sk.minAgl;
+      // gun solution (lead), whatever geometry we're flying
+      const gunAim = _b.copy(tgt.pos).addScaledVector(tgt.vel, tof * sk.lead).sub(ac.pos);
+      const offG = Math.acos(RJ.clamp(gunAim.dot(ac.fwd) / Math.max(gunAim.length(), 1), -1, 1));
+      this.fireWish = !!g && dist < st.gunRange && offG < sk.aim * (1 + 300 / Math.max(dist, 150));
+      // missiles
+      this.mslWait -= sk.react;
+      if (ac.locked && this.mslWait <= 0 && Math.random() < sk.mslRate * st.mslMul) {
+        if (C.fireMissile(ac)) this.mslWait = RJ.rand(5, 10) / (sk.mslRate * st.mslMul);
       }
-      if (this.phase === "vertical") {
-        this.mode = "vertical";
-        this.desired.copy(ac.fwd).setY(0).normalize().addScaledVector(ac.right, this.side * 0.4).addScaledVector(UPV, 1.1).normalize();
-        this.thr = 1; this.ab = true; return;
+      // ---- situation timers ----
+      if (-tail > 0.6 && ata > 2.0 && dist < 2500) this.defT += sk.react; else this.defT = Math.max(0, this.defT - sk.react);
+      const flat = Math.abs(ac.fwd.y) < 0.35 && Math.abs(tgt.fwd.y) < 0.4;
+      if (dist < 4000 && flat && Math.abs(ac.bank) > 0.75 && offG > 0.25) this.circleT += sk.react;
+      else this.circleT = Math.max(0, this.circleT - sk.react * (flat ? 0.5 : 1.5));
+      if (dist < 3000 && ata > 1.2) this.stuckT += sk.react; else this.stuckT = Math.max(0, this.stuckT - sk.react * 2);
+      if (dist < 1500 && closing > 120 && -tail > 0.6 && ata < 0.8) this.headOn = true;
+      const fresh = !this.phase && this.clock - (this.lastPhaseEnd || -99) > 2.5;
+      const roomBelow = ac.agl > need * 4 + 1200;
+      if (this.phase && this.phaseT <= 0) this.endPhase();
+      // ---- stalemate: >25 s of flat co-turning (or the nose stuck far off) → change the plane of the fight ----
+      if (!this.phase && (this.circleT > 25 || this.stuckT > 16)) {
+        const r = Math.random();
+        if (ac.speed > corner * 0.85 && r < 0.35 + this.vert * 0.5) this.setPhase("vertical", RJ.rand(4, 6));
+        else if (roomBelow && r < 0.75) this.setPhase("slice", RJ.rand(3, 4.5));
+        else this.setPhase("extend", RJ.rand(5, 8));
+        this.circleT = 0; this.stuckT = 0;
       }
-      if (this.phase === "zoom") {
-        this.mode = "zoom";
-        this.desired.copy(ac.fwd).setY(0).normalize().addScaledVector(UPV, 0.9).normalize();
-        this.thr = 1; this.ab = true;
-        if (ac.pos.y > tgt.pos.y + 900) this.phase = null;
-        return;
+      // ---- just passed a head-on merge: the style's merge move (one-circle / two-circle / vertical / extend) ----
+      if (this.headOn && los.dot(ac.fwd) < 0.15 && dist < 1500) {
+        this.headOn = false;
+        if (!this.phase && this.clock - this.mergeT > 6) {
+          this.mergeT = this.clock;
+          let mv = st.merge;
+          if (mv === "flat" && this.vert > 0.6 && Math.random() < 0.5) mv = "vertical";
+          if (mv === "extend" && ac.missiles <= 0) mv = "flat";
+          if (mv === "slice" && !roomBelow) mv = "flat";
+          if (mv === "vertical" && ac.speed < corner * 0.9) mv = roomBelow ? "slice" : "flat";
+          if (mv !== "flat") this.setPhase(mv, mv === "extend" ? RJ.rand(5, 7) : mv === "vertical" ? RJ.rand(3.5, 5) : RJ.rand(3, 4));
+          else this.tactic = "flat turn";
+        }
+      } else if (dist > 2500) this.headOn = false;
+      // ---- defensive: overshot / bandit settling on the six ----
+      if (fresh && dist < 700 && -tail > 0.4 && los.dot(ac.fwd) < 0.3 && closing < 150) {
+        const r = Math.random();
+        if (r < st.scissor * 0.6 && ac.speed < corner * 1.3) this.setPhase("scissors", RJ.rand(4, 7));
+        else if (ac.speed > corner * 1.05 && r < 0.4 + this.vert * 0.4) this.setPhase("vertical", RJ.rand(3, 4.5));
+        else if (this.canSplitS() && r < 0.8) this.startSplitS();
       }
-      // avoid head-on collisions
+      if (!this.phase && this.defT > 5) {
+        if (this.canSplitS() && Math.random() < 0.5) this.startSplitS();
+        else if (ac.speed > tgt.speed * 1.15 && dist > 1200) this.setPhase("extend", RJ.rand(4, 6)); // faster: run for it
+      }
+      // ---- offensive geometry: yo-yos to avoid overshooting or to close the range ----
+      if (fresh && !this.phase && tail > 0.2 && dist < 1500 && closing > 60 + dist * 0.03 && ata > 0.35 && Math.random() < 0.3 + this.vert * 0.4) this.setPhase("hiyoyo", RJ.rand(2, 3.5));
+      else if (fresh && !this.phase && tail > 0.2 && dist > 900 && dist < 3500 && closing < -15 && ata > 0.25 && ac.agl > need * 3 + 500 && Math.random() < 0.35) this.setPhase("loyoyo", RJ.rand(2.5, 3.5));
+      // ---- energy ----
+      if (!this.phase && ac.speed < Math.max(corner * 0.7, F.vstall * 1.5) && (tail < 0.3 || ata > 0.8) && !(-tail > 0.7 && dist < 1500)) this.setPhase("extend", RJ.rand(4, 6)); // out of energy: unload, extend, come back
+      if (fresh && !this.phase && (st.name === "boomer" || this.vert > 0.7) && dist < 3200 && ata > 0.5 && ac.speed > corner * 1.05 && (ac.pos.y < tgt.pos.y + 300 || eDiff > 600)) this.setPhase("zoom", RJ.rand(4, 6)); // boom-and-zoom
+      if (st.name === "sniper" && !this.phase && ac.missiles > 0 && dist < 1300 && ata > 0.6) this.setPhase("extend", RJ.rand(4, 6)); // open up to missile range
+      switch (this.phase) {
+        case "extend": {
+          this.mode = "extend";
+          // unloaded run away from the fight in burner, diving for speed if there's room, then turn back in
+          this.desired.copy(rel).negate().setY(0).normalize().addScaledVector(UPV, ac.agl > need * 3 + 600 ? -0.12 : 0.05).normalize();
+          this.thr = 1; this.ab = true;
+          if (dist > (st.name === "sniper" ? 5000 : 3500) && ac.speed > corner * 1.15) this.endPhase();
+          return;
+        }
+        case "vertical":
+          this.mode = "vertical";
+          this.desired.copy(ac.fwd).setY(0).normalize().addScaledVector(ac.right, this.side * 0.4).addScaledVector(UPV, 1.1).normalize();
+          this.thr = 1; this.ab = true;
+          if (ac.speed < corner * 0.62) this.endPhase(); // over the top: pursuit pulls the nose back down onto him
+          return;
+        case "zoom":
+          this.mode = "zoom";
+          this.desired.copy(ac.fwd).setY(0).normalize().addScaledVector(UPV, 0.9).normalize();
+          this.thr = 1; this.ab = true;
+          if (ac.pos.y > tgt.pos.y + 900 || ac.speed < corner * 0.75) this.endPhase();
+          return;
+        case "hiyoyo":
+          this.mode = "hiyoyo";
+          this.desired.copy(los).addScaledVector(UPV, 0.8).normalize();
+          this.thr = 0.7; this.ab = false;
+          if (ac.pos.y > tgt.pos.y + 400 || closing < 20 || offG < 0.2) this.endPhase();
+          return;
+        case "loyoyo":
+          this.mode = "loyoyo";
+          this.desired.copy(los).addScaledVector(UPV, -0.55).normalize();
+          this.thr = 1; this.ab = true;
+          if (closing > 60 || ac.agl < need * 3) this.endPhase();
+          return;
+        case "slice":
+          this.mode = "slice";
+          this.desired.copy(los).setY(0).normalize().addScaledVector(UPV, -0.6).normalize();
+          this.thr = 1; this.ab = ac.speed < corner;
+          if (ac.agl < need * 3 + 300) this.endPhase();
+          return;
+        case "scissors":
+          this.mode = "scissors";
+          // reverse into him each time he crosses, slow down so he ends up in front, rolling over the top
+          this.desired.copy(los).addScaledVector(UPV, 0.4 * Math.sin(this.clock * 1.7)).normalize();
+          this.thr = 0.3; this.ab = false; this.brake = ac.speed > corner * 0.85;
+          if ((tail > 0.3 && ata < 0.6) || ac.speed < F.vstall * 1.3) this.endPhase();
+          return;
+      }
+      // ---- pursuit: lead for guns, lag to hold position without overshooting, pure to close, intercept at range ----
+      let aim;
+      if (dist > 2500) { aim = tv2.copy(tgt.pos).addScaledVector(tgt.vel, Math.min(8, dist / Math.max(100, ac.speed))).sub(ac.pos); this.tactic = "intercept"; }
+      else if (tail > 0 && dist < 2000 && ata > 0.3 && (closing > 110 || ac.speed > corner * 1.3)) { aim = tv2.copy(tgt.pos).addScaledVector(tgt.fwd, -Math.min(dist * 0.6, 450)).sub(ac.pos); this.tactic = "lag pursuit"; }
+      else if (dist < st.gunRange * 2 && ata < 0.7) { aim = gunAim; this.tactic = "lead pursuit"; }
+      else { aim = tv2.copy(tgt.pos).sub(ac.pos); this.tactic = "pure pursuit"; }
+      this.desired.copy(aim).normalize();
+      // fights drifting into the weeds: bias the turn upward
+      if (ac.agl < need * 2.5) this.desired.addScaledVector(UPV, 0.15).normalize();
       // avoid head-on collisions: break up and to the right (both jets doing it means a left-to-left pass)
       if (dist < 600 && closing > 120) this.desired.addScaledVector(ac.up, 0.45).addScaledVector(ac.right, 0.9).normalize();
       // energy management by style
@@ -621,12 +828,6 @@
       else { this.ab = dist > st.closeAB || ac.speed < corner * 1.1; this.thr = dist < 700 && closing > 60 ? 0.45 : 0.95; }
       // snipers hold the target at missile range with a crank
       if (st.name === "sniper" && dist > 1500 && dist < 4500 && ac.locked) this.desired.addScaledVector(ac.right, this.side * 0.35).normalize();
-      this.fireWish = !!g && dist < st.gunRange && off < sk.aim * (1 + 300 / Math.max(dist, 150));
-      // missiles
-      this.mslWait -= sk.react;
-      if (ac.locked && this.mslWait <= 0 && Math.random() < sk.mslRate * st.mslMul) {
-        if (C.fireMissile(ac)) this.mslWait = RJ.rand(5, 10) / (sk.mslRate * st.mslMul);
-      }
     }
     /** Waypoint following for bombers, strike packages and fleeing targets. */
     flyRoute() {
@@ -688,7 +889,17 @@
       const need = sk.minAgl * (this.role === "runner" || this.role === "strike" ? 0.55 : 1) * (C.crowd ? 1.3 : 1);
       // diving at a target near the ground: never commit below the floor
       if (ac.agl < need * 2.2 && this.desired.y < -0.1) this.desired.y = -0.1;
-      if (clear >= need && ac.agl >= need * 0.7) return;
+      // sink rate: can we still pull out of this dive (at the g we'll actually use) above the floor?
+      const sink = -ac.vel.y;
+      let pullout = false;
+      if (sink > 15) {
+        const F = ac.spec.flight, n = Math.max(2, (F.gmax || 6) * sk.gUse * 0.85 - 1);
+        const gam = Math.asin(RJ.clamp(sink / v, 0, 1));
+        const loss = (v * v) / (RJ.G0 * n) * (1 - Math.cos(gam)) + sink * (sk.react * 1.5 + 0.4);
+        pullout = ac.agl - loss < need * 0.9;
+      }
+      if (clear >= need && ac.agl >= need * 0.7 && !pullout) return;
+      if (pullout && this.phase && this.phase !== "vertical" && this.phase !== "zoom") this.endPhase();
       this.mode = "climb"; this.rollT = 0;
       const flat = tv2.copy(ac.fwd).setY(0).normalize();
       let best = null;
@@ -697,7 +908,7 @@
         const c = pathClear(ac.pos, d, dists, 0.35) - Math.abs(a) * 40;
         if (!best || c > best.c) best = { d, c };
       }
-      const urgent = clear < need * 0.4 || ac.agl < need * 0.35;
+      const urgent = clear < need * 0.4 || ac.agl < need * 0.35 || (pullout && ac.fwd.y < -0.3);
       this.desired.copy(best.d).addScaledVector(UPV, urgent ? 1.3 : 0.65).normalize();
       this.ab = true; this.thr = 1; this.fireWish = false;
     }
@@ -714,7 +925,8 @@
       if (off < 0.12) rollErr = RJ.lerp(-ac.bank * 0.8, rollErr, off / 0.12);
       const roll = RJ.clamp(rollErr * 2.4, -1, 1);
       let pitch = 0;
-      const gUse = this.mode === "form" || this.mode === "route" || this.mode === "orbit" ? Math.min(this.sk.gUse, 0.55) : this.sk.gUse;
+      let gUse = this.mode === "form" || this.mode === "route" || this.mode === "orbit" ? Math.min(this.sk.gUse, 0.55) : this.sk.gUse;
+      if (this.mode === "evade" || this.mode === "defend" || this.mode === "climb" || this.mode === "splitS") gUse = Math.min(1, gUse + 0.12); // defensive / pull-up: everything the jet has
       if (l.y > 0 || Math.abs(rollErr) < 1.2) pitch = RJ.clamp(off * 3.2, 0, 1) * Math.max(0, Math.cos(rollErr)) * gUse;
       if (off < 0.1) pitch = RJ.clamp(l.y * 12, -0.4, 1) * gUse;
       ac.input.pitch = pitch;
@@ -722,7 +934,7 @@
       ac.input.yaw = off < 0.15 ? RJ.clamp(l.x * 8, -1, 1) : 0;
       ac.input.thrAbs = this.thr;
       ac.input.ab = this.ab;
-      ac.input.brake = this.mode === "form" && this.thr < 0.2;
+      ac.input.brake = (this.mode === "form" && this.thr < 0.2) || (this.brake && this.mode === "scissors");
       if (this.rollT > 0 && ac.agl > 400 && this.mode !== "climb" && this.mode !== "recover") { this.rollT -= dt; ac.input.roll = this.rollDir; ac.input.pitch = 0.5 * gUse; ac.input.yaw = 0; }
       // fire in bursts
       if (this.fireWish && !ac.overheated) { this.burstT += dt; ac.input.guns = this.burstT < 0.7; if (this.burstT > 1.1) this.burstT = 0; }

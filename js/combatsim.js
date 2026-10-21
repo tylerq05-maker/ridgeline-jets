@@ -139,18 +139,55 @@
       if (o.style === "missile") for (const ac of [this.A, this.B]) ac.pilot.mslWait = 2;
       this.t = 0; this.ended = false; this.endT = 0; this.events = []; this.lastMsl = null; this.slow = 0;
       this.cam = { shot: "wide", auto: true, t: 0, pos: null, look: V3(), fov: 50, lensPos: null, cut: true, lastShot: 0 };
-      this.hudOn = true; this.buildHud();
+      // ---- shared spectator state (see docs/CS-INTERFACES.md) ----
+      this.sel = this.A; this.listeners = []; this.evLog = []; this.watch = new Map(); this.slowReq = 0;
+      this.A.csId = 1; this.B.csId = 2;
+      // optional modules: cinematic camera (cs-camera.js), spectator UI (cs-ui.js), pilot radio (cs-radio.js)
+      this.camMod = RJ.csCam ? RJ.csCam.create(this) : null;
+      if (this.camMod && !this.camMod.names && RJ.csCam.LABELS) try { this.camMod.names = RJ.csCam.LABELS; } catch (e) { /* read-only */ }
+      this.radio = RJ.csRadio ? RJ.csRadio.create(this) : null;
+      this.ui = RJ.csUI ? RJ.csUI.create(this) : null;
+      for (const m of [this.camMod, this.radio, this.ui]) if (m && m.onEvent) this.listeners.push((e) => m.onEvent(e));
+      if (!this.ui) { this.hudOn = true; this.buildHud(); }
       RJ.ui.returnTo = "scr-csim";
+      if (RJ.post) RJ.post.cinematic = true; // filmic grade while spectating
 
       RJ.ui.flash("JET COMBAT SIMULATOR", `${this.A.spec.name} vs ${this.B.spec.name}`, 2.6);
     }
-    onMissile(e) { if (this.ended) return; this.lastMsl = e.msl; this.events.push({ t: this.t, k: "launch", by: e.by }); if (this.cam.auto && this.t - (this.cam.mslT || -99) > 6) { this.setShot("missile", true); this.cam.mslT = this.t; } }
+    /* ---------- shared interface ---------- */
+    other(ac) { return ac === this.A ? this.B : this.A; }
+    /** Spectate jet 1 or 2 (or an aircraft): camera subject and primary radio voice follow; the fight goes on. */
+    select(which) {
+      const ac = which === 1 ? this.A : which === 2 ? this.B : which && which.csId ? which : this.other(this.sel);
+      if (ac === this.sel) return;
+      this.sel = ac; this.emit("select", ac, { prev: this.other(ac) });
+    }
+    /** Request slow motion for `sec` seconds of real time (the strongest/longest request wins). */
+    slowMo(sec, scale) { this.slow = Math.max(this.slow, sec); this.slowScale = Math.min(this.slow > 0 && this.slowScale ? this.slowScale : 1, scale || 0.35); }
+    /** Combat event bus: { type, ac, other, t, data }. Types: see docs/CS-INTERFACES.md. */
+    emit(type, ac, data) {
+      const e = { type, ac, other: ac ? this.other(ac) : null, t: this.t, data: data || {} };
+      this.evLog.push(e); if (this.evLog.length > 400) this.evLog.shift();
+      for (const fn of this.listeners) { try { fn(e); } catch (err) { console.error(err); } }
+      RJ.emit("cs", e);
+      return e;
+    }
+    onMissile(e) {
+      if (this.ended) return; this.lastMsl = e.msl; this.events.push({ t: this.t, k: "launch", by: e.by });
+      const m = e.msl, fox = m.type === "ir" || m.type === "heat" ? "fox2" : "fox3";
+      this.emit("launch", e.by, { msl: m, fox, range: m.target ? Math.round(m.target.pos.distanceTo(e.by.pos)) : 0 });
+      if (m.target) this.emit("incoming", m.target, { msl: m, from: e.by });
+      if (!this.camMod && this.cam.auto && this.t - (this.cam.mslT || -99) > 6) { this.setShot("missile", true); this.cam.mslT = this.t; }
+    }
     onDestroyed(d) {
       const ac = d.ac;
       if (this.ended) return;
       this.ended = true; this.endT = 0; this.winner = ac === this.A ? this.B : ac === this.B ? this.A : null; this.cause = d.cause; this.victim = ac;
       this.slow = 3.2; // the decisive moment in slow motion
-      if (this.cam.auto) this.setShot(Math.random() < 0.5 ? "longlens" : "side", true);
+      if (!this.camMod && this.cam.auto) this.setShot(Math.random() < 0.5 ? "longlens" : "side", true);
+      const by = d.by && d.by !== ac ? d.by : null;
+      this.emit("down", ac, { cause: d.cause, by });
+      if (by) this.emit("kill", by, { victim: ac, cause: d.cause });
       RJ.ui.feed(`${d.by && d.by !== ac ? d.by.callsign + " ▸ " : ""}${ac.callsign} ${d.cause === "missile" ? "· missile" : d.cause === "gun" ? "· guns" : d.cause === "terrain" || d.cause === "water" ? "crashed" : "down"}`, ac === this.A ? "r" : "b");
     }
     update(dt) {
@@ -162,11 +199,57 @@
         if (this.t > 8 * 60) { this.ended = true; this.endT = 0; this.winner = null; this.cause = "time"; }
         // a close pass in auto mode: cut to the side camera and ease time down for a moment
         const sep = A.pos.distanceTo(B.pos), clos = tv.copy(B.vel).sub(A.vel).dot(tv2.copy(B.pos).sub(A.pos).normalize());
-        if (sep < 260 && clos < -150 && this.t - (this.passT || -99) > 12) { this.passT = this.t; if (this.cam.auto) this.setShot("side", true); this.slow = Math.max(this.slow, 1.1); }
+        if (sep < 260 && clos < -150 && this.t - (this.passT || -99) > 12) { this.passT = this.t; if (!this.camMod && this.cam.auto) this.setShot("side", true); this.slow = Math.max(this.slow, 1.1); }
+        this.detect(dt, sep, clos);
       } else {
         this.endT += dt;
         if (this.endT > 6 && !this.shown) { this.shown = true; this.results(); }
       }
+    }
+    /** Turns the simulation state into combat events (edges only, with per-type cool-downs so nothing repeats). */
+    detect(dt, sep, clos) {
+      const W = (ac, k) => { const key = ac.csId + k; let w = this.watch.get(key); if (!w) this.watch.set(key, (w = { v: 0, t: -99, n: 0 })); return w; };
+      const once = (ac, k, cool, data) => { const w = W(ac, "cd" + k); if (this.t - w.t < cool) return false; w.t = this.t; this.emit(k, ac, data); return true; };
+      for (const ac of [this.A, this.B]) {
+        if (!ac.alive) continue;
+        const o = this.other(ac), rel = tv.copy(o.pos).sub(ac.pos), d = rel.length(); rel.multiplyScalar(1 / Math.max(1, d));
+        const ata = rel.dot(ac.fwd), aspect = tv2.copy(ac.pos).sub(o.pos).normalize().dot(o.fwd); // ata > 0: o ahead of ac · aspect > 0: ac ahead of o (o pointing at ac)
+        const brg = Math.round((((Math.atan2(rel.x, -rel.z) / DEG) + 360) % 360) / 10) * 10;
+        const clock = Math.round(((((Math.atan2(rel.dot(ac.right), rel.dot(ac.fwd)) / DEG) + 360) % 360) / 30)) || 12;
+        // radar contact and visual
+        const wc = W(ac, "contact"); if (!wc.v && d < 60000 && this.t > 1.5) { wc.v = 1; this.emit("contact", ac, { bearing: brg, range: Math.round(d), alt: Math.round(o.pos.y) }); }
+        const wv = W(ac, "visual"); if (!wv.v && d < 6000) { wv.v = 1; this.emit("visual", ac, { range: Math.round(d), clock }); }
+        // lock gained / lost
+        const wl = W(ac, "lock"); if (ac.locked && !wl.v) { wl.v = 1; once(ac, "lock", 6, { range: Math.round(d) }); } else if (!ac.locked && wl.v) wl.v = 0;
+        // being locked
+        const wlb = W(ac, "lockedBy"); const lb = ac.lockedByT > 0; if (lb && !wlb.v) { wlb.v = 1; once(ac, "spiked", 8, { clock }); } else if (!lb) wlb.v = 0;
+        // bandit on the six / guns solution
+        const six = d < 1600 && ata < -0.55 && aspect > 0.7, w6 = W(ac, "six");
+        if (six) { w6.n += dt; if (w6.n > 1.2) { once(ac, "onsix", 9, { range: Math.round(d), clock }); once(o, "tally6", 9, { range: Math.round(d) }); } } else w6.n = 0;
+        // defensive break (the AI's evade / defend modes) and its direction
+        const pm = ac.pilot && ac.pilot.mode, wb = W(ac, "mode");
+        if (pm !== wb.v) { if ((pm === "evade" || pm === "defend" || pm === "break") && wb.v !== "evade" && wb.v !== "defend") once(ac, "break", 6, { dir: (ac.input && ac.input.roll) > 0 ? "right" : "left", mode: pm }); wb.v = pm; }
+        // flares
+        const wf = W(ac, "flares"); if (ac.flares < wf.v && wf.v > 0) once(ac, "flares", 5, { left: ac.flares }); wf.v = ac.flares;
+        // damage
+        const wh = W(ac, "hp"); if (!wh.v) wh.v = ac.hp;
+        if (ac.hp < wh.v - 0.5) { const dmg = wh.v - ac.hp, frac = ac.hp / ac.maxHp; once(ac, frac < 0.35 ? "heavydamage" : "hit", frac < 0.35 ? 4 : 3, { dmg: Math.round(dmg), frac, by: o }); once(o, "scored", 3, { dmg: Math.round(dmg) }); }
+        wh.v = ac.hp;
+        // target lost (out of sight behind, far), reacquired
+        const wt = W(ac, "lost"); const blind = d > 5000 && ata < -0.2;
+        if (blind) { wt.n += dt; if (wt.n > 4 && !wt.v) { wt.v = 1; once(ac, "lost", 15, { range: Math.round(d) }); } } else { if (wt.v && ata > 0.6) { wt.v = 0; once(ac, "reacquired", 10, { range: Math.round(d) }); } wt.n = 0; }
+        // disengaging: badly hurt and opening
+        if (ac.hp / ac.maxHp < 0.3 && clos > 40 && d > 2500) once(ac, "disengage", 30, { range: Math.round(d) });
+      }
+      // missiles: detect the ones that went away without a kill (defeated / missed)
+      const live = new Set(RJ.combat.missiles);
+      for (const m of this.trackM || []) if (!live.has(m) && !this.ended && m.target && m.target.alive && m.owner) {
+        if (!m._csHit) { this.emit("defeated", m.target, { from: m.owner }); this.emit("missed", m.owner, { target: m.target }); }
+      }
+      this.trackM = RJ.combat.missiles.filter((m) => m.owner === this.A || m.owner === this.B);
+      // the merge: closing fast through 600 m
+      if (sep < 600 && clos < -120 && this.t - (this.mergeT || -99) > 10) { this.mergeT = this.t; this.emit("merge", this.A, { sep: Math.round(sep), closing: Math.round(-clos) }); }
+      if (sep < 180 && this.t - (this.nearT || -99) > 8) { this.nearT = this.t; this.emit("nearmiss", this.A, { sep: Math.round(sep) }); }
     }
     /* ---------- camera director ---------- */
     setShot(s, cut) { this.cam.shot = s; this.cam.t = 0; this.cam.cut = !!cut; this.cam.lensPos = null; this.cam.lastShot = this.t; }
@@ -178,6 +261,7 @@
       return aBeh && !bBeh ? A : bBeh && !aBeh ? B : (this.heroPrev || A);
     }
     camera(camera, rdt) {
+      if (this.camMod) { const r = this.camMod.update(camera, rdt); this.focus = this.camMod.subject ? this.camMod.subject() : this.sel; return r || "cinematic"; }
       const C = this.cam, A = this.A, B = this.B, H = this.heroPrev = this.hero(), E = H === A ? B : A;
       C.t += rdt;
       // auto director: pick a shot for the moment
@@ -233,7 +317,15 @@
       this.focus = H;
       return "cinematic";
     }
+    /** Real-time per frame: slow motion eases in and out. */
+    tickTime() {
+      this.slow = Math.max(0, this.slow - (1 / 60));
+      const want = this.slowToggle ? 0.3 : this.slow > 0 ? (this.slowScale || 0.35) : 1;
+      if (this.slow <= 0) this.slowScale = 0;
+      this.timeScale += (want - this.timeScale) * 0.08;
+    }
     input(I) {
+      if (this.ui) { this.ui.input(I); this.tickTime(); return; }
       const C = this.cam, map = { "1": "wide", "2": "track", "3": "side", "4": "missile", "5": "overhead", "6": "longlens", "7": "dynamic" };
       for (const k in map) if (I.anyEdge(k)) { C.auto = false; this.setShot(map[k], true); RJ.ui.flash(map[k].toUpperCase() + " CAMERA", "0 for the auto director", 1); }
       if (I.anyEdge("0") || I.action("camera")) { C.auto = !C.auto; RJ.ui.flash(C.auto ? "AUTO DIRECTOR" : "MANUAL CAMERA", null, 1); }
@@ -260,7 +352,9 @@
       btn("HUD", () => { this.hudOn = !this.hudOn; h.style.display = this.hudOn ? "" : "none"; });
       document.body.appendChild(bar); this.barEl = bar;
     }
-    hud() {
+    hud(dt) {
+      if (this.radio && this.radio.update) this.radio.update(dt || 1 / 60);
+      if (this.ui) { this.ui.update(dt || 1 / 60); return; }
       if (!this.hudOn) return;
       const card = (el, ac) => {
         el.style.setProperty("--c", ac.csColor);
@@ -284,6 +378,7 @@
     }
     results() {
       if (this.hudEl) this.hudEl.style.display = "none"; if (this.barEl) this.barEl.style.display = "none";
+      if (this.ui && this.ui.hide) this.ui.hide();
       const A = this.A, B = this.B, w = this.winner;
       const line = (ac) => `${ac.stats.shots} rounds · ${ac.stats.hits} hits · ${ac.stats.mslHits}/${ac.stats.msl} missiles`;
       RJ.ui.showResults({
@@ -297,7 +392,7 @@
     status() { return ""; }
     objective() { return ""; }
     hudExtras() { return {}; }
-    dispose() { if (this.hudEl) this.hudEl.remove(); if (this.barEl) this.barEl.remove(); }
+    dispose() { if (this.hudEl) this.hudEl.remove(); if (this.barEl) this.barEl.remove(); for (const m of [this.camMod, this.radio, this.ui]) if (m && m.dispose) m.dispose(); if (RJ.post) RJ.post.cinematic = false; }
   }
   const tv = V3(), tv2 = V3(), tv3 = V3(), tp = V3(), tl = V3(), tp2 = V3(), tl2 = V3(), tz = V3(), tvR = V3();
   RJ.modes = RJ.modes || {};

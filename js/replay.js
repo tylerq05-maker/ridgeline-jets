@@ -34,11 +34,12 @@
     const data = new Float32Array(acs.length * NF), ids = new Array(acs.length);
     acs.forEach((ac, i) => {
       ids[i] = ac.uid;
-      if (!R.meta.has(ac.uid)) R.meta.set(ac.uid, { id: ac.id, team: ac.team, isPlayer: ac.isPlayer, callsign: ac.callsign });
+      if (!R.meta.has(ac.uid)) R.meta.set(ac.uid, { id: ac.id, team: ac.team, isPlayer: ac.isPlayer, callsign: ac.callsign, csId: ac.csId || 0 });
       pack(ac, data, i * NF);
     });
     const ms = RJ.combat.missiles.map((m) => [m._rid || (m._rid = ++R.rid), m.pos.x, m.pos.y, m.pos.z, m.t < m.burn ? 1 : 0]);
-    R.frames.push({ t: R.t, ids, data, ms, idx: null });
+    const fl = RJ.combat.flares.length ? RJ.combat.flares.map((f) => [f.p.x, f.p.y, f.p.z]) : null;
+    R.frames.push({ t: R.t, ids, data, ms, fl, idx: null });
     while (R.frames.length && R.t - R.frames[0].t > R.maxT) R.frames.shift();
     while (R.events.length && R.t - R.events[0].t > R.maxT + 1) R.events.shift();
   };
@@ -84,7 +85,8 @@
 
   /* ======================= REPLAY PLAYBACK ======================= */
   const P = { on: false, pups: new Map(), mpups: new Map(), shot: "director", speed: 1, slow: 1 };
-  const SHOTS = [["director", "Director"], ["chase", "Chase"], ["side", "Side"], ["flyby", "Flyby"], ["wide", "Wide"], ["orbit", "Orbit"]];
+  const SHOTS = [["director", "Director"], ["chase", "Chase"], ["side", "Side"], ["flyby", "Flyby"], ["wide", "Wide"], ["orbit", "Orbit"], ["cockpit", "Cockpit"], ["padlock", "Padlock"]];
+  const SHOT_NAMES = { chase: "Chase", side: "Side", flyby: "Flyby", wide: "Wide", low: "Low angle", landmark: "Landmark", boom: "Sonic boom", orbit: "Orbit", cockpit: "Cockpit", padlock: "Padlock" };
   const SPEEDS = [0.25, 0.5, 1, 2];
   let ghostMat = null;
   function makePuppet(meta, ghost) {
@@ -122,6 +124,11 @@
     RJ.fx.clear(); RJ.sonic.reset();
     for (const [uid, meta] of R.meta) P.pups.set(uid, makePuppet(meta));
     P.focusUid = [...R.meta.entries()].find(([, m]) => m.isPlayer)?.[0] ?? [...R.meta.keys()][0];
+    // two-jet spectator fights (Combat Simulator): the duel's jets by csId, starting on the one being watched
+    P.duel = [1, 2].map((id) => [...R.meta.entries()].find(([, m]) => m.csId === id)?.[0]).filter((u) => u != null);
+    if (P.duel.length < 2) P.duel = null;
+    const gm = RJ.game.mode;
+    if (P.duel) { const su = gm && gm.sel && gm.sel.uid; P.focusUid = P.duel.includes(su) ? su : P.duel[0]; }
     P.saveFov = v.camera.fov;
     P.orbit = { yaw: 0.6, pitch: 0.15, dist: 1 };
     RJ.state.mode = "replay";
@@ -156,6 +163,14 @@
 
   /* ---------------- camera shots ---------------- */
   function focusPup() { return P.pups.get(P.focusUid); }
+  /** The aircraft the subject is fighting: the duel opponent, else the nearest other visible aircraft. */
+  function otherPup() {
+    const me = focusPup(); if (!me) return null;
+    if (P.duel) { const o = P.pups.get(P.duel[0] === P.focusUid ? P.duel[1] : P.duel[0]); return o && o.mesh.visible ? o : null; }
+    let best = null, bd = 8000;
+    for (const p of P.pups.values()) { if (p === me || !p.mesh.visible) continue; const d = p.pos.distanceTo(me.pos); if (d < bd) { bd = d; best = p; } }
+    return best;
+  }
   function futureOf(t, out) { return sample(P.focusUid, RJ.clamp(t, P.t0, P.t1), out); }
   const keepAbove = (p, m) => { const g = RJ.world.ground(p.x, p.z); if (p.y < g + (m || 3)) p.y = g + (m || 3); return p; };
   function nearLandmark(p) {
@@ -193,6 +208,7 @@
     const pup = focusPup();
     if (pup && rt - P.lastLandmarkT > 12 && nearLandmark(pup.pos)) { P.lastLandmarkT = rt; return makeShot("landmark", rt); }
     const order = pup && pup.agl < 600 ? ["chase", "flyby", "side", "low", "wide", "flyby"] : ["chase", "flyby", "side", "wide"];
+    if (P.duel && otherPup()) order.splice(2, 0, "padlock"); // duels: an over-the-shoulder shot on the bandit
     P.cycle = ((P.cycle || 0) + 1) % order.length;
     return makeShot(order[P.cycle], rt);
   }
@@ -216,7 +232,22 @@
     const target = tv.copy(pup.pos);
     let pos;
     P.slow = shot.kind === "boom" && rt > shot.tb - 0.8 && rt < shot.tb + 2.2 ? 0.35 : 1;
-    if (shot.kind === "chase") {
+    const foe = shot.kind === "padlock" ? otherPup() : null;
+    if (shot.kind === "cockpit") {
+      // in the seat: the pilot's eye point, looking where the jet points (no smoothing, banks with the jet)
+      const ck = tv2.copy(pup.vis.cockpit || V3(0, 1, -len * 0.3)); pup.mesh.localToWorld(ck);
+      P.camPos = ck.clone(); P.camLook = ck.clone().addScaledVector(pup.fwd, 100); P.lastShot = shot;
+      cam.position.copy(ck); cam.quaternion.copy(pup.mesh.quaternion);
+      cam.fov = 68; cam.updateProjectionMatrix(); P.dof = null;
+      $("rpl-shot").textContent = (P.shot === "director" ? "Director · " : "") + "Cockpit" + (P.duel ? " · " + (R.meta.get(P.focusUid) || {}).callsign : "");
+      return;
+    }
+    if (shot.kind === "padlock" && foe) {
+      // over the subject's shoulder, looking at the bandit
+      const dir = tv2.copy(foe.pos).sub(pup.pos).normalize();
+      pos = pup.pos.clone().addScaledVector(dir, -(len * 2.6 + 16)).add(V3(0, len * 0.6 + 5, 0));
+      target.addScaledVector(dir, 60);
+    } else if (shot.kind === "chase" || shot.kind === "padlock") {
       pos = pup.pos.clone().addScaledVector(pup.fwd, -(len * 2.4 + 14)).addScaledVector(pup.up, len * 0.45 + 4);
       target.addScaledVector(pup.fwd, 25);
     } else if (shot.kind === "side") {
@@ -246,8 +277,8 @@
     const K = { wide: 9, flyby: 3.2, boom: 4.5, low: 4 }[shot.kind] || 3.5;
     cam.fov = shot.anchor ? RJ.clamp((2 * Math.atan((len * K) / Math.max(dist, 1))) / RJ.DEG, 5, fov + 12) : fov;
     cam.updateProjectionMatrix();
-    P.dof = shot.kind === "chase" ? null : [dist, Math.max(30, dist * 0.6), 0.75];
-    $("rpl-shot").textContent = (P.shot === "director" ? "Director · " : "") + ({ chase: "Chase", side: "Side", flyby: "Flyby", wide: "Wide", low: "Low angle", landmark: "Landmark", boom: "Sonic boom", orbit: "Orbit" }[shot.kind] || shot.kind);
+    P.dof = shot.kind === "chase" || shot.kind === "padlock" ? null : [dist, Math.max(30, dist * 0.6), 0.75];
+    $("rpl-shot").textContent = (P.shot === "director" ? "Director · " : "") + (SHOT_NAMES[shot.kind] || shot.kind) + (P.duel ? " · " + (R.meta.get(P.focusUid) || {}).callsign : "");
   }
 
   /* ---------------- per frame ---------------- */
@@ -293,6 +324,7 @@
       if (m[4] && sdt > 0 && Math.random() < sdt * 40) RJ.fx.smoke(mesh.position, tv.set(0, 0, 0), 1.3, 0.9, 3.5, 0.6);
     }
     for (const [id, mesh] of P.mpups) if (!seen.has(id)) mesh.visible = false;
+    if (f0.fl && sdt > 0) for (const p of f0.fl) if (Math.random() < sdt * 25) RJ.fx.flareGlow(tv.set(p[0], p[1], p[2]), tv2.set(0, -5, 0));
     placeCamera(dt, P.rt);
     const pup = focusPup();
     RJ.sonic.update(sdt, list);
@@ -312,7 +344,24 @@
     RJ.fx.clear(); RJ.sonic.reset();
   };
   R.togglePause = function () { if (P.rt >= P.t1) R.seek(P.t0); P.paused = !P.paused; renderReplayUI(); };
+  /** Follow a specific recorded aircraft (Combat Simulator: 1 / 2 = the duel's jets). */
+  R.focusJet = function (n) {
+    if (!P.on || !P.duel || !P.duel[n - 1]) return;
+    const u = P.duel[n - 1];
+    if (u === P.focusUid) return;
+    P.focusUid = u; P.shotObj = null; P.lastShot = null;
+    RJ.ui.toast(`Following ${R.meta.get(u).callsign}`, 1500);
+  };
+  /** Step through the camera angles (C / V in replays). */
+  R.cycleShot = function (dir) {
+    if (!P.on) return;
+    const ids = SHOTS.map((x) => x[0]).filter((id) => id !== "padlock" || P.pups.size > 1);
+    const i = ids.indexOf(P.shot);
+    P.shot = ids[(i + (dir || 1) + ids.length) % ids.length]; P.shotObj = null;
+    renderReplayUI();
+  };
   R.focusNext = function () {
+    if (P.duel) { const o = P.duel[0] === P.focusUid ? P.duel[1] : P.duel[0]; if (P.pups.get(o) && P.pups.get(o).mesh.visible) return R.focusJet(P.duel.indexOf(o) + 1); }
     const live = [...P.pups.keys()].filter((u) => P.pups.get(u).mesh.visible);
     if (live.length < 2) return;
     P.focusUid = live[(live.indexOf(P.focusUid) + 1) % live.length];
@@ -326,6 +375,13 @@
     $("rpl-speed").innerHTML = SPEEDS.map((s) => `<button class="chip" data-speed="${s}" aria-pressed="${P.speed === s}">${s}×</button>`).join("");
     $("rpl-shots").innerHTML = SHOTS.map(([id, n]) => `<button class="chip" data-shot="${id}" aria-pressed="${P.shot === id}">${n}</button>`).join("");
     $("rpl-target").hidden = R.meta.size < 2;
+    $("rpl-target").textContent = P.duel ? "Other jet" : "Next aircraft";
+    const hint = document.querySelector("#replay-ui .rpl-keys");
+    if (hint) {
+      if (hint.dataset.base == null) hint.dataset.base = hint.textContent;
+      hint.textContent = P.duel ? "Space pause · ← → skip 5 s · 1 / 2 or Tab follow a jet · C cycle cameras (3–8 pick) · Esc exit"
+        : hint.dataset.base.replace("1–6 cameras", "1–8 or C cameras");
+    }
   }
 
   /* ======================= GHOSTS ======================= */
@@ -567,7 +623,10 @@
         else if (k === "arrowright") { e.preventDefault(); R.seek(P.rt + 5); }
         else if (k === "tab") { e.preventDefault(); R.focusNext(); }
         else if (k === RJ.settings.keys.photo) { P.paused = true; renderReplayUI(); PH.start("replay"); }
-        else if (/^[1-6]$/.test(k)) { P.shot = SHOTS[+k - 1][0]; P.shotObj = null; renderReplayUI(); }
+        else if (P.duel && (k === "1" || k === "2")) R.focusJet(+k); // Combat Simulator: follow jet 1 / 2
+        else if (k === "c" || k === RJ.settings.keys.camera) R.cycleShot(e.shiftKey ? -1 : 1);
+        else if (!P.duel && /^[1-8]$/.test(k)) { P.shot = SHOTS[+k - 1][0]; P.shotObj = null; renderReplayUI(); }
+        else if (P.duel && /^[3-8]$/.test(k)) { P.shot = SHOTS[+k - 1][0]; P.shotObj = null; renderReplayUI(); }
       }
     });
     addEventListener("keyup", (e) => { if (PH.on) PH.keys.delete(e.key.toLowerCase() === " " ? "space" : e.key.toLowerCase()); });

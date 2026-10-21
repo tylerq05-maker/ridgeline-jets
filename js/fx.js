@@ -143,6 +143,8 @@
       P.flush();
     }
     if (FX.lightLevel > 0) { FX.lightLevel = Math.max(0, FX.lightLevel - dt * 3); FX.light.intensity = FX.lightLevel * 6; }
+    // dusk/night factor shared by every jet exhaust shader (aircraft.js): flames and diamonds burn brighter in the dark
+    if (RJ.FLAME_NIGHT && W.sunElev != null) RJ.FLAME_NIGHT.value = 1 - RJ.smooth(-6, 10, W.sunElev);
   };
   FX.clear = () => { FX.smokeP.clear(); FX.fireP.clear(); };
 
@@ -165,11 +167,26 @@
       FX.fireP.spawn(p.x, p.y, p.z, vx + R(sp), vy + R(sp) + 10, vz + R(sp), 0.6 + Math.random() * 1.0, 1.2, 0.6, 1, 0.8, 0.5, 1, -25, 0.6);
     }
     FX.light.position.copy(p); FX.light.color.setHex(0xffaa55); FX.lightLevel = Math.max(FX.lightLevel, Math.min(2, s));
+    if (s >= 1.2) FX.smokeColumn(p, s);
+  };
+  /** A slow, dark column of smoke that keeps rising from a big blast (crash sites, kills) long after the fire. */
+  FX.smokeColumn = function (p, s = 1) {
+    const n = Math.round((RJ.settings.quality === "low" ? 5 : 11) * Math.min(1.6, Math.sqrt(s)));
+    for (let i = 0; i < n; i++) {
+      const d = 0.08 + Math.random() * 0.1, up = 3 + (i / n) * 14 + Math.random() * 3;
+      FX.smokeP.spawn(p.x + R(5 * s), p.y + R(3 * s), p.z + R(5 * s), R(2.5), up, R(2.5), 9 + Math.random() * 8, 9 * s, (55 + Math.random() * 35) * s, d * 1.05, d, d * 0.95, 0.5, 0.4, 0.12);
+    }
   };
   FX.debris = function (p, vel, s = 1) {
     for (let i = 0; i < 18 * s; i++) {
       const sp = 40 * s;
       FX.smokeP.spawn(p.x, p.y, p.z, vel.x * 0.5 + R(sp), vel.y * 0.5 + R(sp) + 10, vel.z * 0.5 + R(sp), 2 + Math.random() * 2, 1.5, 3, 0.12, 0.11, 0.1, 1, -30, 0.3);
+    }
+    // burning fragments arcing down: bright embers that cool from yellow to red as they fall
+    const ne = Math.round((RJ.settings.quality === "low" ? 8 : 20) * s);
+    for (let i = 0; i < ne; i++) {
+      const sp = 50 * s;
+      FX.fireP.spawn(p.x, p.y, p.z, vel.x * 0.45 + R(sp), vel.y * 0.45 + R(sp) + 14, vel.z * 0.45 + R(sp), 1.4 + Math.random() * 1.6, 1.6, 0.5, 1, 0.75, 0.4, 1, -22, 0.35);
     }
   };
   FX.smoke = (p, v, size, dark, life = 3, alpha = 0.55) =>
@@ -177,6 +194,54 @@
   FX.fire = (p, v, size) => FX.fireP.spawn(p.x, p.y, p.z, v.x + R(3), v.y + R(3), v.z + R(3), 0.35 + Math.random() * 0.3, size, size * 2.2, 1, 0.6, 0.25, 0.9, 4, 1.5);
   FX.contrail = (p, v, size, alpha = 0.5, life = 22) => FX.smokeP.spawn(p.x, p.y, p.z, v.x * 0.02, v.y * 0.02, v.z * 0.02, life, size, size * 9, 0.97, 0.98, 1.0, alpha, 0, 0);
   FX.vapor = (p, v, size, alpha = 0.35) => FX.smokeP.spawn(p.x, p.y, p.z, v.x * 0.1 + R(1), v.y * 0.1 + R(1), v.z * 0.1 + R(1), 0.45 + Math.random() * 0.4, size, size * 2.5, 1, 1, 1, alpha, 0, 1);
+  /** High-G condensation for any aircraft (player or AI): continuous wingtip vortex trails (interpolated between
+   * emits so they read as unbroken lines at 300 m/s) plus sunlit vapor sheets flowing off the upper wing in hard
+   * pulls. Called from Aircraft.updateVisual's trail block (~33 Hz). Bounded: <= ~20 particles per call. */
+  const _wv = new THREE.Vector3(), _wp = new THREE.Vector3();
+  FX.wingVapor = function (ac) {
+    const vis = ac.vis, F = ac.spec.flight, m = ac.mesh, tips = vis && vis.tips;
+    if (!tips || !tips.length || !m) return;
+    const g = Math.abs(ac.g), gT = F.gmax > 5 ? 4.5 : 1.8, alt = ac.pos.y;
+    const cam = RJ.camera, dist = cam ? cam.position.distanceTo(ac.pos) : 0;
+    if (g <= gT || ac.speed <= 110 || alt >= 12500 || dist > 7000 || ac.state !== "flying") { ac._vtp = null; return; }
+    const low = RJ.settings.quality === "low";
+    const hum = RJ.sonic ? RJ.sonic.humidity(ac) : 0.5;
+    const altK = 1 - RJ.smooth(5000, 12500, alt) * 0.65;
+    const k = RJ.clamp((g - gT) / 4, 0, 1);
+    const a = Math.min(0.8, (0.18 + k * 0.62) * (0.45 + hum * 0.75) * altK);
+    if (a < 0.02) { ac._vtp = null; return; }
+    const v = ac.vel, far = dist > 2500;
+    // 1 wingtip vortices: thin, dense cores that swell as they trail
+    const prev = ac._vtp || (ac._vtp = []);
+    const had = prev.length === tips.length;
+    for (let i = 0; i < tips.length; i++) {
+      const wp = m.localToWorld(_wp.copy(tips[i]));
+      const pp = had ? prev[i] : null;
+      const seg = pp ? pp.distanceTo(wp) : 0;
+      const n = pp && seg < 60 ? Math.min(low || far ? 2 : 6, Math.max(1, Math.ceil(seg / 4))) : 1;
+      for (let j = 1; j <= n; j++) {
+        const p = pp && n > 1 ? _wv.copy(pp).lerp(wp, j / n) : wp;
+        FX.smokeP.spawn(p.x + R(0.12), p.y + R(0.12), p.z + R(0.12), v.x * 0.03 + R(0.6), v.y * 0.03 + R(0.6), v.z * 0.03 + R(0.6),
+          (0.6 + Math.random() * 0.5) * (0.7 + k * 0.8), 0.35 + k * 0.3 + (far ? 1.2 : 0), 1.4 + k * 1.8 + (far ? 3 : 0), 1, 1, 1, a * (far ? 0.7 : 1), 0, 1.4);
+      }
+      if (!prev[i]) prev[i] = new THREE.Vector3();
+      prev[i].copy(wp);
+    }
+    prev.length = tips.length;
+    // 2 vapor sheets: condensation flashing over the upper wing and streaming off the trailing edge
+    if (g > gT + 1.2 && F.gmax > 5 && !far) {
+      const tp = tips[0], span = Math.abs(tp.x) || 4;
+      const sheets = Math.round((low ? 2 : 6) * (0.4 + k * 0.6) * (0.5 + hum * 0.6));
+      const sk = RJ.clamp((g - gT - 1.2) / 3, 0.25, 1);
+      for (let s = 0; s < sheets; s++) {
+        const x = RJ.rand(-0.88, 0.88) * span, lp = _wp.set(x, 0.35 + Math.random() * 0.45 + Math.abs(x) * 0.03, tp.z - 3.2 + RJ.rand(-1.6, 2.2));
+        const p = m.localToWorld(lp);
+        const keep = 0.8 + Math.random() * 0.12; // rides with the wing, then peels away aft
+        FX.smokeP.spawn(p.x, p.y, p.z, v.x * keep + R(1.5), v.y * keep + R(1.5), v.z * keep + R(1.5), 0.18 + Math.random() * 0.22,
+          1.4 + Math.random() * 1.2, 3.2 + Math.random() * 2.2, 0.98, 0.99, 1, a * 0.5 * sk, 0, 0);
+      }
+    }
+  };
   FX.spark = (p, v) => FX.fireP.spawn(p.x, p.y, p.z, v.x + R(30), v.y + R(30), v.z + R(30), 0.25 + Math.random() * 0.25, 0.8, 0.3, 1, 0.85, 0.5, 1, -10, 1);
   FX.muzzle = (p, v, size) => FX.fireP.spawn(p.x, p.y, p.z, v.x, v.y, v.z, 0.05, size, size * 1.6, 1, 0.85, 0.5, 0.9, 0, 0);
   FX.flareGlow = (p, v) => {
