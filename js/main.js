@@ -595,7 +595,7 @@
     if (I.action("camera")) cam.cycle();
     if (I.action("map")) RJ.nav.toggle();
     if (I.action("hud")) { RJ.settings.hud = !RJ.settings.hud; RJ.saveSettings(); }
-    if (I.action("mute")) { RJ.settings.muted = !RJ.settings.muted; RJ.saveSettings(); RJ.ui.flash(RJ.settings.muted ? "SOUND OFF" : "SOUND ON", null, 0.8); }
+    if (I.action("mute")) { RJ.settings.muted = !RJ.settings.muted; RJ.saveSettings(); RJ.ui.flash(RJ.settings.muted ? "SOUND OFF" : "SOUND ON", null, 0.8); if (RJ.ui.soundButtons) RJ.ui.soundButtons(); }
     if (pl.alive && !spect) {
       const ax = I.axes();
       Object.assign(pl.input, { pitch: ax.pitch, roll: ax.roll, yaw: ax.yaw, thr: ax.thr, thrAbs: ax.thrAbs, ab: ax.ab, brake: ax.brake, guns: ax.guns });

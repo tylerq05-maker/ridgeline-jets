@@ -749,6 +749,11 @@
       UI.renderMP();
     };
     $("btn-pause").onclick = () => RJ.pause();
+    // sound on/off, visible everywhere: a muted game should never look like broken audio
+    UI.soundButtons = () => { const m = RJ.settings.muted; if ($("btn-sound")) $("btn-sound").textContent = m ? "🔇" : "🔊"; if ($("btn-sound-main")) $("btn-sound-main").textContent = m ? "Sound: OFF (tap to turn on)" : "Sound: on"; };
+    const toggleSound = () => { RJ.settings.muted = !RJ.settings.muted; if (!RJ.settings.muted && !(RJ.settings.master > 0)) RJ.settings.master = 0.8; RJ.saveSettings(); if (RJ.audio.unlock) RJ.audio.unlock(); RJ.ui.flash(RJ.settings.muted ? "SOUND OFF" : "SOUND ON", null, 0.8); UI.soundButtons(); };
+    $("btn-sound").onclick = toggleSound; $("btn-sound-main").onclick = toggleSound;
+    UI.soundButtons(); RJ.on("settings", () => UI.soundButtons());
     $("btn-cam").onclick = (e) => { RJ.input.touchEdges.add("camera"); e.currentTarget.blur(); };
 
     RJ.on("discover", (d) => UI.discover(d));
