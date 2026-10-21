@@ -1542,7 +1542,7 @@
     W.mistGeo.setAttribute("info", new THREE.InstancedBufferAttribute(mi, 4));
     W.mistGeo.setAttribute("local", new THREE.InstancedBufferAttribute(ml, 3));
     W.mistGeo.instanceCount = M;
-    W.mist.visible = M > 0;
+    W.mist.visible = M > 0 && !W.noMist;
   }
 
   function updateMist(cam) {

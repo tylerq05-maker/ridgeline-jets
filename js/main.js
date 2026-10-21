@@ -460,14 +460,18 @@
     // the menu panel covers the left third: frame the formation in the open space on the right
     if (innerWidth > 700) camera.rotateY(camera.fov * RJ.DEG * camera.aspect * (show.shot === 1 ? 0.1 : 0.26));
     camera.updateMatrixWorld();
-    const s = show.jets[0];
+    showRender(dt, show.jets[0]);
+  }
+  function showRender(dt, s, motion, exposure) {
     RJ.world.update(dt, camera, s.pos, s.vel, s.pos.y - RJ.world.ground(s.pos.x, s.pos.z));
     RJ.fx.update(dt, camera, renderer);
     postInputs(s, s, "cinematic", dt);
+    if (motion != null) RJ.post.fx.motion = motion;
     RJ.post.fx.dof = null;
     RJ.world.renderCloudShadow(renderer, camera);
     RJ.world.renderReflection(renderer, camera);
-    RJ.post.render(scene, camera, null, RJ.world.grade, dt, { world: true });
+    const gr = exposure ? Object.assign({}, RJ.world.grade, { exposure: RJ.world.grade.exposure * exposure }) : RJ.world.grade;
+    RJ.post.render(scene, camera, null, gr, dt, { world: true });
     RJ.hud.clear();
   }
 
@@ -486,6 +490,7 @@
     cam.hidden = null; cam.temp = null; PIP.t = 0; PIP.target = null; CP.owner = null;
   }
   RJ.startGame = async function (kind, opts) {
+    if (RJ.intro && RJ.intro.active) RJ.intro.skip();
     RJ.audio.init();
     RJ.game.config = { kind, opts: Object.assign({}, opts) };
     stopCurrent();
@@ -831,6 +836,7 @@
       else if (st === "photo") RJ.photo.frame(dt);
       else if (st === "hangar") HV.render(dt);
       else if (st === "menu") menuFrame(dt);
+      else if (st === "intro") RJ.intro.frame(dt);
     } catch (e) { console.error(e); }
     const musKey = st + (RJ.audio.ctx ? "+" : "") + (RJ.settings.muted ? "m" : "") + RJ.settings.musicVol + "|" + RJ.settings.master + "|" + (RJ.settings.musicSC || "");
     if (RJ.audio.music && musKey !== RJ._lastSt) { RJ.audio.music(st === "menu" || st === "hangar"); RJ._lastSt = musKey; }
@@ -896,13 +902,23 @@
     renderer.localClippingEnabled = true;
     try { RJ.atlas.ensure(); } catch (e) { console.warn("Atlas failed", e); }
     const reg = RJ.world.findRegion("mountains");
+    // the start-up cinematic needs a runway: lay an airfield along the valley floor (every mode sets or clears its own)
+    const intro = RJ.intro && !/[#&]join=|[?&]nointro/.test(location.hash + location.search);
+    let ab = null;
+    if (intro) { RJ.world.setEnvironment({ time: "golden", weather: "scattered" }); ab = RJ.world.planAirbase(reg.x, reg.z, reg.yaw); RJ.world.setAirbase(ab); }
     const pos = V3(reg.x, RJ.modes.highestAround(reg.x, reg.z, 2500, 4) + 450, reg.z);
     setLoad(0.1, "Generating terrain…");
     await RJ.world.prepare(pos, (p) => setLoad(0.1 + p * 0.9));
     makeShowcase(pos, reg.yaw);
-    RJ.state.mode = "menu";
-    RJ.ui.show("scr-main");
-    RJ.ui.checkInvite();
+    let lobbyOpen = false;
+    const openLobby = () => {
+      if (lobbyOpen) return; lobbyOpen = true;
+      if (show.jets) { show.pass = 0; newPass(); }
+      RJ.state.mode = "menu";
+      RJ.ui.show("scr-main");
+      RJ.ui.checkInvite();
+    };
+    if (!intro || !RJ.intro.start({ jets: show.jets, delta: DELTA, center: V3(ab.x, RJ.world.ground(ab.x, ab.z), ab.z), yaw: ab.yaw, render: showRender, done: openLobby })) openLobby();
   }
   boot();
 })(window.RJ);
