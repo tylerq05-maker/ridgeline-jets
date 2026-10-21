@@ -1,4 +1,4 @@
-/* Jet City — start-up cinematic (about 15 s).
+/* Jet City — start-up cinematic (about 30 s).
  * A six-ship blue-and-gold Super Hornet demonstration team (a tribute to the US Navy Blue Angels) flies a scripted
  * show over a valley airfield at golden hour: approach, low pass over the runway, a climbing turn that re-forms the
  * Delta into a Diamond, a high-speed hero pass, then the JET CITY logo hands over to the lobby.
@@ -7,7 +7,8 @@
  * main.js owns the lobby: it calls RJ.intro.start(api) once at boot and api.done() runs exactly once. */
 (function (RJ) {
   "use strict";
-  const V3 = RJ.V3, DUR = 15;
+  const V3 = RJ.V3, TIME_SCALE = 2, DUR = 15 * TIME_SCALE;
+  const toReal = (t) => t * TIME_SCALE, toScene = (t) => t / TIME_SCALE;
   const I = { active: false };
   RJ.intro = I;
 
@@ -17,12 +18,13 @@
   const D2R = Math.PI / 180;
 
   /* ---------------- the flight path (pre-integrated so it can be checked against the terrain) ---------------- */
-  const SPS = 60, NS = Math.ceil(16.5 * SPS);
+  const SPS = 60, NS = Math.ceil(toReal(16.5) * SPS);
   function pitchAt(t, c) { // degrees; c = climb angle of the pull-up (steeper where the valley closes in)
+    t = toScene(t);
     return -4.5 + 4.5 * sm(3.6, 4.4, t) + c * sm(5.2, 6.6 + (c - 24) * 0.05, t) - (c + 5) * sm(8.2, 10, t) + 34 * sm(11.9, 13.9, t);
   }
-  function rollAt(t, sg) { return sg * 62 * (sm(5.9, 7, t) - sm(8.3, 9.3, t)) - 12 * (sm(10.4, 11.2, t) - sm(11.8, 12.8, t)); }
-  function speedAt(t) { return 172 - 22 * sm(5.2, 8.3, t) + 55 * sm(8.3, 11.5, t) + 10 * sm(11.5, 13, t); }
+  function rollAt(t, sg) { t = toScene(t); return sg * 62 * (sm(5.9, 7, t) - sm(8.3, 9.3, t)) - 12 * (sm(10.4, 11.2, t) - sm(11.8, 12.8, t)); }
+  function speedAt(t) { t = toScene(t); return 172 - 22 * sm(5.2, 8.3, t) + 55 * sm(8.3, 11.5, t) + 10 * sm(11.5, 13, t); }
   function buildPath(O, yaw0, climb, turn) {
     const P = [], Q = [], S = [], G = [];
     const pos = V3(), q = new THREE.Quaternion(), qy = new THREE.Quaternion(), qp = new THREE.Quaternion(), qr = new THREE.Quaternion();
@@ -38,7 +40,7 @@
       psi += 1.5 * RJ.G0 * Math.tan(ph) / v * dt; // coordinated turn (a little tighter than level flight: it's a pull)
     }
     // place it: the lead crosses the runway centre 40 m up at t = 4.7 s
-    const k = Math.round(4.7 * SPS), off = V3(O.x, O.y + 40, O.z).sub(P[k]);
+    const k = Math.round(toReal(4.7) * SPS), off = V3(O.x, O.y + 40, O.z).sub(P[k]);
     for (const p of P) p.add(off);
     // load factor from the path's own acceleration (drives the wing vapour)
     for (let i = 0; i < NS; i++) {
@@ -52,14 +54,14 @@
     let lift = 0;
     for (let it = 0; it < 6; it++) {
       let need = 0, at = 0;
-      for (let i = Math.round(5.2 * SPS); i < NS; i += 6) {
+      for (let i = Math.round(toReal(5.2) * SPS); i < NS; i += 6) {
         const p = P[i], h = Math.max(ground(p.x, p.z), ground(p.x + 40, p.z), ground(p.x - 40, p.z), ground(p.x, p.z + 40), ground(p.x, p.z - 40));
-        const d = h + 25 + 65 * sm(5.6, 7.5, i / SPS) - p.y;
+        const d = h + 25 + 65 * sm(toReal(5.6), toReal(7.5), i / SPS) - p.y;
         if (d > need) { need = d; at = i / SPS; }
       }
       if (need < 1) break;
       lift += need + 10;
-      for (let i = 0; i < NS; i++) P[i].y += (need + 10) * sm(5.2, Math.max(7.7, at), i / SPS);
+      for (let i = 0; i < NS; i++) P[i].y += (need + 10) * sm(toReal(5.2), Math.max(toReal(7.7), at), i / SPS);
     }
     return { P, Q, S, G, lift, turn };
   }
@@ -211,9 +213,9 @@
     g.gain.setValueAtTime(0.0005, t); g.gain.exponentialRampToValueAtTime(vol, t + dur); g.gain.linearRampToValueAtTime(0, t + dur + 0.03);
     s.connect(fl).connect(g).connect(A.mIn); s.start(t); s.stop(t + dur + 0.1); A.srcs.push(s);
   }
-  // the cue: D minor, rising through Bb-F-C, climbing to a D major hit on the logo (~96 bpm)
+  // the cue: D minor, rising through Bb-F-C, climbing to a D major hit on the logo (30-second arrangement)
   function score(A) {
-    const E = (t, fn) => A.ev.push({ t, fn });
+    const E = (t, fn) => A.ev.push({ t: toReal(t), fn });
     E(0, (w) => { strings(A, [38, 45, 50], w, 5.6, 0.035); swell(A, w + 1.2, 1.8, 0.05); });
     [0, 1.25, 2.5].forEach((x, i) => E(x, (w) => timp(A, 38, w, 0.18 + i * 0.08)));
     // low-string ostinato from the flyby to the climax
@@ -237,12 +239,13 @@
     // build: snare roll and cymbal swell into the hit
     for (let x = 11.9; x < 12.97; x += 0.065) E(x, (w) => noiseHit(A, w, 0.05 + 0.2 * sm(11.9, 13, x), "bandpass", 1900, 0.06, 1.2));
     E(11.2, (w) => swell(A, w, 1.8, 0.16));
-    // the logo: full D major, timpani, sub boom and crash, ringing out under the lobby
+    // the logo at ~26 s: full D major, timpani, sub boom and crash, ringing out under the lobby
     E(13, (w) => {
       brass(A, [38, 45, 50, 54, 57, 62, 66, 69], w, 1.1, 0.05); strings(A, [50, 54, 57, 62, 66, 69, 74], w, 1.6, 0.03);
       timp(A, 38, w, 0.9); timp(A, 26, w + 0.02, 0.6); boom(A, w, 0.9); noiseHit(A, w, 0.45, "highpass", 2500, 3.2);
     });
     E(14.1, (w) => strings(A, [50, 57, 62, 66], w, 0.9, 0.018));
+    A.ev.sort((a, b) => a.t - b.t);
   }
   function audioTick(A, t, camPos, form, fwd, dt) {
     if (!A || A.ctx.state !== "running") { if (A) A.base = null; return; }
@@ -258,8 +261,8 @@
     const aft = Math.max(0, -rel.normalize().dot(fwd));
     const near = RJ.clamp(70 / r, 0, 1.25);
     let lvl = near * (0.75 + 0.75 * aft);
-    if (t > 6 && t < 13) lvl *= 0.55; // air-to-air shots: let the score lead
-    lvl *= 1 - sm(13.2, 15.5, t);
+    if (t > toReal(6) && t < toReal(13)) lvl *= 0.55; // air-to-air shots: let the score lead
+    lvl *= 1 - sm(toReal(13.2), toReal(15.5), t);
     const k = Math.min(1, dt * 12);
     A.eng.gain.setTargetAtTime(lvl, now, 0.05);
     A.lp.frequency.setTargetAtTime(Math.min(16000, (380 + 9000 * Math.min(1, near * near)) * A.dop), now, 0.05);
@@ -350,37 +353,38 @@
   function slot(k, t, out) {
     const a = I.api.delta[k], b = DIAMOND[k];
     const st = k >= 4 ? 6.3 : 7.0, en = k >= 4 ? 8.0 : 8.4;
+    t = toScene(t);
     const x = sm(st, en, t) - sm(10, 11.3, t);
     return out.set(lerp(a[0], b[0], x), lerp(a[1], b[1], x), lerp(a[2], b[2], x));
   }
   // where the camera is (writes cpos / look, returns fov)
   function shot(t) {
-    const O = I.O, F = I.F, R = I.R;
+    const sceneT = toScene(t), O = I.O, F = I.F, R = I.R;
     const L = (s, r, u, out) => out.set(O.x + F.x * s + R.x * r, O.y + u, O.z + F.z * s + R.z * r);
     let fov;
     I.camUp = 0;
-    if (t < 3) {
+    if (sceneT < 3) {
       // establishing: a slow crane across the field at golden hour, the team a smoke-trailed speck closing in
-      const u = t / 3;
+      const u = sceneT / 3;
       L(430 - 90 * u, 250 - 50 * u, 140 - 80 * ease(u), cpos);
       look.copy(mid).lerp(L(-150, 0, 20, v1), 0.45 * (1 - ease(u)));
       fov = lerp(44, 16, ease(u));
-    } else if (t < 6) {
+    } else if (sceneT < 6) {
       // crowd line: low by the runway edge, the formation roars straight over and pulls up
       L(25, -58, 1.7, cpos);
       look.copy(mid);
       const d = cpos.distanceTo(mid);
       fov = RJ.clamp(2 * Math.atan(48 / d) / RJ.DEG, 24, 78);
-      const shake = Math.max(0, 1 - Math.abs(t - 4.75) / 0.6) * 0.25;
+      const shake = Math.max(0, 1 - Math.abs(sceneT - 4.75) / 0.6) * 0.25;
       look.x += Math.sin(t * 61) * shake; look.y += Math.sin(t * 47 + 1) * shake;
-    } else if (t < 8.2) {
+    } else if (sceneT < 8.2) {
       // the sweep: camera ship high on the inside of the turn, sliding from behind to abeam
-      const u = ease((t - 6) / 2.2);
+      const u = ease((sceneT - 6) / 2.2);
       cpos.copy(tP).addScaledVector(hr, -I.path.turn * lerp(78, 100, u)).addScaledVector(hf, lerp(-55, 5, u)); cpos.y += lerp(-4, -10, u);
       look.copy(mid);
       fov = lerp(40, 34, u);
       I.camUp = 0.25;
-    } else if (t < 10) {
+    } else if (sceneT < 10) {
       // wide: all six against the sky from far below and to the side
       if (!I.wide) { I.wide = pickWide(); formationAt(t); }
       cpos.copy(I.wide);
@@ -388,14 +392,14 @@
       fov = RJ.clamp(2 * Math.atan(70 / cpos.distanceTo(mid)) / RJ.DEG, 14, 40);
     } else {
       // hero: alongside on the sunny side, the team edging past, then the camera falls back and wide
-      heroPose(Math.min(t, 13), cpos, look);
-      fov = lerp(44, 34, sm(11.4, 13, t));
-      if (t > 13) {
+      heroPose(Math.min(t, toReal(13)), cpos, look);
+      fov = lerp(44, 34, sm(11.4, 13, sceneT));
+      if (sceneT > 13) {
         // the camera ship eases off; the formation runs on toward the horizon under the logo
-        const a = heroPose(12.95, V3()), b = heroPose(13, V3()), vel = b.clone().sub(a).multiplyScalar(20), x = t - 13;
+        const a = heroPose(toReal(12.95), V3()), b = heroPose(toReal(13), V3()), vel = b.clone().sub(a).multiplyScalar(20 / TIME_SCALE), x = sceneT - 13;
         cpos.copy(b).addScaledVector(vel, x - x * x / 4.4); cpos.y += 18 * x * x;
-        look.copy(mid).lerp(v2.copy(mid).addScaledVector(hf, 300).add(V3(0, 300, 0)), sm(13, 15, t) * 0.35);
-        fov = lerp(34, 40, sm(13, 15, t));
+        look.copy(mid).lerp(v2.copy(mid).addScaledVector(hf, 300).add(V3(0, 300, 0)), sm(13, 15, sceneT) * 0.35);
+        fov = lerp(34, 40, sm(13, 15, sceneT));
       }
     }
     return fov;
@@ -403,10 +407,11 @@
   const hp = V3(), hq = new THREE.Quaternion(), hfw = V3(), hrt = V3();
   function heroPose(t, outP, outL) {
     sample(I.path, t, hp, hq);
+    const sceneT = toScene(t);
     hfw.set(0, 0, -1).applyQuaternion(hq); hfw.y = 0; hfw.normalize();
     hrt.set(-hfw.z, 0, hfw.x);
-    const k = sm(11.4, 13, t);
-    const side = lerp(36, 300, k), ahead = lerp(4 - 3.2 * (t - 10), -90, k), high = lerp(-7, -30, k);
+    const k = sm(11.4, 13, sceneT);
+    const side = lerp(36, 300, k), ahead = lerp(4 - 3.2 * (sceneT - 10), -90, k), high = lerp(-7, -30, k);
     outP.copy(hp).addScaledVector(hrt, side).addScaledVector(hfw, ahead); outP.y += high;
     if (outL) outL.copy(hp).addScaledVector(hfw, lerp(-16, 30, k));
     return outP;
@@ -416,14 +421,14 @@
     return true;
   }
   function pickWide() {
-    formationAt(9.1);
+    formationAt(toReal(9.1));
     const m = mid.clone(), F = hf.clone(), R = hr.clone();
     const cand = [[700, -230, 250], [-700, -230, 250], [650, -120, -200], [-650, -120, -200], [800, 60, 300], [-800, 60, 300]];
     for (const [r, u, f] of cand) {
       const p = m.clone().addScaledVector(R, r).addScaledVector(F, f); p.y += u;
       const g = RJ.world.ground(p.x, p.z) + 25; if (p.y < g) p.y = g;
       let ok = true;
-      for (const tt of [8.2, 9.1, 10]) { formationAt(tt); if (!losClear(p, mid)) { ok = false; break; } }
+      for (const tt of [8.2, 9.1, 10]) { formationAt(toReal(tt)); if (!losClear(p, mid)) { ok = false; break; } }
       if (ok) return p;
     }
     const p = m.clone().addScaledVector(R, 600); p.y = Math.max(p.y + 200, RJ.world.ground(p.x, p.z) + 300); return p;
@@ -445,7 +450,7 @@
       j.pos.copy(tP).addScaledVector(rt, o.x + Math.sin(w) * 0.2).addScaledVector(up, o.y + Math.sin(w * 1.3) * 0.15).addScaledVector(fw, -o.z + Math.sin(w * 0.7) * 0.25);
       j.q.copy(tQ); j.updateBasis();
       j.vel.copy(fw).multiplyScalar(st.v); j.speed = st.v; j.state = "flying";
-      j.g = st.g; j.throttle = 0.78 + 0.2 * sm(9.5, 10.5, t); j.spool = j.throttle; j.abLevel = 0.85 * (sm(9.6, 10.4, t) - sm(12.6, 13.6, t));
+      j.g = st.g; j.throttle = 0.78 + 0.2 * sm(toReal(9.5), toReal(10.5), t); j.spool = j.throttle; j.abLevel = 0.85 * (sm(toReal(9.6), toReal(10.4), t) - sm(toReal(12.6), toReal(13.6), t));
       j.updateVisual(dt);
       if (!I.running) return;
       const tail = v1.copy(j.pos).addScaledVector(fw, -9);
@@ -459,7 +464,7 @@
     // camera
     const fov = shot(t);
     cam.position.copy(cpos);
-    const gy = RJ.world.ground(cam.position.x, cam.position.z) + (t >= 3 && t < 6 ? 1.5 : 4);
+    const gy = RJ.world.ground(cam.position.x, cam.position.z) + (t >= toReal(3) && t < toReal(6) ? 1.5 : 4);
     if (cam.position.y < gy) cam.position.y = gy;
     if (I.camUp > 0) cam.up.set(0, 1, 0).lerp(up, I.camUp).normalize(); else cam.up.set(0, 1, 0);
     cam.lookAt(look); cam.up.set(0, 1, 0);
@@ -468,7 +473,7 @@
     cam.fov = cut ? fov : RJ.damp(cam.fov, fov, 8, dt);
     cam.updateProjectionMatrix(); cam.updateMatrixWorld();
     // a whisper of radial blur on the two fast passes, centred on the formation so the jets stay sharp
-    const pass = Math.max(Math.max(0, 1 - Math.abs(t - 4.75) / 0.5), sm(10, 10.6, t) * (1 - sm(12.4, 13, t)) * 0.6);
+    const pass = Math.max(Math.max(0, 1 - Math.abs(t - toReal(4.75)) / toReal(0.5)), sm(toReal(10), toReal(10.6), t) * (1 - sm(toReal(12.4), toReal(13), t)) * 0.6);
     const sc = v2.copy(mid).project(cam);
     RJ.post.fx.motionCenter = [RJ.clamp((sc.x + 1) / 2, 0.15, 0.85), RJ.clamp((sc.y + 1) / 2, 0.15, 0.85)];
     const ex = [1.3, 1.15, 1.25, 1.0, 1.3][shotId(t)];
@@ -477,28 +482,28 @@
     // overlay timing
     if (I.running) {
       const q = I.q;
-      if (t > 2.6) q.credit.classList.remove("on");
-      const hit = t - 13;
+      if (t > toReal(2.6)) q.credit.classList.remove("on");
+      const hit = t - toReal(13);
       q.flash.style.opacity = hit > 0 ? Math.max(0, 0.85 * Math.exp(-hit * 3.2)) : 0;
       if (hit > 0 && !q.big.classList.contains("sweep")) q.big.classList.add("sweep");
       q.streak.style.opacity = hit > 0 ? Math.max(0, 1 - hit * 1.4) : 0;
       q.streak.style.transform = `translate(-50%, -50%) scaleX(${hit > 0 ? Math.min(1, hit * 3) : 0})`;
       const lw = q["logo-wrap"];
-      if (hit > 0 && t < 14.3) {
+      if (hit > 0 && t < toReal(14.3)) {
         const k = Math.min(1, hit / 0.45);
         lw.style.opacity = k; lw.style.filter = `blur(${(1 - k) * 10}px)`;
         lw.style.transform = `translate(-50%, -50%) scale(${1.18 - 0.18 * ease(k) + 0.03 * Math.min(1, hit)})`;
       }
-      if (t >= 14.3 && !I.flipped) flipLogo();
-      if (t > 14.2) I.el.classList.add("open");
-      q.dip.style.opacity = 0.5 * sm(14.55, 14.95, t);
+      if (t >= toReal(14.3) && !I.flipped) flipLogo();
+      if (t > toReal(14.2)) I.el.classList.add("open");
+      q.dip.style.opacity = 0.5 * sm(toReal(14.55), toReal(14.95), t);
       // audio
       if (I.A) { v1.copy(cam.position).sub(mid); I.A.panX = -v1.dot(V3(1, 0, 0).applyQuaternion(cam.quaternion)) / Math.max(30, v1.length()) * 1.4; }
       audioTick(I.A, t, cam.position, mid, fw, dt);
       if (t >= DUR) I.finish(false);
     }
   };
-  function shotId(t) { return t < 3 ? 0 : t < 6 ? 1 : t < 8.2 ? 2 : t < 10 ? 3 : 4; }
+  function shotId(t) { const s = toScene(t); return s < 3 ? 0 : s < 6 ? 1 : s < 8.2 ? 2 : s < 10 ? 3 : 4; }
   // hand the logo over to the lobby's own title: glide the big logo onto it, then fade
   function flipLogo() {
     I.flipped = true;
