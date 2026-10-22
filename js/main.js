@@ -901,9 +901,21 @@
     await new Promise((r) => setTimeout(r, 30));
     renderer.localClippingEnabled = true;
     try { RJ.atlas.ensure(); } catch (e) { console.warn("Atlas failed", e); }
-    const reg = RJ.world.findRegion("mountains");
-    // the start-up cinematic needs a runway: lay an airfield along the valley floor (every mode sets or clears its own)
+    // The intro opens over Rio's beach; gameplay still starts from the usual mountain showcase.
     const intro = RJ.intro && !/[#&]join=|[?&]nointro/.test(location.hash + location.search);
+    let reg = RJ.world.findRegion(intro ? "rio" : "mountains");
+    let beach = null;
+    if (intro && RJ.cities && RJ.cities.sites.rio) {
+      const S = RJ.cities.sites.rio, shore = S.coast - 360;
+      reg = { x: S.x + S.sx * shore, z: S.z + S.sz * shore, yaw: Math.atan2(S.sx, S.sz) };
+      beach = { x: reg.x, z: reg.z, y: Math.max(0, RJ.world.ground(reg.x, reg.z)),
+        alongX: S.px, alongZ: S.pz, seaX: S.sx, seaZ: S.sz, heading: reg.yaw,
+        length: 1900, depth: 260, coast: S.coast };
+      beach.zone = { type: "airshow", x: beach.x, y: beach.y, z: beach.z, r: 1500, n: 1400,
+        alongX: beach.alongX, alongZ: beach.alongZ, seaX: beach.seaX, seaZ: beach.seaZ, length: beach.length, depth: beach.depth, heading: beach.heading };
+      if (RJ.living && RJ.living.addZone) RJ.living.addZone(beach.zone);
+    }
+    // The start-up cinematic needs a runway beside the show area.
     let ab = null;
     if (intro) { RJ.world.setEnvironment({ time: "golden", weather: "scattered" }); ab = RJ.world.planAirbase(reg.x, reg.z, reg.yaw); RJ.world.setAirbase(ab); }
     const pos = V3(reg.x, RJ.modes.highestAround(reg.x, reg.z, 2500, 4) + 450, reg.z);
@@ -918,7 +930,7 @@
       RJ.ui.show("scr-main");
       RJ.ui.checkInvite();
     };
-    if (!intro || !RJ.intro.start({ jets: show.jets, delta: DELTA, center: V3(ab.x, RJ.world.ground(ab.x, ab.z), ab.z), yaw: ab.yaw, render: showRender, done: openLobby })) openLobby();
+    if (!intro || !RJ.intro.start({ jets: show.jets, delta: DELTA, center: V3(ab.x, RJ.world.ground(ab.x, ab.z), ab.z), yaw: ab.yaw, beach, render: showRender, done: openLobby })) openLobby();
   }
   boot();
 })(window.RJ);
