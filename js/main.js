@@ -869,6 +869,41 @@
   addEventListener("keydown", (e) => { if (e.key === "Tab" && RJ.game.mode && RJ.game.mode.mp && RJ.state.mode === "playing") { e.preventDefault(); board(true); } });
   addEventListener("keyup", (e) => { if (e.key === "Tab") board(false); });
 
+  /** The start-up airshow's venue: a stretch of open coast (away from the cities and landmarks) where an air
+   * station can be laid along the shore, runway parallel to the sea. Returns the natural waterline point and the
+   * sea / shore directions. The terrain generator's coasts are steep, so the airbase pad does the levelling. */
+  function findShowCoast() {
+    const g = (x, z) => RJ.world.terrainHeight(x, z), TAU = Math.PI * 2; // below 0 out at sea
+    const cities = Object.values((RJ.cities && RJ.cities.sites) || {});
+    const sites = (RJ.world.sites || []).filter((q) => q && q.x != null);
+    for (let r = 3000; r <= 70000; r += 1000) {
+      const n = Math.round((TAU * r) / 900);
+      let best = null;
+      for (let k = 0; k < n; k++) {
+        const a = (k / n) * TAU, x = Math.cos(a) * r, z = Math.sin(a) * r, h = g(x, z);
+        if (h < 0.5 || h > 60) continue;
+        let sea = null;
+        for (let j = 0; j < 16 && !sea; j++) { const b = (j / 16) * TAU, dx = Math.cos(b), dz = Math.sin(b); if (g(x + dx * 400, z + dz * 400) < -6 && g(x + dx * 900, z + dz * 900) < -12 && g(x + dx * 2500, z + dz * 2500) < -15) sea = { dx, dz }; }
+        if (!sea) continue;
+        const px = -sea.dz, pz = sea.dx;
+        let ok = true, hi = 0;
+        for (let aa = -1900; aa <= 1900 && ok; aa += 380) {
+          const qx = x + px * aa, qz = z + pz * aa;
+          if (g(qx + sea.dx * 450, qz + sea.dz * 450) > -3) ok = false;           // open water all along the show line
+          for (const ss of [-250, -520, -800]) hi = Math.max(hi, g(qx + sea.dx * ss, qz + sea.dz * ss));
+        }
+        if (!ok || hi > 260) continue;
+        let near = 1e9; for (const c of cities) near = Math.min(near, Math.hypot(c.x - x, c.z - z));
+        if (near < 17000) continue;
+        if (sites.some((q) => Math.hypot(q.x - x, q.z - z) < (q.r || q.len || 1500) + 3500)) continue;
+        const sc = hi + Math.abs(near - 22000) / 200;
+        if (!best || sc < best.sc) best = { x, z, sx: sea.dx, sz: sea.dz, px, pz, sc };
+      }
+      if (best) return best;
+    }
+    return null;
+  }
+
   /* ======================= BOOT ======================= */
   async function boot() {
     if (typeof THREE === "undefined") { $("load-text").textContent = "The 3D engine didn't load. Check your connection and reload."; return; }
@@ -901,11 +936,24 @@
     await new Promise((r) => setTimeout(r, 30));
     renderer.localClippingEnabled = true;
     try { RJ.atlas.ensure(); } catch (e) { console.warn("Atlas failed", e); }
-    const reg = RJ.world.findRegion("mountains");
-    // the start-up cinematic needs a runway: lay an airfield along the valley floor (every mode sets or clears its own)
-    const intro = RJ.intro && !/[#&]join=|[?&]nointro/.test(location.hash + location.search);
-    let ab = null;
-    if (intro) { RJ.world.setEnvironment({ time: "golden", weather: "scattered" }); ab = RJ.world.planAirbase(reg.x, reg.z, reg.yaw); RJ.world.setAirbase(ab); }
+    // the start-up cinematic is an airshow over Rio's beach; without it (invite links, ?nointro) the lobby opens in the mountains
+    let intro = RJ.intro && !/[#&]join=|[?&]nointro/.test(location.hash + location.search);
+    let reg = null, beach = null;
+    const coast = intro && findShowCoast();
+    if (coast) {
+      // an air station along the shore: runway 250 m inland of the old cliff line; the pad levels the coast to 6 m and slopes into the sea
+      const rx = coast.x - coast.sx * 250, rz = coast.z - coast.sz * 250, yaw = Math.atan2(-coast.px, -coast.pz);
+      RJ.world.setAirbase({ x: rx, z: rz, dx: -Math.sin(yaw), dz: -Math.cos(yaw), yaw, len: 3200, halfW: 280, side: 0, elev: 6 });
+      let d = 0; while (d < 1500 && RJ.world.ground(rx + coast.sx * d, rz + coast.sz * d) > 0.3) d += 3;
+      const x = rx + coast.sx * d, z = rz + coast.sz * d, y = 6, crowdS = 190 - d; // crowd line: 190 m seaward of the runway
+      beach = { x, z, y, crowdS, alongX: coast.px, alongZ: coast.pz, seaX: coast.sx, seaZ: coast.sz };
+      // the crowd: 3,000 spectators along the waterfront apron, facing the sea
+      beach.zone = { type: "airshow", x: x + coast.sx * crowdS, y, z: z + coast.sz * crowdS, r: 700, n: 3000, alongX: coast.px, alongZ: coast.pz, seaX: coast.sx, seaZ: coast.sz, length: 1300, depth: 70, heading: Math.atan2(coast.sx, coast.sz) };
+      if (RJ.living && RJ.living.addZone) RJ.living.addZone(beach.zone);
+      reg = { x: x + coast.sx * 300, z: z + coast.sz * 300, yaw };
+      RJ.world.setEnvironment({ time: "golden", weather: "scattered" });
+    }
+    if (!reg) { intro = false; reg = RJ.world.findRegion("mountains"); }
     const pos = V3(reg.x, RJ.modes.highestAround(reg.x, reg.z, 2500, 4) + 450, reg.z);
     setLoad(0.1, "Generating terrain…");
     await RJ.world.prepare(pos, (p) => setLoad(0.1 + p * 0.9));
@@ -918,7 +966,7 @@
       RJ.ui.show("scr-main");
       RJ.ui.checkInvite();
     };
-    if (!intro || !RJ.intro.start({ jets: show.jets, delta: DELTA, center: V3(ab.x, RJ.world.ground(ab.x, ab.z), ab.z), yaw: ab.yaw, render: showRender, done: openLobby })) openLobby();
+    if (!intro || !RJ.intro.start({ jets: show.jets, delta: DELTA, beach, render: showRender, done: openLobby })) openLobby();
   }
   boot();
 })(window.RJ);
