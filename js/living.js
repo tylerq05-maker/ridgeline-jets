@@ -579,15 +579,14 @@
     const P = new Float32Array(n * 3), N2 = new Float32Array(n * 3), A = new Float32Array(n); let o = 0;
     for (const g of parts) { P.set(g.attributes.position.array, o * 3); N2.set(g.attributes.normal.array, o * 3); A.set(g.attributes.aLeg.array, o); o += g.attributes.position.count; }
     const G = new THREE.BufferGeometry(); G.setAttribute("position", new THREE.BufferAttribute(P, 3)); G.setAttribute("normal", new THREE.BufferAttribute(N2, 3)); G.setAttribute("aLeg", new THREE.BufferAttribute(A, 1));
-    const MAX = 1400, ph = new Float32Array(MAX), cheer = new Float32Array(MAX);
+    const MAX = 1400, ph = new Float32Array(MAX);
     G.setAttribute("aPh", new THREE.InstancedBufferAttribute(ph, 1));
-    G.setAttribute("aCheer", new THREE.InstancedBufferAttribute(cheer, 1));
-    const time = { value: 0 }, airTime = { value: 0 };
+    const time = { value: 0 };
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
     mat.onBeforeCompile = (sh) => {
-      sh.uniforms.rjT = time; sh.uniforms.rjAir = airTime;
-      sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute float aLeg; attribute float aPh; attribute float aCheer; uniform float rjT; uniform float rjAir;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nfloat air = smoothstep(8.5, 9.8, rjAir) * (1.0 - smoothstep(11.4, 12.7, rjAir));\nfloat sw = sin(rjT * 7.0 + aPh) * 0.5 * sign(aLeg) * step(0.001, aPh) - step(1.5, abs(aLeg)) * aCheer * air * 0.9;\nfloat hip = abs(aLeg) > 1.5 ? 1.45 : 0.86;\nif (abs(aLeg) > 0.5) { float yy = transformed.y - hip; transformed.z += -yy * sin(sw) * (abs(aLeg) > 1.5 ? 0.7 : 1.0); transformed.y = hip + yy * cos(sw); }");
+      sh.uniforms.rjT = time;
+      sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute float aLeg; attribute float aPh; uniform float rjT;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nfloat sw = sin(rjT * 7.0 + aPh) * 0.5 * sign(aLeg) * step(0.001, aPh);\nfloat hip = abs(aLeg) > 1.5 ? 1.45 : 0.86;\nif (abs(aLeg) > 0.5) { float yy = transformed.y - hip; transformed.z += -yy * sin(sw) * (abs(aLeg) > 1.5 ? 0.7 : 1.0); transformed.y = hip + yy * cos(sw); }");
     };
     const im = new THREE.InstancedMesh(G, mat, MAX); im.count = 0; im.frustumCulled = false; im.layers.set(5); grp.add(im);
     const CL = [0x2a2f3a, 0x8a1c1c, 0x1c3a7a, 0xd8d0c0, 0x3a5a2a, 0x6a4a8a, 0xc87a1a, 0x101010, 0xe8e8e8, 0x5a6a7a];
@@ -596,7 +595,6 @@
     let active = null;
     L.people = {
       im,
-      setAirshow(t) { airTime.value = t; },
       update(dt, cam) {
         time.value += dt;
         // the nearest people zone within 1.2 km gets a crowd (zones: plazas, parks, stations, terminals, beaches)
@@ -604,34 +602,21 @@
         for (const Z of L.zones) { const d = Math.hypot(Z.x - cam.position.x, Z.z - cam.position.z) - Z.r; if (d < bd) { bd = d; best = Z; } }
         if (best !== active) {
           active = best; people.length = 0;
-          if (best) {
-            const n = Math.min(MAX, Math.round(best.n || best.r * best.r * 0.02));
-            for (let i = 0; i < n; i++) {
-              let x, z, hd, isCheer = false;
-              if (best.type === "airshow") {
-                const a = (Math.random() - 0.5) * best.length, d = (Math.random() - 0.5) * best.depth;
-                x = best.x + best.alongX * a + best.seaX * d; z = best.z + best.alongZ * a + best.seaZ * d;
-                hd = best.heading; isCheer = Math.random() < 0.72;
-              } else { const a = Math.random() * TAU, r = Math.sqrt(Math.random()) * best.r; x = best.x + Math.cos(a) * r; z = best.z + Math.sin(a) * r; hd = Math.random() * TAU; }
-              people.push({ x, z, hd, v: best.type === "airshow" ? 0 : (Math.random() < 0.2 ? 0 : RJ.lerp(1.0, 1.6, Math.random())), t: Math.random() * 8, ph: 1 + Math.random() * 6, cheer: isCheer ? 1 : 0 });
-            }
-          }
+          if (best) { const n = Math.min(MAX, Math.round(best.n || best.r * best.r * 0.02)); for (let i = 0; i < n; i++) { const a = Math.random() * TAU, r = Math.sqrt(Math.random()) * best.r; people.push({ x: best.x + Math.cos(a) * r, z: best.z + Math.sin(a) * r, hd: Math.random() * TAU, v: Math.random() < 0.2 ? 0 : RJ.lerp(1.0, 1.6, Math.random()), t: Math.random() * 8, ph: 1 + Math.random() * 6 }); } }
         }
         if (!active || cam.position.y - active.y > 900) { im.count = 0; return; }
         let n = 0;
         for (const P of people) {
           P.t -= dt; if (P.t < 0) { P.t = RJ.lerp(3, 10, Math.random()); P.hd += RJ.lerp(-1.2, 1.2, Math.random()); if (Math.random() < 0.15) P.v = P.v ? 0 : RJ.lerp(1.0, 1.6, Math.random()); }
           P.x += Math.sin(P.hd) * P.v * dt; P.z += Math.cos(P.hd) * P.v * dt;
-          if (active.type === "airshow") { P.hd = active.heading; P.v = 0; }
-          else if (Math.hypot(P.x - active.x, P.z - active.z) > active.r) P.hd = Math.atan2(active.x - P.x, active.z - P.z);
-          m4.compose(p.set(P.x, active.y, P.z), q.setFromAxisAngle(Y, P.hd), sc); im.setMatrixAt(n, m4); ph[n] = P.v ? P.ph : 0; cheer[n] = P.cheer || 0; n++;
+          if (Math.hypot(P.x - active.x, P.z - active.z) > active.r) P.hd = Math.atan2(active.x - P.x, active.z - P.z);
+          m4.compose(p.set(P.x, active.y, P.z), q.setFromAxisAngle(Y, P.hd), sc); im.setMatrixAt(n, m4); ph[n] = P.v ? P.ph : 0; n++;
         }
-        im.count = n; im.instanceMatrix.needsUpdate = true; G.attributes.aPh.needsUpdate = true; G.attributes.aCheer.needsUpdate = true;
+        im.count = n; im.instanceMatrix.needsUpdate = true; G.attributes.aPh.needsUpdate = true;
       }
     };
     // zones from the cities' plazas and parks, rail stations and airport terminals
     for (const a of L.airports) { const [x, z] = a.W(0, 420); L.zones.push({ x, z, y: a.E, r: 160, n: 260 }); }
   };
   L.addZone = (z) => L.zones.push(z);
-  L.removeZone = (z) => { const i = L.zones.indexOf(z); if (i >= 0) L.zones.splice(i, 1); };
 })(window.RJ);
