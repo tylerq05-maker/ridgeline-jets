@@ -571,14 +571,18 @@
   const G = (A.ghosts = []);
   let HUBS = null;
   function hubs() {
-    if (HUBS) return HUBS;
+    const LA = RJ.living && RJ.living.airports ? RJ.living.airports : [];
+    if (HUBS && HUBS.nAp === LA.length) return HUBS;
     const out = [];
+    out.nAp = LA.length;
+    // the living world's real airports (runways, terminals, their own arrivals and departures) are the busiest hubs
+    for (const ap of LA) out.push({ id: "ap-" + ap.city, x: ap.x, z: ap.z, w: 2.6, air: true, e: ap.E, city: true });
     // the two big airports; everything else is en-route traffic between gateways beyond the map and airway fixes
     // across it, so away from the cities flights are at cruise levels, not on approach to every small region
     // each city has several airports around it (arrivals and departures spread out instead of converging on one point)
     const reg = (id, ap) => { const r = RJ.world.findRegion(id); if (r) for (const [dx, dz, w] of ap) out.push({ id, x: r.x + dx, z: r.z + dz, w, air: true, e: H(r.x + dx, r.z + dz), city: true }); };
     reg("nyc", [[14000, 9000, 2.6], [-15000, 4000, 2.2], [3000, -13000, 1.8]]); reg("sf", [[6000, 14000, 2.8], [-12000, -6000, 2]]);
-    for (const id of ["tokyo", "dubai", "rio", "hk", "chicago"]) if (RJ.cities && RJ.cities.sites[id]) reg(id, [[8000, 6000, 2.2]]);
+    for (const id of ["tokyo", "dubai", "rio", "hk", "chicago"]) if (RJ.cities && RJ.cities.sites[id] && !LA.some((ap) => ap.city === id)) reg(id, [[8000, 6000, 2.2]]);
     for (let i = 0; i < 12; i++) { const a = (i / 12) * Math.PI * 2 + 0.2; out.push({ id: "gw" + i, x: -25000 + Math.cos(a) * 260000, z: 45000 + Math.sin(a) * 260000, w: 2.2, air: false, e: 0 }); }
     for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2 + 0.6; out.push({ id: "fix" + i, x: -25000 + Math.cos(a) * 70000, z: 45000 + Math.sin(a) * 70000, w: 1.4, air: false, e: 0 }); }
     return (HUBS = out);
@@ -677,7 +681,17 @@
       const k = RJ.clamp((g.pos.y - (g.b && g.b.air ? g.b.e : 0) - 300) / 7000, 0, 1);
       g.spd = 80 + (g.cspd - 80) * Math.pow(k, 0.6);
     }
-    const vy = RJ.clamp((ty - g.pos.y) * 0.08, -13, 13);           // ~2,500 ft/min climbs and descents
+    // traffic advisory: a flight closing on the player's level steps 450 m away from it (up when above or near the ground)
+    let vmax = 13;
+    const P = A._pl;
+    if (P && P.alive) {
+      const dh = Math.hypot(g.pos.x - P.pos.x, g.pos.z - P.pos.z);
+      if (dh < 2600 && Math.abs(g.pos.y - P.pos.y) < 450) {
+        const up = g.pos.y >= P.pos.y || P.pos.y - 450 < H(g.pos.x, g.pos.z) + 400;
+        ty = up ? Math.max(ty, P.pos.y + 450) : Math.min(ty, P.pos.y - 450); vmax = 22;
+      }
+    }
+    const vy = RJ.clamp((ty - g.pos.y) * 0.08, -vmax, vmax);           // ~2,500 ft/min climbs and descents
     g.pos.x += g.dir.x * g.spd * dt; g.pos.z += g.dir.z * g.spd * dt; g.pos.y += vy * dt;
     g.vy = vy; g.pitch = Math.atan2(vy, g.spd);
     // contrails at cruise height (jets only)
@@ -849,6 +863,7 @@
     if (W.flashT > 0) W.flashT -= dt;
     A._acc = (A._acc || 0) + dt;
     if (A.show) { A.show.update(dt); if (A.show.done && !A.show.alive) A.show = null; }
+    A._pl = pl;
     for (const g of G) stepGhost(g, dt);
     if (A._acc < 0.25) { drawStars(); return; }
     const step = A._acc; A._acc = 0;

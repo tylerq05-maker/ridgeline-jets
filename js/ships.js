@@ -102,6 +102,18 @@
       box(P, 0.5, 9, 0.5, -3, free, 10, 0xe0a020); box(P, 0.5, 9, 0.5, 3, free, 10, 0xe0a020); box(P, 6.5, 0.5, 0.5, 0, free + 9, 10, 0xe0a020);
       box(P, 0.4, 11, 0.4, 0, free + 4, -4, 0xdddddd);
     } },
+    ferry: { w: 0, L: 120, B: 22, speed: 12, build(P) {
+      // a ro-pax ferry: white hull with a blue band, two passenger decks, the bridge forward, twin funnels aft
+      const free = 7, band = pick([0x1d5fae, 0xc8202a, 0x18908a]); hull(P, 120, 22, free, { hull: 0xf2f2ee, deck: 0x8a8a84, stripe: band, boot: 0x23343f, bootTop: 1.2, fine: 0.3 });
+      box(P, 20, 3.2, 84, 0, free, 4, 0xf6f6f2); box(P, 20.2, 1.1, 82, 0, free + 1.5, 4, 0x223040);
+      box(P, 18, 3, 62, 0, free + 3.2, 8, 0xf6f6f2); box(P, 18.2, 1, 60, 0, free + 4.6, 8, 0x223040);
+      box(P, 21, 3, 9, 0, free + 6.2, -24, 0xf6f6f2); box(P, 21.2, 1.1, 8.6, 0, free + 7.4, -24, 0x1a2a3a);
+      for (const x of [-4, 4]) { cyl(P, 1.8, 7, x, free + 6.2, 30, band); cyl(P, 1.9, 1.2, x, free + 12.4, 30, 0x1a1a1a); }
+    } },
+    speed: { w: 0, L: 11, B: 3.2, speed: 17, build(P) {
+      const free = 1.2; hull(P, 11, 3.2, free, { hull: pick([0xf6f6f4, 0xc8202a, 0x1d3f7a, 0xf2c21b, 0x2a2d31]), deck: 0xe8e2d4, boot: 0x222222, bootTop: 0.3, fine: 0.45 });
+      box(P, 1.8, 0.9, 1.6, 0, free, -0.4, 0x2a3440); box(P, 2.2, 0.6, 0.2, 0, free + 0.9, -1.3, 0x7a98ae); box(P, 2.4, 0.7, 2.2, 0, free, 2.2, 0xd8d0c0);
+    } },
     yacht: { w: 12, L: 20, B: 6, speed: 4, sail: true, build(P) {
       const free = 1.6; hull(P, 20, 6, free, { hull: 0xf6f6f4, deck: 0xb08a5a, boot: 0x1d3f7a, bootTop: 0.4, fine: 0.5 });
       box(P, 3.4, 1.2, 6, 0, free, 1, 0xf6f6f4); cyl(P, 0.18, 24, 0, free, -1.5, 0xd0d0d0);
@@ -163,15 +175,18 @@
   }
 
   /* ---------------- spawning ---------------- */
-  const WEIGHTS = [["container", 26], ["tanker", 16], ["cruise", 8], ["destroyer", 6], ["trawler", 22], ["yacht", 22]];
-  function pickType() { let r = Math.random() * 100; for (const [k, w] of WEIGHTS) { if ((r -= w) <= 0) return k; } return "trawler"; }
+  // open sea: mostly merchant shipping; within ~25 km of a city: ferries, speedboats, yachts and cruise liners
+  const WEIGHTS = [["container", 26], ["tanker", 16], ["cruise", 8], ["destroyer", 6], ["trawler", 20], ["yacht", 18], ["ferry", 2], ["speed", 4]];
+  const WEIGHTS_CITY = [["container", 10], ["tanker", 5], ["cruise", 10], ["destroyer", 3], ["trawler", 9], ["yacht", 22], ["ferry", 17], ["speed", 24]];
+  function pickType(city) { const W = city ? WEIGHTS_CITY : WEIGHTS; let r = Math.random() * 100; for (const [k, w] of W) { if ((r -= w) <= 0) return k; } return "trawler"; }
+  const nearCity = (p) => { const N = RJ.living && RJ.living.cityNodes ? RJ.living.cityNodes() : []; return N.some((n) => Math.hypot(n.x - p.x, n.z - p.z) < n.r + 16000); };
   const deep = (x, z, need) => RJ.world.terrainHeight(x, z) < -need && !(RJ.carrier && RJ.carrier.site && Math.hypot(x - RJ.carrier.site.x, z - RJ.carrier.site.z) < 1500);
   function spawn(cam, near) {
-    const W = RJ.world, type = pickType(), T = TYPES[type];
+    const W = RJ.world, type = pickType(nearCity(cam.position)), T = TYPES[type], small = T.L < 40;
     for (let k = 0; k < 6; k++) {
-      const a = Math.random() * Math.PI * 2, r = near ? RJ.rand(1500, 9000) : RJ.rand(9000, 20000);
+      const a = Math.random() * Math.PI * 2, r = near ? RJ.rand(small ? 800 : 1500, small ? 6000 : 9000) : RJ.rand(small ? 6000 : 9000, small ? 12000 : 20000);
       const x = cam.position.x + Math.cos(a) * r, z = cam.position.z + Math.sin(a) * r, hdg = Math.random() * Math.PI * 2;
-      const need = T.L > 100 ? 14 : 5;
+      const need = T.L > 100 ? 14 : type === "speed" ? 3 : 5;
       const fx = -Math.sin(hdg), fz = -Math.cos(hdg);
       if (!deep(x, z, need) || !deep(x + fx * T.L, z + fz * T.L, need) || !deep(x - fx * T.L, z - fz * T.L, need)) continue;
       if (S.list.some((s) => Math.hypot(s.pos.x - x, s.pos.z - z) < 900)) continue;
@@ -183,7 +198,7 @@
       wake.frustumCulled = false; wake.renderOrder = 4; // after the sea surface (renderOrder 2)
       const grp = new THREE.Group(); grp.add(wake); grp.add(mesh);
       W.scene.add(grp);
-      const sh = { type, T, grp, mesh, wake, pos: V3(x, 0, z), hdg, want: hdg, speed: T.speed * RJ.rand(0.8, 1.1), ph: Math.random() * 10, look: 0 };
+      const sh = { type, T, grp, mesh, wake, pos: V3(x, 0, z), hdg, want: hdg, speed: T.speed * RJ.rand(0.8, 1.1), ph: Math.random() * 10, look: 0, lights: shipLights(type, T) };
       S.list.push(sh);
       return sh;
     }
@@ -193,8 +208,41 @@
     RJ.world.scene.remove(sh.grp); sh.mesh.geometry.dispose(); sh.wake.geometry.dispose();
     S.list.splice(S.list.indexOf(sh), 1);
   }
-  S.clear = () => { while (S.list.length) remove(S.list[0]); first = true; };
-  S.target = () => (RJ.settings.quality === "low" || (RJ.perf && RJ.perf.tier >= 1) ? 6 : 12);
+  S.clear = () => { while (S.list.length) remove(S.list[0]); first = true; if (GLS) { GLS.begin(); GLS.end(); } };
+  S.target = (cam) => {
+    const q = RJ.settings.quality, base = { low: 6, medium: 10, high: 15, ultra: 20 }[q] || 12;
+    if (RJ.perf && RJ.perf.tier >= 1) return Math.min(base, 7);
+    return base + (q !== "low" && cam && nearCity(cam.position) ? 4 : 0);
+  };
+
+  /* ---------------- night lights ---------------- */
+  /** Local light points [x, y, z, r, g, b, size] (bow toward -z): navigation lights (masthead and stern white, port
+   *  red, starboard green), deck floods, and rows of lit cabins on the passenger ships. */
+  function shipLights(type, T) {
+    const out = [], L = T.L, B = T.B, add = (x, y, z, r, g, b, k) => out.push(x, y, z, r, g, b, k || 1);
+    const free = { container: 13, tanker: 9, cruise: 12, destroyer: 7, trawler: 3, yacht: 1.6, ferry: 7, speed: 1.2 }[type] || 3;
+    const mast = { container: 34, tanker: 30, cruise: 36, destroyer: 32, trawler: 12, yacht: 26, ferry: 16, speed: 2.4 }[type] || 8;
+    add(0, free + mast, -L * 0.15, 1, 0.95, 0.85, 1.2); add(0, free + 2, L * 0.5, 1, 0.95, 0.85, 0.9);
+    add(-B * 0.5, free + 1, -L * 0.2, 1, 0.08, 0.05, 1); add(B * 0.5, free + 1, -L * 0.2, 0.1, 1, 0.25, 1);
+    const R = Math.random;
+    if (type === "cruise") { for (let k = 0; k < 7; k++) { const w = 33 - k * 1.6, l = 220 - k * 18, z0 = 10 + k * 3, y = free + k * 3.2 + 1.9; for (let z = z0 - l / 2 + 5; z < z0 + l / 2 - 5; z += 8) for (const sd of [-1, 1]) if (R() < 0.75) add(sd * (w / 2 + 0.2), y, z, 1, 0.78, 0.48, 0.75); } }
+    else if (type === "ferry") { for (const [y, l, z0, w] of [[free + 1.9, 82, 4, 20], [free + 5, 60, 8, 18]]) for (let z = z0 - l / 2 + 4; z < z0 + l / 2 - 4; z += 6) for (const sd of [-1, 1]) if (R() < 0.85) add(sd * (w / 2 + 0.2), y, z, 1, 0.82, 0.55, 0.75); }
+    else if (L > 100) { for (let z = -L * 0.4; z < L * 0.35; z += 30) add(0, free + 3, z, 1, 0.85, 0.6, 1.1); for (let k = -2; k <= 2; k++) add(k * B * 0.18, free + 12, L * 0.4, 1, 0.8, 0.5, 0.8); }
+    else if (L > 25) add(0, free + 4, -2, 1, 0.85, 0.6, 1.2); // trawler working lights
+    return new Float32Array(out);
+  }
+  let GLS = null;
+  function lightsUpdate(cam) {
+    const night = RJ.cityKit && RJ.cityKit.NIGHT ? RJ.cityKit.NIGHT.value : 0;
+    if (!GLS) { if (night < 0.05 || !RJ.living || !RJ.living.glowLayer) return; GLS = RJ.living.glowLayer(3500, { fade: 11000 }); }
+    GLS.begin(cam);
+    if (night >= 0.05) for (const sh of S.list) {
+      const A = sh.lights; if (!A || sh.pos.distanceTo(cam.position) > 20000) continue;
+      const c = Math.cos(sh.hdg), s = Math.sin(sh.hdg), px = sh.grp.position.x, py = sh.grp.position.y, pz = sh.grp.position.z;
+      for (let i = 0; i < A.length; i += 7) { const lx = A[i], lz = A[i + 2]; GLS.add(px + lx * c + lz * s, py + A[i + 1], pz - lx * s + lz * c, A[i + 3] * night, A[i + 4] * night, A[i + 5] * night, A[i + 6]); }
+    }
+    GLS.end();
+  }
 
   let tick = 0, first = true;
   S.update = function (dt, cam) {
@@ -205,7 +253,7 @@
       tick = 1;
       for (let i = S.list.length - 1; i >= 0; i--) if (S.list[i].pos.distanceTo(cam.position) > 26000) remove(S.list[i]);
       // fill the bubble: on the first pass ships may appear close, later only out of sight range
-      const n = S.target();
+      const n = S.target(cam);
       for (let k = 0; k < (first ? 24 : 3) && S.list.length < n; k++) spawn(cam, first && k % 2 === 0);
       first = false;
     }
@@ -222,17 +270,19 @@
         sh.look = 2;
         const need = sh.T.L > 100 ? 12 : 4, ahead = Math.max(500, sh.T.L * 4);
         const ok = (h) => deep(sh.pos.x - Math.sin(h) * ahead, sh.pos.z - Math.cos(h) * ahead, need);
+        if (sh.type === "speed" && Math.random() < 0.3) sh.want = sh.hdg + RJ.rand(-0.7, 0.7); // speedboats weave about
         if (!ok(sh.want)) { for (const d of [0.5, -0.5, 1, -1, 1.6, -1.6, 2.6, 3.14]) if (ok(sh.hdg + d)) { sh.want = sh.hdg + d; break; } }
       }
       const dh = Math.atan2(Math.sin(sh.want - sh.hdg), Math.cos(sh.want - sh.hdg));
-      sh.hdg += RJ.clamp(dh, -1, 1) * dt * (sh.T.L > 100 ? 0.03 : 0.12);
+      sh.hdg += RJ.clamp(dh, -1, 1) * dt * (sh.T.L > 100 ? 0.03 : sh.type === "speed" ? 0.35 : 0.12);
       sh.pos.x -= Math.sin(sh.hdg) * sh.speed * dt; sh.pos.z -= Math.cos(sh.hdg) * sh.speed * dt;
       // motion in the swell: small craft pitch and roll far more than big hulls
       const k = RJ.clamp(40 / sh.T.L, 0.08, 1.6) * sea, p = sh.ph + t;
       sh.grp.position.set(sh.pos.x, Math.sin(p * 0.9) * 0.3 * k, sh.pos.z);
       sh.grp.rotation.set(0, sh.hdg, 0);
-      sh.mesh.rotation.set(Math.sin(p * 0.7) * 0.02 * k, 0, Math.sin(p * 0.55 + 1) * 0.035 * k + (sh.T.sail ? 0.12 : 0));
+      sh.mesh.rotation.set(Math.sin(p * 0.7) * 0.02 * k + (sh.type === "speed" ? 0.07 : 0), 0, Math.sin(p * 0.55 + 1) * 0.035 * k + (sh.T.sail ? 0.12 : 0)); // speedboats ride bow-up
     }
+    lightsUpdate(cam);
   };
   S.stats = () => S.list.map((s) => s.type + "@" + Math.round(s.pos.distanceTo(RJ.world.camera.position)));
 })(window.RJ);

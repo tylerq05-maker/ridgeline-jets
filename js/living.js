@@ -14,6 +14,79 @@
   const K = () => RJ.cityKit;
   const hh = (a, b) => { const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453; return s - Math.floor(s); };
   let grp = null;
+  /** Quality scale for the amount of life: low 0.5 · medium 0.75 · high 1 · ultra 1.3. */
+  L.qn = () => ({ low: 0.5, medium: 0.75, high: 1, ultra: 1.3 }[RJ.settings.quality] || 1);
+
+  /* ======================= night glows ======================= *
+   * One additive point layer for every small light in the living world (vehicle head and tail lights, boat and ship
+   * lights, aircraft landing lights and beacons): filled each frame near the camera, drawn in one call. Point size is
+   * in metres (perspective), clamped to a few pixels far away so the streams of headlights still read from altitude. */
+  let GTEX = null;
+  function glowTex() {
+    if (GTEX) return GTEX;
+    const c = document.createElement("canvas"); c.width = c.height = 32; const x = c.getContext("2d"), g = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+    g.addColorStop(0, "rgba(255,255,255,1)"); g.addColorStop(0.25, "rgba(255,255,255,0.75)"); g.addColorStop(0.6, "rgba(255,255,255,0.18)"); g.addColorStop(1, "rgba(255,255,255,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 32, 32); return (GTEX = new THREE.CanvasTexture(c));
+  }
+  L.glowLayer = function (cap, o) {
+    o = o || {};
+    const g = new THREE.BufferGeometry(), P = new Float32Array(cap * 3), C = new Float32Array(cap * 3), Z = new Float32Array(cap);
+    g.setAttribute("position", new THREE.BufferAttribute(P, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute("color", new THREE.BufferAttribute(C, 3).setUsage(THREE.DynamicDrawUsage));
+    g.setAttribute("aSz", new THREE.BufferAttribute(Z, 1).setUsage(THREE.DynamicDrawUsage));
+    const m = new THREE.PointsMaterial({ size: o.size || 3, sizeAttenuation: true, vertexColors: true, map: glowTex(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false, fog: false });
+    const lo = (o.min || 1.8).toFixed(2), hi = (o.max || 22).toFixed(2);
+    m.onBeforeCompile = (sh) => {
+      sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute float aSz;").replace("gl_PointSize = size;", "gl_PointSize = size * aSz;")
+        .replace("#include <fog_vertex>", "gl_PointSize = clamp(gl_PointSize, " + lo + " * min(aSz, 1.0), " + hi + ");\n#include <fog_vertex>");
+    };
+    const pts = new THREE.Points(g, m); pts.frustumCulled = false; pts.renderOrder = 6; g.setDrawRange(0, 0); pts.visible = false;
+    RJ.world.scene.add(pts);
+    let n = 0;
+    const cp = V3(), fade = o.fade || 9000;
+    return {
+      pts, cap,
+      begin(cam) { n = 0; if (cam) cp.copy(cam.position); },
+      /** x, y, z, colour (0..1+, additive), size multiplier. Lights fade out with distance (no fog on additive points). */
+      add(x, y, z, r, gg, b, k) {
+        if (n >= cap) return;
+        const d = Math.hypot(x - cp.x, y - cp.y, z - cp.z), f = d < fade ? 1 : Math.max(0, 1 - (d - fade) / fade); if (f <= 0) return;
+        const i = n * 3; P[i] = x; P[i + 1] = y; P[i + 2] = z; C[i] = r * f; C[i + 1] = gg * f; C[i + 2] = b * f; Z[n] = k || 1; n++;
+      },
+      end() { g.setDrawRange(0, n); pts.visible = n > 0; if (n) { g.attributes.position.needsUpdate = true; g.attributes.color.needsUpdate = true; g.attributes.aSz.needsUpdate = true; } },
+      get count() { return n; }
+    };
+  };
+  let GLOW = null;
+  /** The shared per-frame glow layer (null by day). */
+  L.glow = () => GLOW && GLOW.on ? GLOW : null;
+
+  /* every street traffic system made by the city kit (city streets, metro highways, the intercity motorways) is
+   * remembered so its head and tail lights can glow at night */
+  const TRAF = (L.trafficAll = []);
+  if (RJ.cityKit && RJ.cityKit.traffic && !RJ.cityKit.traffic.rjWrapped) {
+    const make = RJ.cityKit.traffic;
+    RJ.cityKit.traffic = function () { const api = make.apply(this, arguments); if (api && api.lm) TRAF.push(api); return api; };
+    RJ.cityKit.traffic.rjWrapped = true;
+  }
+  function trafficGlow(GL, cam) {
+    const cx = cam.position.x, cy = cam.position.y, cz = cam.position.z;
+    for (const T of TRAF) {
+      const lm = T.lm; if (!lm.visible || !lm.count || !lm.parent || !lm.parent.visible) continue;
+      const e = lm.instanceMatrix.array;
+      for (let i = 0; i < lm.count; i++) {
+        const o = i * 16, tx = e[o + 12], ty = e[o + 13], tz = e[o + 14];
+        // vehicle axes: y up (height scale), z along (length scale; headlights at -z, tail lights at +z)
+        const zx = e[o + 8], zy = e[o + 9], zz = e[o + 10], yx = e[o + 4], yy = e[o + 5], yz = e[o + 6];
+        const vx = cx - tx, vy = cy - ty, vz = cz - tz, vl = Math.hypot(vx, vy, vz) || 1, zl = Math.hypot(zx, zy, zz) || 1;
+        const face = -(vx * zx + vy * zy + vz * zz) / (vl * zl); // +1: looking at the headlights
+        const hx = tx - zx * 2.3 + yx * 0.72, hy = ty - zy * 2.3 + yy * 0.72, hz = tz - zz * 2.3 + yz * 0.72;
+        const kH = 0.3 + 0.7 * Math.max(0, face), kT = 0.35 + 0.65 * Math.max(0, -face);
+        GL.add(hx, hy, hz, 1.0 * kH, 0.9 * kH, 0.72 * kH, 1.15);
+        GL.add(tx + zx * 2.3 + yx * 0.78, ty + zy * 2.3 + yy * 0.78, tz + zz * 2.3 + yz * 0.78, 0.95 * kT, 0.08 * kT, 0.04 * kT, 0.85);
+      }
+    }
+  }
 
   /* ======================= network nodes ======================= */
   function nodes() {
@@ -211,7 +284,9 @@
     }
     // one traffic system and a pair of high-speed train sets per corridor
     const paths = L.corridors.map((c) => c.road);
-    L.traffic = K().traffic(grp, paths, { cars: 900, range: 3200, gap: [34, 80], density: (P, d) => 0.45 + 0.4 * (0.5 + 0.5 * Math.sin(d / 3100 + P.len * 0.001)) });
+    // busier near the cities at either end of a corridor (commuter traffic), thinner out in the country
+    const nearEnd = (P, d) => Math.exp(-Math.min(d, P.len - d) / 9000);
+    L.traffic = K().traffic(grp, paths, { cars: Math.round(1100 * L.qn()), range: 3200, gap: [30, 76], density: (P, d) => Math.min(0.95, 0.42 + 0.33 * (0.5 + 0.5 * Math.sin(d / 3100 + P.len * 0.001)) + 0.35 * nearEnd(P, d)) });
     L.trains = L.corridors.map((c, i) => K().trains(grp, c.rail, { speed: 78, acc: 0.6, cars: 8, carScale: 1.3, headway: 1100, dwell: 0, livery: [0xf2f2f0, 0xe8e4d8, 0xd8dde4][i % 3], phase: i * 300 }));
   }
 
@@ -224,17 +299,22 @@
     try { if (L.buildAirports) L.buildAirports(grp); } catch (e) { console.warn("Airports failed", e); }
     try { if (L.buildHarbours) L.buildHarbours(grp); } catch (e) { console.warn("Harbours failed", e); }
     try { if (L.buildPeople) L.buildPeople(grp); } catch (e) { console.warn("People failed", e); }
+    try { GLOW = L.glowLayer(9000); } catch (e) { console.warn("Glow failed", e); }
+    try { if (L.buildAmbient) L.buildAmbient(grp); } catch (e) { console.warn("Ambient life failed", e); }
     console.log("Living world planned in " + Math.round(performance.now() - t0) + " ms: " + L.corridors.length + " corridors, " + Math.round(L.corridors.reduce((a, c) => a + c.len, 0) / 1000) + " km");
   };
   L.update = function (dt, cam) {
     if (!grp) return;
     const P = cam.position;
+    if (GLOW) { GLOW.on = K().NIGHT.value > 0.05; GLOW.begin(cam); }
     for (const c of L.corridors) for (const m of c.meshes) { const bs = m.geometry.boundingSphere; m.visible = !bs || bs.center.distanceTo(P) - bs.radius < 26000; }
     if (L.traffic) L.traffic.update(dt, cam, true);
     if (L.trains) for (const t of L.trains) t.update(dt, cam, true);
     for (const a of L.airports) a.update(dt, cam);
     for (const h of L.harbours) h.update(dt, cam);
     if (L.people) L.people.update(dt, cam);
+    if (L.ambient) L.ambient.update(dt, cam);
+    if (GLOW) { if (GLOW.on) { const n = K().NIGHT.value; if (n > 0.05) trafficGlow(GLOW, cam); } GLOW.end(); GLOW.pts.material.opacity = Math.min(1, K().NIGHT.value * 1.6); }
     for (const m of grp.children) if (m.isMesh && m.material && m.material.userData && m.material.userData.lampK != null) m.material.color.setScalar(0.1 + K().NIGHT.value * m.material.userData.lampK);
   };
   L.reset = function () { /* simulations run on world time; nothing to clear between flights */ };
@@ -391,13 +471,14 @@
     populate() {
       for (const G of this.gates) if (Math.random() < 0.6) { const m = this.model(this.pickType()); this.park(m, G); }
       this.live = true;
+      try { this.gaInit(); } catch (e) { console.warn("GA circuit failed", e); this.gaUpdate = null; }
     }
     park(m, G) {
       G.plane = m; const [x, z] = this.W(G.u, 40);
       m.position.set(x, this.E + m.userData.lift, z); m.rotation.set(0, Math.atan2(-this.vx, -this.vz), 0); // nose toward +v (the terminal)
       RJ.setGear(m, 1);
     }
-    clear() { for (const G of this.gates) G.plane = null; for (const p of this.planes) p.m = null; this.planes = []; for (let i = this.grp.children.length - 1; i >= 0; i--) { const o = this.grp.children[i]; if (o.userData && o.userData.id) { this.grp.remove(o); o.traverse((c) => { if (c.geometry) c.geometry.dispose(); }); } } this.live = false; }
+    clear() { for (const G of this.gates) G.plane = null; for (const p of this.planes) p.m = null; this.planes = []; for (let i = this.grp.children.length - 1; i >= 0; i--) { const o = this.grp.children[i]; if (o.userData && o.userData.id) { this.grp.remove(o); o.traverse((c) => { if (c.geometry) c.geometry.dispose(); }); } } this.live = false; this.ga = this.gaUpdate = null; this.gaTried = false; }
     /** A path follower on the ground: polyline in (u, v), rounded corners, speed profile, optional reverse (pushback). */
     path(pts, vmax, opts) {
       let P = pts.map((p) => ({ u: p[0], v: p[1] }));
@@ -425,10 +506,13 @@
       if (d > 32000) { if (this.live) this.clear(); return; }
       if (!this.live) this.populate();
       if (this.vehUpdate && d < 9000) this.vehUpdate(dt);
-      // schedule: alternate departures and arrivals, at most three aircraft moving
+      // schedule: alternate departures and arrivals; busier on the higher quality settings (2 to 5 aircraft moving)
+      const qn = L.qn();
       this.t += dt; this.next -= dt;
-      if (this.next <= 0 && this.planes.length < 3) { if (Math.random() < 0.5) this.depart(); else this.arrive(); this.next = RJ.rand(35, 75); }
-      const E = this.E, deg = Math.PI / 180;
+      if (this.next <= 0 && this.planes.length < Math.round(1.5 + 2.5 * qn)) { if (Math.random() < 0.5) this.depart(); else this.arrive(); this.next = RJ.rand(22, 50) / qn; }
+      if (this.gaUpdate) this.gaUpdate(dt, cam);
+      const E = this.E, deg = Math.PI / 180, pl = RJ.game && RJ.game.mode && RJ.game.mode.player, PP = pl && pl.alive ? pl.pos : null;
+      const night = K().NIGHT.value, GL = night > 0.05 && L.glow ? L.glow() : null;
       for (let i = this.planes.length - 1; i >= 0; i--) {
         const A = this.planes[i], m = A.m; A.t += dt;
         let u, v, hdu, hdv, y = E + m.userData.lift, pitch = 0;
@@ -445,13 +529,26 @@
           A.v += 2.1 * dt; A.u += A.v * dt; u = A.u; v = -430; hdu = 1; hdv = 0;
           if (A.v > 76) { A.phase = "climb"; A.alt = 0; }
         } else if (A.phase === "climb") {
-          A.v = Math.min(120, A.v + 1.2 * dt); A.u += A.v * dt; A.alt += A.v * 0.13 * dt; u = A.u; v = -430; hdu = 1; hdv = 0; y += A.alt; pitch = Math.min(9, 3 + A.alt * 0.2) * deg;
+          // climb out on the runway heading; terrain ahead (or the player close by) steepens the climb
+          A.v = Math.min(120, A.v + 1.2 * dt); A.u += A.v * dt; u = A.u; v = A.lane || -430; hdu = 1; hdv = 0;
+          A.tc = (A.tc || 0) - dt;
+          if (A.tc <= 0) { A.tc = 0.6; const [ax, az] = this.W(A.u + 1800, v), [bx, bz] = this.W(A.u + 600, v); A.floor = Math.max(RJ.world.ground(ax, az), RJ.world.ground(bx, bz)) - E + 220; }
+          const near = PP && PP.distanceTo(m.position) < 900 ? 1 : 0;
+          A.alt += A.v * (0.13 + (A.alt < (A.floor || 0) ? 0.2 : 0) + near * 0.1) * dt; y += A.alt; pitch = Math.min(12, 3 + A.alt * 0.2) * deg;
           if (A.alt > 40) RJ.setGear(m, Math.max(0, 1 - (A.alt - 40) / 60));
           if (A.u > 16000) { this.grp.remove(m); m.traverse((c) => { if (c.geometry) c.geometry.dispose(); }); this.planes.splice(i, 1); continue; }
         } else if (A.phase === "approach") {
-          A.u += A.v * dt; const togo = -1500 - A.u; A.alt = Math.max(0, togo * Math.tan(3 * deg)); u = A.u; v = -680; hdu = 1; hdv = 0;
+          A.u += A.v * dt; const togo = -1500 - A.u; u = A.u; v = -680; hdu = 1; hdv = 0;
+          // 3° glide path, held above the terrain under the approach until short final
+          A.tc = (A.tc || 0) - dt;
+          if (A.tc <= 0) { A.tc = 0.6; const [ax, az] = this.W(A.u + 1200, v), [bx, bz] = this.W(A.u, v); A.floor = togo > 2500 ? Math.max(RJ.world.ground(ax, az), RJ.world.ground(bx, bz)) - E + 160 : 0; }
+          const glide = Math.max(0, togo * Math.tan(3 * deg)), want = Math.max(glide, A.floor || 0);
+          A.alt = A.alt == null || A.alt <= 0 ? want : A.alt + RJ.clamp(want - A.alt, -7 * dt, 12 * dt);
+          if (togo < 2500) A.alt = Math.min(A.alt, glide + 40 * RJ.smooth(0, 2500, togo));
           const flare = RJ.smooth(18, 0, A.alt); y += A.alt; pitch = (2.5 + flare * 3) * deg;
-          if (togo <= 0) { A.phase = "rollout"; A.alt = 0; }
+          // go-around: the player is in the way on final
+          if (PP && togo > 500 && PP.distanceTo(m.position) < 700) { A.phase = "climb"; A.lane = -680; A.G.plane = null; A.v = Math.max(A.v, 80); RJ.setGear(m, 1); }
+          else if (togo <= 0) { A.phase = "rollout"; A.alt = 0; }
         } else if (A.phase === "rollout") {
           A.v = Math.max(16, A.v - 2.4 * dt); A.u += A.v * dt; u = A.u; v = -680; hdu = 1; hdv = 0; pitch = Math.max(0, 5.5 - A.t * 0) * 0;
           if (A.v <= 16.5 && A.u > -600) {
@@ -464,7 +561,41 @@
         m.position.set(x, y, z);
         const hd = Math.atan2(-dx, -dz); // model nose is -z
         m.rotation.set(pitch, hd, 0, "YXZ");
+        // night: landing lights in the air and on the runway, a red beacon whenever the engines run
+        if (GL && (A.phase !== "toGate" || A.v > 2)) {
+          const fx = Math.sin(hd), fz = Math.cos(hd), air = A.phase === "approach" || A.phase === "climb" || A.phase === "roll" || A.phase === "rollout";
+          if (air) GL.add(x - fx * 14, y + 1, z - fz * 14, 1, 0.95, 0.85, 2.2);
+          if ((A.t * 1.1) % 1 < 0.15) GL.add(x, y + 4, z, 1, 0.12, 0.08, 1.2);
+        }
       }
+    }
+    /** A light aircraft flying touch-and-go circuits round runway B (left-hand pattern on the far side from the terminal). */
+    gaInit() {
+      if (this.gaTried) return; this.gaTried = true;
+      const ids = Object.values(RJ.AIRCRAFT || {}).filter((s) => s.cat === "civil" && !s.flight.model && !s.flight.glider && s.flight.eng === "prop").map((s) => s.id);
+      if (!ids.length || L.qn() < 0.7) return;
+      const E = this.E, P0 = [[-1500, -680, 0], [-500, -680, 0], [800, -680, 60], [2400, -680, 220], [3200, -1000, 300], [3200, -2200, 300], [2400, -2500, 300], [-2800, -2500, 300], [-3800, -2200, 260], [-3900, -1000, 180], [-3300, -680, 110], [-2400, -680, 45]];
+      let P = P0.map((p) => ({ u: p[0], v: p[1], a: p[2] }));
+      for (let it = 0; it < 3; it++) { const Q = []; for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; Q.push({ u: a.u * 0.75 + b.u * 0.25, v: a.v * 0.75 + b.v * 0.25, a: a.a * 0.75 + b.a * 0.25 }, { u: a.u * 0.25 + b.u * 0.75, v: a.v * 0.25 + b.v * 0.75, a: a.a * 0.25 + b.a * 0.75 }); } P = Q; }
+      for (const p of P) { if (p.v > -800 && p.u > -2000 && p.u < 0) { p.a = Math.max(0, p.a); continue; } const [x, z] = this.W(p.u, p.v); p.a = Math.max(p.a, RJ.world.ground(x, z) - E + 130); } // terrain clearance off the runway
+      let d = 0; P[0].d = 0; for (let i = 1; i <= P.length; i++) { const a = P[i - 1], b = P[i % P.length]; d += Math.hypot(b.u - a.u, b.v - a.v); if (i < P.length) P[i].d = d; }
+      const m = this.model(RJ.pick(ids)), G = { m, P, len: d, s: Math.random() * d, hd: 0, bank: 0, off: 0 };
+      this.ga = G;
+      this.gaUpdate = (dt, cam) => {
+        const n = G.P.length; G.s = (G.s + 44 * dt) % G.len;
+        let i = 0; while (i < n - 1 && G.P[i + 1].d <= G.s) i++;
+        const a = G.P[i], b = G.P[(i + 1) % n], seg = (i + 1 < n ? b.d : G.len) - a.d, f = RJ.clamp((G.s - a.d) / Math.max(1, seg), 0, 1);
+        const u = a.u + (b.u - a.u) * f, v = a.v + (b.v - a.v) * f, alt = a.a + (b.a - a.a) * f, [x, z] = this.W(u, v);
+        const du = b.u - a.u, dv = b.v - a.v, dx = this.ux * du + this.vx * dv, dz = this.uz * du + this.vz * dv, hd = Math.atan2(-dx, -dz);
+        let dh = hd - G.hd; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); G.hd = hd; G.bank = RJ.damp(G.bank, RJ.clamp(-dh / Math.max(dt, 1e-3) * 1.6, -0.5, 0.5), 2, dt);
+        // keep clear of the player: step up or down out of the way
+        const pl = RJ.game && RJ.game.mode && RJ.game.mode.player, near = pl && pl.alive && pl.pos.distanceTo(m.position) < 500;
+        G.off = RJ.damp(G.off, near ? (pl.pos.y > m.position.y ? -60 : 90) : 0, 0.6, dt); if (alt + G.off < 25) G.off = Math.max(G.off, 25 - alt);
+        m.position.set(x, this.E + m.userData.lift + Math.max(0, alt + (alt > 20 ? G.off : 0)), z);
+        m.rotation.set(RJ.clamp((b.a - a.a) / Math.max(1, seg), -0.1, 0.15), hd, G.bank, "YXZ");
+        const gr = alt < 30 ? 1 : 0; if (G.gear !== gr) { G.gear = gr; RJ.setGear(m, gr); }
+        if (K().NIGHT.value > 0.05 && L.glow) { const GL = L.glow(); GL.add(x, m.position.y + 1.5, z, 1, 0.15, 0.1, 0.9); if ((this.t * 1.4) % 1 < 0.1) GL.add(x, m.position.y + 1, z, 1, 1, 1, 1.4); }
+      };
     }
   }
   L.heightAt = (x, z) => { let h = -Infinity; for (const a of L.airports) if (a.inside(x, z)) { h = Math.max(h, a.E, a.hgrid(x, z)); } return h; };
@@ -494,7 +625,7 @@
   function boatMesh(k) {
     const T = BOATS[k], g = new THREE.Group(), hullM = new THREE.MeshStandardMaterial({ color: T.hull, roughness: 0.35, metalness: 0.1 });
     const sh = new THREE.Shape(); sh.moveTo(-T.B / 2, -T.L / 2); sh.lineTo(T.B / 2, -T.L / 2); sh.lineTo(T.B / 2, T.L * 0.2); sh.quadraticCurveTo(T.B / 2, T.L / 2, 0, T.L / 2); sh.quadraticCurveTo(-T.B / 2, T.L / 2, -T.B / 2, T.L * 0.2); sh.lineTo(-T.B / 2, -T.L / 2);
-    const hg = new THREE.ExtrudeGeometry(sh, { depth: T.L * 0.09 + 1, bevelEnabled: false }); hg.rotateX(-Math.PI / 2); hg.translate(0, -0.8, 0);
+    const hg = new THREE.ExtrudeGeometry(sh, { depth: T.L * 0.09 + 1, bevelEnabled: false }); hg.rotateX(-Math.PI / 2); hg.rotateY(Math.PI); hg.translate(0, -0.8, 0); // bow (the pointed end) toward +z, the way the boat moves
     const hull = new THREE.Mesh(hg, hullM); hull.castShadow = true; g.add(hull);
     const top = T.L * 0.09 + 0.2;
     if (T.cabin) for (let i = 0; i < T.cabin; i++) { const c = new THREE.Mesh(new THREE.BoxGeometry(T.B * (0.8 - i * 0.15), 2.4, T.L * (0.45 - i * 0.12)), new THREE.MeshStandardMaterial({ color: i ? T.deck : 0xeeeeea, roughness: 0.4 })); c.position.set(0, top + 1.2 + i * 2.4, -T.L * 0.05); c.castShadow = true; g.add(c); const w = new THREE.Mesh(new THREE.BoxGeometry(T.B * (0.82 - i * 0.15), 0.7, T.L * (0.42 - i * 0.12)), new THREE.MeshStandardMaterial({ color: 0x1a2430, roughness: 0.1, metalness: 0.6, emissive: 0xffd9a0, emissiveIntensity: 0 })); w.position.set(0, top + 1.5 + i * 2.4, -T.L * 0.05); g.add(w); g.userData.win = w; }
@@ -529,7 +660,9 @@
     nextWp(B) { for (let t = 0; t < 12; t++) { const w = this.W[Math.floor(Math.random() * this.W.length)]; if (w !== B.wp && Math.hypot(w.x - B.x, w.z - B.z) > 400 && this.clearLine(B, w)) return w; } return this.W[Math.floor(Math.random() * this.W.length)]; }
     spawn() {
       if (this.W.length < 4) return;
-      const kinds = ["ferry", "ferry", "yacht", "yacht", "yacht", "speed", "speed", "speed", "sail", "sail", "sail", "tug"];
+      // the fleet scales with quality: 7 boats on low up to ~20 on ultra (ferries, yachts, speedboats, sailing boats, a tug)
+      const all = ["ferry", "yacht", "speed", "sail", "sail", "speed", "yacht", "tug", "ferry", "sail", "speed", "yacht", "sail", "speed", "sail", "yacht", "speed", "sail", "ferry", "speed"];
+      const kinds = all.slice(0, Math.round(15 * L.qn()));
       for (const k of kinds) { const m = boatMesh(k), w = this.W[Math.floor(Math.random() * this.W.length)]; this.grp.add(m); const B = { m, k, T: m.userData.T, x: w.x, z: w.z, hd: Math.random() * TAU, v: 0, ph: Math.random() * 10, wait: 0 }; B.wp = this.nextWp(B); this.boats.push(B); }
       this.live = true;
     }
@@ -557,6 +690,15 @@
         B.m.rotation.set(Math.sin(t * 1.1 + B.ph) * 0.035 * s * sea - (B.k === "speed" ? RJ.smooth(4, 16, B.v) * 0.08 : 0), B.hd, Math.sin(t * 0.9 + B.ph * 1.7) * 0.05 * s * sea, "YXZ");
         const w = B.m.userData.wake; w.material.opacity = RJ.smooth(0.5, B.T.v * 0.7, B.v) * 0.55; w.scale.z = B.T.L * (1.5 + B.v * 0.25);
         if (B.m.userData.win) B.m.userData.win.material.emissiveIntensity = night * 1.4;
+        // navigation lights: masthead / stern white, port red, starboard green
+        const GL = L.glow && L.glow();
+        if (GL) {
+          const T = B.T, fx = Math.sin(B.hd), fz = Math.cos(B.hd), rx = fz, rz = -fx, /* (rx, rz): port side */ top = T.L * 0.09 + (T.mast ? T.L * 1.25 : T.cabin ? 2.6 + T.cabin * 2.4 : 1.2);
+          GL.add(B.x + fx * T.L * 0.1, top, B.z + fz * T.L * 0.1, 1, 0.95, 0.85, 0.7);
+          GL.add(B.x + fx * T.L * 0.3 + rx * T.B * 0.5, T.L * 0.09 + 0.6, B.z + fz * T.L * 0.3 + rz * T.B * 0.5, 1, 0.1, 0.06, 0.55);
+          GL.add(B.x + fx * T.L * 0.3 - rx * T.B * 0.5, T.L * 0.09 + 0.6, B.z + fz * T.L * 0.3 - rz * T.B * 0.5, 0.1, 1, 0.25, 0.55);
+          if (T.cabin) for (let k = -1; k <= 1; k++) GL.add(B.x + fx * k * T.L * 0.12 + rx * T.B * 0.45, T.L * 0.09 + 1.8, B.z + fz * k * T.L * 0.12 + rz * T.B * 0.45, 1, 0.8, 0.5, 0.5);
+        }
       }
     }
   }
@@ -582,28 +724,119 @@
     const MAX = 3200, ph = new Float32Array(MAX), cheer = new Float32Array(MAX);
     G.setAttribute("aPh", new THREE.InstancedBufferAttribute(ph, 1));
     G.setAttribute("aCheer", new THREE.InstancedBufferAttribute(cheer, 1));
-    const time = { value: 0 }, airTime = { value: 0 };
+    const time = { value: 0 }, airTime = { value: 0 }, crowdK = { value: 0 };
     const mat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
     mat.onBeforeCompile = (sh) => {
-      sh.uniforms.rjT = time; sh.uniforms.rjAir = airTime;
-      sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute float aLeg; attribute float aPh; attribute float aCheer; uniform float rjT; uniform float rjAir;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nfloat air = rjAir;\nfloat sw = sin(rjT * 7.0 + aPh) * 0.5 * sign(aLeg) * step(0.001, aPh) - step(1.5, abs(aLeg)) * (aCheer > 1.95 ? step(1.5, aLeg) * 1.15 : step(0.5, aCheer) * (0.62 + 0.38 * sin(rjT * 8.0 + fract(aCheer) * 6.283))) * air * 0.9;\nfloat hip = abs(aLeg) > 1.5 ? 1.45 : 0.86;\nif (abs(aLeg) > 0.5) { float yy = transformed.y - hip; transformed.z += -yy * sin(sw) * (abs(aLeg) > 1.5 ? 0.7 : 1.0); transformed.y = hip + yy * cos(sw); }");
+      sh.uniforms.rjT = time; sh.uniforms.rjAir = airTime; sh.uniforms.rjCrowd = crowdK;
+      // aCheer: 0 still · 1..1.98 waving (airshow) · 2 phone held up (airshow) · 3..3.98 waving with the stadium (own excitement, rjCrowd)
+      sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute float aLeg; attribute float aPh; attribute float aCheer; uniform float rjT; uniform float rjAir; uniform float rjCrowd;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nfloat own = step(2.5, aCheer); float ch = aCheer - own * 2.0;\nfloat air = mix(rjAir, rjCrowd, own);\nfloat sw = sin(rjT * 7.0 + aPh) * 0.5 * sign(aLeg) * step(0.001, aPh) - step(1.5, abs(aLeg)) * (ch > 1.95 ? step(1.5, aLeg) * 1.15 : step(0.5, ch) * (0.62 + 0.38 * sin(rjT * 8.0 + fract(ch) * 6.283))) * air * 0.9;\nfloat hip = abs(aLeg) > 1.5 ? 1.45 : 0.86;\nif (abs(aLeg) > 0.5) { float yy = transformed.y - hip; transformed.z += -yy * sin(sw) * (abs(aLeg) > 1.5 ? 0.7 : 1.0); transformed.y = hip + yy * cos(sw); }");
     };
     const im = new THREE.InstancedMesh(G, mat, MAX); im.count = 0; im.frustumCulled = false; im.layers.set(5); grp.add(im);
     const CL = [0x2a2f3a, 0x8a1c1c, 0x1c3a7a, 0xd8d0c0, 0x3a5a2a, 0x6a4a8a, 0xc87a1a, 0x101010, 0xe8e8e8, 0x5a6a7a];
     const col = new THREE.Color(); for (let i = 0; i < MAX; i++) im.setColorAt(i, col.setHex(CL[i % CL.length]));
-    const people = [], m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = V3(), sc = V3(1, 1, 1), Y = V3(0, 1, 0);
+    const people = [], m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), q2 = new THREE.Quaternion(), p = V3(), sc = V3(1, 1, 1), Y = V3(0, 1, 0), X = V3(1, 0, 0);
     let active = null;
+    /* ---------- crowds in many places at once (plazas, stations, terminals, beaches, promenades, stadium stands) ----------
+     * The nearest few zones near the camera share the instance budget; each zone's people are generated once (cached while
+     * near) as a mix of walkers, small standing groups, sunbathers lying on the sand and cheering fans. Only walkers are
+     * re-posed each frame, the rest are written when the set of zones changes. */
+    const SEL = { t: 0, key: "", zones: [], movers: [], minY: 0 };
+    let zid = 0;
+    const R = Math.random;
+    const QP = () => ({ low: [2, 700], medium: [4, 1500], high: [7, 2600], ultra: [10, MAX] }[RJ.settings.quality] || [7, 2600]);
+    function gen(Z, n) {
+      const out = [], type = Z.type || "plaza", W = RJ.world;
+      const rect = (a, c) => [Z.x + Z.ax * a + Z.sx * c, Z.z + Z.az * a + Z.sz * c];
+      const walker = (x, y, z, hd) => ({ x, y, z, hd, v: RJ.lerp(0.9, 1.6, R()), t: R() * 8, ph: 1 + R() * 6, cheer: 0 });
+      const still = (x, y, z, hd, o) => Object.assign({ x, y, z, hd, v: 0, t: 1e9, ph: 0, cheer: 0, still: true }, o || {});
+      if (type === "stadium") {
+        // the stands: an elliptical bowl of fans rising with the radius, facing the pitch; most wave with the crowd
+        for (let i = 0; i < n; i++) {
+          const a = R() * TAU, rr = RJ.lerp(101, 150, R()), lx = Math.cos(a) * rr, lz = Math.sin(a) * rr * 0.8;
+          const x = Z.x + Z.ax * lx + Z.sx * lz, z = Z.z + Z.az * lx + Z.sz * lz;
+          out.push(still(x, Z.y + 1 + (rr - 101) / 49 * 24, z, Math.atan2(Z.x - x, Z.z - z), { cheer: R() < 0.7 ? 3 + R() * 0.98 : 0 }));
+        }
+        return out;
+      }
+      for (let i = 0; i < n;) {
+        const r0 = R();
+        if (type === "beach") {
+          const [x, z] = rect((R() - 0.5) * Z.len, (R() - 0.5) * Z.dep), g = W.terrainHeight(x, z); i++;
+          if (g < 0.15) continue; // in the water
+          const y = Math.max(g, W.ground(x, z));
+          if (r0 < 0.4) out.push(still(x, y + 0.14, z, R() * TAU, { lie: true }));
+          else if (r0 < 0.72) out.push(still(x, y, z, Math.atan2(Z.sx, Z.sz) + (R() - 0.5) * 2));
+          else out.push(Object.assign(walker(x, y, z, Math.atan2(Z.ax, Z.az) + (R() < 0.5 ? Math.PI : 0)), { rect: true }));
+        } else if (type === "prom") {
+          const [x, z] = rect((R() - 0.5) * Z.len, (R() - 0.5) * Z.dep); i++;
+          if (r0 < 0.25) out.push(still(x, Z.y, z, Math.atan2(Z.sx, Z.sz) + (R() - 0.5)));
+          else out.push(Object.assign(walker(x, Z.y, z, Math.atan2(Z.ax, Z.az) + (R() < 0.5 ? Math.PI : 0)), { rect: true }));
+        } else if (r0 < 0.35) {
+          // a group standing and chatting: two to five people round a point
+          const a = R() * TAU, rr = Math.sqrt(R()) * Z.r * 0.85, cx = Z.x + Math.cos(a) * rr, cz = Z.z + Math.sin(a) * rr, k = 2 + Math.floor(R() * 4);
+          for (let j = 0; j < k && i < n; j++, i++) { const b = (j / k) * TAU + R() * 0.5, d = RJ.lerp(0.6, 1.1, R()), x = cx + Math.cos(b) * d, z = cz + Math.sin(b) * d; out.push(still(x, Z.y, z, Math.atan2(cx - x, cz - z))); }
+        } else { const a = R() * TAU, rr = Math.sqrt(R()) * Z.r; out.push(walker(Z.x + Math.cos(a) * rr, Z.y, Z.z + Math.sin(a) * rr, R() * TAU)); i++; }
+      }
+      return out;
+    }
+    function pose(P, i) {
+      q.setFromAxisAngle(Y, P.hd); if (P.lie) q.multiply(q2.setFromAxisAngle(X, -Math.PI / 2));
+      m4.compose(p.set(P.x, P.y, P.z), q, sc); im.setMatrixAt(i, m4); ph[i] = P.v ? P.ph : 0; cheer[i] = P.cheer || 0;
+    }
+    function multi(dt, cam) {
+      if (active) { active = null; people.length = 0; SEL.key = ""; } // leaving the airshow crowd
+      const C = cam.position;
+      SEL.t -= dt;
+      if (SEL.t <= 0 || !SEL.at || Math.hypot(C.x - SEL.at.x, C.z - SEL.at.z) > 250) { // every 0.6 s, or at once after a jump
+        SEL.t = 0.6; SEL.at = { x: C.x, z: C.z };
+        const [maxZ, maxP] = QP(), qm = L.qn() * 1.2, cand = [];
+        for (const Z of L.zones) {
+          if (Z.type === "airshow") continue;
+          const d = Math.hypot(Z.x - C.x, Z.z - C.z) - Z.r;
+          if (d < 1500 && C.y - Z.y < 1100) cand.push([d, Z]); else if (Z._pp && d > 6000) Z._pp = null;
+        }
+        cand.sort((u, v) => u[0] - v[0]);
+        const zs = cand.slice(0, maxZ).map((c) => c[1]), key = zs.map((Z) => Z._id || (Z._id = ++zid)).join(",");
+        if (key !== SEL.key) {
+          SEL.key = key; SEL.zones = zs; SEL.movers = []; SEL.minY = Infinity;
+          let n = 0;
+          for (const Z of zs) {
+            const want = Math.round((Z.n || Z.r * Z.r * 0.02) * qm);
+            if (!Z._pp || Z._pp.length < want * 0.6) Z._pp = gen(Z, want);
+            SEL.minY = Math.min(SEL.minY, Z.y);
+            for (const P of Z._pp) { if (n >= maxP) break; pose(P, n); if (!P.still) SEL.movers.push({ P, i: n, Z }); n++; }
+          }
+          im.count = n; im.instanceMatrix.needsUpdate = true; G.attributes.aPh.needsUpdate = true; G.attributes.aCheer.needsUpdate = true;
+        }
+      }
+      if (!SEL.zones.length || C.y - SEL.minY > 1100) { im.count = 0; SEL.key = ""; return; }
+      crowdK.value = 0.35 + 0.65 * Math.pow(0.5 + 0.5 * Math.sin(time.value * 0.21), 3); // the stadium crowd swells and settles
+      for (const M of SEL.movers) {
+        const P = M.P, Z = M.Z;
+        P.t -= dt;
+        if (P.t < 0) { P.t = RJ.lerp(3, 10, R()); P.hd += RJ.lerp(-1, 1, R()) * (P.rect ? 0.35 : 1.2); if (R() < 0.15) P.v = P.v ? 0 : RJ.lerp(0.9, 1.6, R()); }
+        P.x += Math.sin(P.hd) * P.v * dt; P.z += Math.cos(P.hd) * P.v * dt;
+        if (P.rect) {
+          const dx = P.x - Z.x, dz = P.z - Z.z, a = dx * Z.ax + dz * Z.az, c = dx * Z.sx + dz * Z.sz;
+          if (Math.abs(a) > Z.len / 2) P.hd = Math.atan2(-Math.sign(a) * Z.ax, -Math.sign(a) * Z.az);
+          else if (Math.abs(c) > Z.dep / 2) P.hd = Math.atan2(-Math.sign(c) * Z.sx + Z.ax * 0.5, -Math.sign(c) * Z.sz + Z.az * 0.5);
+        } else if (Math.hypot(P.x - Z.x, P.z - Z.z) > Z.r) P.hd = Math.atan2(Z.x - P.x, Z.z - P.z);
+        pose(P, M.i);
+      }
+      if (SEL.movers.length) { im.instanceMatrix.needsUpdate = true; G.attributes.aPh.needsUpdate = true; }
+    }
     L.people = {
       im,
       setAirshow(k) { airTime.value = k; }, // 0..1: how hard the airshow crowd is cheering
       update(dt, cam) {
         time.value += dt;
-        // the nearest people zone within 1.2 km gets a crowd (zones: plazas, parks, stations, terminals, beaches)
+        // the airshow crowd (the start-up intro) takes the whole budget when it is near: one zone, 3,000 spectators
         let best = null, bd = 1200;
-        for (const Z of L.zones) { const d = Math.hypot(Z.x - cam.position.x, Z.z - cam.position.z) - Z.r; if (d < bd) { bd = d; best = Z; } }
+        for (const Z of L.zones) { if (Z.type !== "airshow") continue; const d = Math.hypot(Z.x - cam.position.x, Z.z - cam.position.z) - Z.r; if (d < bd) { bd = d; best = Z; } }
+        if (!best) return multi(dt, cam);
         if (best !== active) {
-          active = best; people.length = 0;
+          active = best; people.length = 0; SEL.key = ""; SEL.zones = []; SEL.movers = [];
           if (best) {
             const n = Math.min(MAX, Math.round(best.n || best.r * best.r * 0.02));
             for (let i = 0; i < n; i++) {
@@ -634,4 +867,260 @@
   };
   L.addZone = (z) => L.zones.push(z);
   L.removeZone = (z) => { const i = L.zones.indexOf(z); if (i >= 0) L.zones.splice(i, 1); };
+})(window.RJ);
+
+/* ======================= ambient life: helicopters, flags and windsocks, beaches, promenades and the stadium ======================= *
+ *   · helicopters over the city near the camera (news, police, medevac, tours): orbit points of interest, transit between
+ *     them at a height cleared over every building and hill on the way, and sidestep / climb away from the player.
+ *     Visual only: they are not combat entities and can't be targeted.
+ *   · flags on poles (terminals, plazas, the stadium rim, marina pontoons) and windsocks by the runways, waving in the
+ *     vertex shader with the wind's strength and direction: two instanced meshes plus their poles
+ *   · crowd zones for the people system: beaches and waterfront promenades along every city's shore, the stadium
+ *     stands, Times Square and Central Park's lawns */
+(function (RJ) {
+  "use strict";
+  const L = RJ.living, V3 = (x, y, z) => new THREE.Vector3(x, y, z), TAU = Math.PI * 2, K = () => RJ.cityKit;
+  const R = Math.random;
+  /* ---------- coloured-box merge (one draw call per helicopter body) ---------- */
+  function boxC(parts, w, h, d, x, y, z, c) {
+    const g = new THREE.BoxGeometry(w, h, d).toNonIndexed(); g.translate(x, y, z);
+    const n = g.attributes.position.count, a = new Float32Array(n * 3), cc = new THREE.Color(c);
+    for (let i = 0; i < n; i++) { a[i * 3] = cc.r; a[i * 3 + 1] = cc.g; a[i * 3 + 2] = cc.b; }
+    g.setAttribute("color", new THREE.BufferAttribute(a, 3)); parts.push(g);
+  }
+  function mergeC(parts) {
+    let n = 0; for (const g of parts) n += g.attributes.position.count;
+    const P = new Float32Array(n * 3), N = new Float32Array(n * 3), C = new Float32Array(n * 3); let o = 0;
+    for (const g of parts) { P.set(g.attributes.position.array, o * 3); N.set(g.attributes.normal.array, o * 3); C.set(g.attributes.color.array, o * 3); o += g.attributes.position.count; g.dispose(); }
+    const G = new THREE.BufferGeometry(); G.setAttribute("position", new THREE.BufferAttribute(P, 3)); G.setAttribute("normal", new THREE.BufferAttribute(N, 3)); G.setAttribute("color", new THREE.BufferAttribute(C, 3)); G.computeBoundingSphere();
+    return G;
+  }
+
+  /* ======================= helicopters ======================= */
+  const LIV = [[0xc8202a, 0xf2f2f0, "news"], [0x1d3f7a, 0xf2f2f0, "police"], [0xf2c21b, 0xc8202a, "medevac"], [0x2a2d31, 0x8a929b, "corporate"], [0xf2f2f0, 0x18908a, "tour"]];
+  let heliMat = null, rotorMat = null;
+  function heliMesh(liv) {
+    if (!heliMat) { heliMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.25 }); rotorMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6 }); }
+    const P = [], a = liv[0], b = liv[1];
+    boxC(P, 2.2, 2.0, 4.6, 0, 1.9, 0.6, a);            // cabin
+    boxC(P, 2.0, 1.2, 1.4, 0, 1.6, 3.3, 0x22303c);     // nose glazing
+    boxC(P, 2.24, 0.5, 4.0, 0, 1.4, 0.6, b);           // cheat line
+    boxC(P, 1.4, 0.8, 2.2, 0, 3.2, 0.2, a);            // engine housing
+    boxC(P, 0.45, 0.5, 6.4, 0, 2.5, -4.6, a);          // tail boom
+    boxC(P, 0.2, 1.8, 1.1, 0, 3.0, -7.6, b);           // fin
+    boxC(P, 2.2, 0.12, 0.9, 0, 2.6, -7.0, a);          // stabiliser
+    for (const s of [-1, 1]) { boxC(P, 0.14, 0.14, 4.4, s * 1.05, 0.12, 0.6, 0x2a2a2a); boxC(P, 0.1, 0.8, 0.1, s * 1.0, 0.5, -0.6, 0x2a2a2a); boxC(P, 0.1, 0.8, 0.1, s * 1.0, 0.5, 1.8, 0x2a2a2a); } // skids
+    const m = new THREE.Mesh(mergeC(P), heliMat); m.castShadow = true;
+    const rg = new THREE.Group(); rg.position.set(0, 3.75, 0.2);
+    for (const r of [0, Math.PI / 2]) { const bl = new THREE.Mesh(new THREE.BoxGeometry(11.5, 0.06, 0.32), rotorMat); bl.rotation.y = r; rg.add(bl); }
+    const g = new THREE.Group(); g.add(m); g.add(rg); g.userData.rotor = rg;
+    return g;
+  }
+  const H = { list: [], city: null, grp: null };
+  /** Highest ground (terrain, buildings) round a ring or along a line. */
+  function ringTop(cx, cz, r) { let m = RJ.world.ground(cx, cz); for (let k = 0; k < 14; k++) { const a = k / 14 * TAU; m = Math.max(m, RJ.world.ground(cx + Math.cos(a) * r, cz + Math.sin(a) * r), RJ.world.ground(cx + Math.cos(a) * r * 0.6, cz + Math.sin(a) * r * 0.6)); } return m; }
+  function lineTop(ax, az, bx, bz) { let m = 0; for (let k = 0; k <= 18; k++) { const f = k / 18; m = Math.max(m, RJ.world.ground(ax + (bx - ax) * f, az + (bz - az) * f)); } return m; }
+  function newOrbit(h) {
+    const C = H.city, rr = Math.min(C.r * 0.4, 3800) * Math.sqrt(R()), a = R() * TAU;
+    h.cx = C.x + Math.cos(a) * rr; h.cz = C.z + Math.sin(a) * rr; h.R = RJ.lerp(280, 750, R()); h.dir = R() < 0.5 ? 1 : -1;
+    h.oy = ringTop(h.cx, h.cz, h.R + 60) + RJ.lerp(150, 320, h.kind === "news" ? 0.3 : R());
+    h.ang = Math.atan2(h.z - h.cz, h.x - h.cx);
+    const ex = h.cx + Math.cos(h.ang) * h.R, ez = h.cz + Math.sin(h.ang) * h.R;
+    h.ty = Math.max(h.oy, lineTop(h.x, h.z, ex, ez) + 160); h.ex = ex; h.ez = ez;
+    h.mode = "transit"; h.ot = RJ.lerp(45, 110, R());
+  }
+  function spawnHelis(C) {
+    clearHelis(); H.city = C;
+    const n = Math.round(4 * L.qn()); if (!n) return;
+    for (let i = 0; i < n; i++) {
+      const liv = LIV[i % LIV.length], m = heliMesh(liv); H.grp.add(m);
+      const a = R() * TAU, rr = Math.min(C.r * 0.4, 3800) * Math.sqrt(R());
+      const h = { m, kind: liv[2], x: C.x + Math.cos(a) * rr, z: C.z + Math.sin(a) * rr, y: 0, hd: R() * TAU, ox: 0, oz: 0, oy: 0, avx: 0, avz: 0, avy: 0, t: R() * 10, bank: 0, v: 0 };
+      newOrbit(h); h.y = h.ty; h.mode = "orbit"; h.oy = h.ty; h.x = h.ex; h.z = h.ez; // the first ones are already on station
+      H.list.push(h);
+    }
+  }
+  function clearHelis() { for (const h of H.list) { H.grp.remove(h.m); h.m.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); } H.list = []; H.city = null; }
+  function updateHelis(dt, cam) {
+    // the nearest city within 18 km gets helicopters; leave it (22 km) and they go
+    const C0 = cam.position; let best = null, bd = 18000;
+    for (const n of L.cityNodes()) { const d = Math.hypot(n.x - C0.x, n.z - C0.z); if (d < bd) { bd = d; best = n; } }
+    if (H.city && Math.hypot(H.city.x - C0.x, H.city.z - C0.z) < 22000 && (!best || best.id === H.city.id)) best = H.city;
+    if (!best) { if (H.list.length) clearHelis(); return; }
+    if (!H.city || H.city.id !== best.id) spawnHelis(best);
+    const pl = RJ.game && RJ.game.mode && RJ.game.mode.player, PP = pl && pl.alive ? pl.pos : null, GL = L.glow && L.glow();
+    for (const h of H.list) {
+      h.t += dt;
+      let px = h.x, pz = h.z, want = h.hd, spd = 0;
+      if (h.mode === "transit") {
+        const dx = h.ex - h.x, dz = h.ez - h.z, d = Math.hypot(dx, dz);
+        h.y += RJ.clamp(h.ty - h.y, -5 * dt, 7 * dt);
+        const climbed = h.y > h.ty - 25 || h.ty <= h.y;
+        spd = climbed ? Math.min(55, d * 0.25 + 8) : 4;           // climb to the cleared height first, then go
+        want = Math.atan2(dx, dz);
+        if (d < 30) { h.mode = "orbit"; h.ang = Math.atan2(h.z - h.cz, h.x - h.cx); }
+        else { h.x += Math.sin(h.hd) * spd * dt; h.z += Math.cos(h.hd) * spd * dt; }
+      } else {
+        spd = 32; h.ang += h.dir * spd / h.R * dt;
+        h.x = h.cx + Math.cos(h.ang) * h.R; h.z = h.cz + Math.sin(h.ang) * h.R; h.y += RJ.clamp(h.oy - h.y, -3 * dt, 6 * dt);
+        want = Math.atan2(h.x - px, h.z - pz); h.ot -= dt;
+        if (h.ot <= 0) newOrbit(h);
+      }
+      let dh = want - h.hd; dh = Math.atan2(Math.sin(dh), Math.cos(dh)); const turn = RJ.clamp(dh, -0.9 * dt, 0.9 * dt); h.hd += turn;
+      h.bank = RJ.damp(h.bank, RJ.clamp(-turn / Math.max(dt, 1e-3) * 0.5, -0.35, 0.35), 2, dt); h.v = RJ.damp(h.v, spd, 1, dt);
+      // keep clear of the player: drift away and climb (never down into the city)
+      if (PP) { const ax = h.x - PP.x, az = h.z - PP.z, ay = h.y - PP.y, d = Math.hypot(ax, ay, az); if (d < 450) { const k = (450 - d) / 450 * 30 * dt / Math.max(1, Math.hypot(ax, az)); h.avx += ax * k; h.avz += az * k; h.avy += 9 * dt; } }
+      const back = Math.exp(-dt * 0.15); h.avx *= back; h.avz *= back; h.avy *= back;
+      const x = h.x + h.avx, z = h.z + h.avz, y = h.y + h.avy, m = h.m;
+      m.position.set(x, y, z); m.rotation.set(RJ.clamp(h.v / 55, 0, 1) * 0.14, h.hd, h.bank, "YXZ");
+      m.userData.rotor.rotation.y += dt * 38;
+      m.visible = Math.hypot(x - C0.x, z - C0.z) < 14000;
+      if (GL && m.visible) {
+        if ((h.t * 1.2) % 1 < 0.12) GL.add(x, y + 3.6, z, 1, 0.12, 0.08, 1.6);                         // beacon
+        if ((h.t * 0.9 + 0.5) % 1 < 0.06) GL.add(x - Math.sin(h.hd) * 7.6, y + 3, z - Math.cos(h.hd) * 7.6, 1, 1, 1, 1.8); // tail strobe
+        if (h.kind === "police" || h.kind === "news") GL.add(x + Math.sin(h.hd) * 2.6, y + 0.4, z + Math.cos(h.hd) * 2.6, 1, 0.97, 0.9, 2.4); // searchlight / camera light
+      }
+    }
+  }
+
+  /* ======================= flags and windsocks ======================= */
+  const FLAGC = [0xc8102e, 0x003da5, 0x009a44, 0xffcd00, 0xf4f4f0, 0x101820, 0xff6a13, 0x5b2c83, 0x00a3e0, 0xd52b1e];
+  const FL = { sites: [], t: 0, time: { value: 0 }, wind: { value: 5 }, wdir: { value: new THREE.Vector2(0.91, 0.41) } };
+  function waveMat(sock) {
+    const m = new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.85 });
+    m.onBeforeCompile = (sh) => {
+      sh.uniforms.rjT = FL.time; sh.uniforms.rjWind = FL.wind; sh.uniforms.rjWdir = FL.wdir;
+      sh.vertexShader = sh.vertexShader.replace("#include <common>", "#include <common>\nattribute float aSeed; uniform float rjT; uniform float rjWind; uniform vec2 rjWdir; varying vec2 vFl; varying float vSd;")
+        .replace("#include <beginnormal_vertex>", "#include <beginnormal_vertex>\nobjectNormal = vec3(-rjWdir.y, 0.0, rjWdir.x);")
+        .replace("#include <begin_vertex>", [
+          "#include <begin_vertex>",
+          "vFl = position.xy; vSd = aSeed;",
+          sock ? "float u = position.x / 3.6;" : "float u = position.x;",
+          "float wk = clamp(rjWind / 12.0, 0.0, 1.0);",
+          // calm air: the cloth hangs down the pole; a breeze lifts it out flat
+          sock ? "float hang = (1.0 - clamp(rjWind / 9.0, 0.0, 1.0)) * 1.15;" : "float hang = (1.0 - clamp(rjWind / 5.0, 0.0, 1.0)) * 1.2;",
+          "float ph = rjT * (2.6 + wk * 5.0) - u * 7.0 + aSeed * 6.283;",
+          sock ? "vec3 tp = transformed; tp.z += sin(ph) * 0.12 * u; tp.y += sin(ph * 0.7) * 0.06 * u;" : "vec3 tp = transformed; tp.z = sin(ph) * (0.05 + 0.09 * wk) * u + sin(ph * 1.7 + 1.3) * 0.02 * u;",
+          "float ch = cos(hang), shh = sin(hang);",
+          "vec3 hp = vec3(tp.x * ch + tp.y * shh, tp.y * ch - tp.x * shh, tp.z);",
+          "transformed = vec3(hp.x * rjWdir.x - hp.z * rjWdir.y, hp.y, hp.x * rjWdir.y + hp.z * rjWdir.x);"
+        ].join("\n"));
+      sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\nvarying vec2 vFl; varying float vSd;")
+        .replace("#include <color_fragment>", sock
+          ? "#include <color_fragment>\ndiffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.95), step(0.5, fract(vFl.x / 3.6 * 2.5)));"
+          : ["#include <color_fragment>",
+            "vec2 f = vec2(vFl.x, (vFl.y + 0.62) / 0.62); float st = floor(fract(vSd * 7.31) * 4.0); vec3 W = vec3(0.94);",
+            "if (st > 0.5 && st < 1.5) diffuseColor.rgb = mix(diffuseColor.rgb, W, step(0.333, f.y) * step(f.y, 0.666));",
+            "else if (st > 1.5 && st < 2.5) diffuseColor.rgb = mix(W, diffuseColor.rgb, step(0.4, f.x));",
+            "else if (st > 2.5) diffuseColor.rgb = mix(W, diffuseColor.rgb, step(length((f - 0.5) * vec2(1.6, 1.0)), 0.28));"].join("\n"));
+    };
+    return m;
+  }
+  function buildFlags(grp) {
+    const CAP = 320;
+    const fg = new THREE.PlaneGeometry(1, 0.62, 8, 2); fg.translate(0.5, -0.31, 0);
+    const sg = new THREE.CylinderGeometry(0.15, 0.45, 3.6, 8, 3, true); sg.rotateZ(-Math.PI / 2); sg.translate(1.8, 0, 0);
+    const pg = new THREE.CylinderGeometry(0.06, 0.09, 1, 5); pg.translate(0, 0.5, 0);
+    const mk = (geo, mat, seed) => { if (seed) geo.setAttribute("aSeed", new THREE.InstancedBufferAttribute(new Float32Array(CAP), 1)); const im = new THREE.InstancedMesh(geo, mat, CAP); im.count = 0; im.frustumCulled = false; im.setColorAt(0, new THREE.Color()); grp.add(im); return im; };
+    FL.flags = mk(fg, waveMat(false), true); FL.socks = mk(sg, waveMat(true), true); FL.poles = mk(pg, new THREE.MeshStandardMaterial({ color: 0xd8dadc, roughness: 0.4, metalness: 0.6 }), false);
+    FL.flags.castShadow = true;
+  }
+  /** x, z, base height, pole height, flag size (m), colour index, windsock */
+  const site = (x, z, y, h, s, ci, sock) => FL.sites.push({ x, z, y, h, s, c: FLAGC[((ci % FLAGC.length) + FLAGC.length) % FLAGC.length], sock: !!sock, seed: R() });
+  const m4 = new THREE.Matrix4(), q0 = new THREE.Quaternion(), pv = V3(), sv = V3(), col = new THREE.Color();
+  function refreshFlags(cam) {
+    const C = cam.position, near = [];
+    // plazas and big parks get a pair of flags the first time the camera comes near
+    for (const Z of L.zones) if (!Z.type && !Z._fl && (Z.n || 0) >= 60 && Math.hypot(Z.x - C.x, Z.z - C.z) < 4500) {
+      Z._fl = true; const a = R() * TAU, ci = Math.floor(R() * 10);
+      for (const k of [0, 1]) site(Z.x + Math.cos(a + k * 0.25) * Z.r * 0.9, Z.z + Math.sin(a + k * 0.25) * Z.r * 0.9, Z.y - 0.4, 11, 2.2, ci + k * 3);
+    }
+    lazyMarinas(C);
+    for (const S of FL.sites) { const d = Math.hypot(S.x - C.x, S.z - C.z); if (d < 4200 && C.y - S.y < 2600) near.push([d, S]); }
+    near.sort((a, b) => a[0] - b[0]);
+    let nf = 0, ns = 0, np = 0;
+    const fs = FL.flags.geometry.attributes.aSeed, ss = FL.socks.geometry.attributes.aSeed;
+    for (const [, S] of near) {
+      if (np >= 320) break;
+      m4.compose(pv.set(S.x, S.y, S.z), q0, sv.set(1 + S.s * 0.15, S.h, 1 + S.s * 0.15)); FL.poles.setMatrixAt(np, m4); FL.poles.setColorAt(np, col.setHex(0xffffff)); np++;
+      if (S.sock) { m4.compose(pv.set(S.x, S.y + S.h - 0.3, S.z), q0, sv.set(1, 1, 1)); FL.socks.setMatrixAt(ns, m4); FL.socks.setColorAt(ns, col.setHex(0xff5a14)); ss.array[ns] = S.seed; ns++; }
+      else { m4.compose(pv.set(S.x, S.y + S.h, S.z), q0, sv.set(S.s, S.s, S.s)); FL.flags.setMatrixAt(nf, m4); FL.flags.setColorAt(nf, col.setHex(S.c)); fs.array[nf] = S.seed; nf++; }
+    }
+    for (const [im, n] of [[FL.flags, nf], [FL.socks, ns], [FL.poles, np]]) { im.count = n; im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
+    fs.needsUpdate = ss.needsUpdate = true;
+  }
+  /* marinas and the stadium are only known once their city is built: add their flags (and the stadium crowd) then */
+  const lazyDone = {};
+  function lazyMarinas(C) {
+    const CI = RJ.cities; if (!CI || !CI.built) return;
+    for (const id in CI.built) {
+      if (lazyDone[id] || !CI.built[id]) continue; lazyDone[id] = true;
+      const S = CI.sites[id], T = CI.STYLE[id]; if (!S || !T) continue;
+      const c = (s, p) => [S.x + S.sx * s + S.px * p, S.z + S.sz * s + S.pz * p];
+      if (T.marina != null) {
+        let e = null; for (let s = S.coast - 1600; s < S.coast + 1600; s += 15) { const [x, z] = c(s, T.marina), g = RJ.world.ground(x, z); if (g < 0.6) break; if (g > 1.2) e = s; }
+        if (e != null) for (let k = -2; k <= 2; k++) { const [x, z] = c(e + 152, T.marina + k * 34); site(x, z, 0.1, 6, 1.2, k + 5); }
+      }
+    }
+  }
+
+  /* ======================= crowd zones along the shores, at the stadium and in New York ======================= */
+  function crowdZones() {
+    const CI = RJ.cities, Hf = RJ.world.heightFn;
+    if (CI) for (const id in CI.sites) {
+      const S = CI.sites[id], T = CI.STYLE[id]; if (!S || !T || S.coast == null) continue;
+      const c = (s, p) => [S.x + S.sx * s + S.px * p, S.z + S.sz * s + S.pz * p], out = T.outer || 6000;
+      for (let p = -out * 0.8; p <= out * 0.8; p += 520) {
+        let e = null; for (let s = S.coast - 1600; s < S.coast + 1600; s += 20) { const [x, z] = c(s, p), g = Hf(x, z); if (g < 0.6) break; if (g > 1.2) e = s; }
+        if (e == null) continue;
+        if (T.beach) { const [x, z] = c(e - 30, p); L.addZone({ type: "beach", x, z, y: Math.max(1, Hf(x, z)), r: 240, n: 110, ax: S.px, az: S.pz, sx: S.sx, sz: S.sz, len: 480, dep: 70 }); }
+        else { const [x, z] = c(e - 14, p); L.addZone({ type: "prom", x, z, y: Math.max(1.2, Hf(...c(e, p))) + 0.2, r: 230, n: 45, ax: S.px, az: S.pz, sx: S.sx, sz: S.sz, len: 460, dep: 8 }); }
+      }
+      if (T.stadium) {
+        const [x, z] = c(T.stadium.s, T.stadium.p), y = Math.max(0, Hf(x, z));
+        L.addZone({ type: "stadium", x, z, y, r: 170, n: 700, ax: S.sx, az: S.sz, sx: S.px, sz: S.pz });
+        for (let k = 0; k < 12; k++) { const a = k / 12 * TAU, lx = Math.cos(a) * 168, lz = Math.sin(a) * 168 * 0.8; site(x + S.sx * lx + S.px * lz, z + S.sz * lx + S.pz * lz, y + 32, 7, 2.4, k); }
+      }
+    }
+    // New York: Times Square and the lawns of Central Park (heights settle when the city has loaded)
+    try {
+      const N = RJ.nyc; if (N && N.addr && N.toWorld) {
+        const at = (st, ac, r, n) => { const [e, nn] = N.addr(st, ac), [x, z] = N.toWorld(e, nn); L.addZone({ x, z, y: Math.max(0, Hf(x, z)) + 0.2, r, n, settle: true }); };
+        at(45.3, -560, 70, 160); at(82.6, -360, 110, 140); at(67.6, -500, 110, 150); at(99.2, -470, 120, 90);
+      }
+    } catch (e) { /* no New York */ }
+  }
+
+  /* ======================= build and update ======================= */
+  L.cityNodes = () => {
+    if (L._cn && L._cn.length && L.planned) return L._cn;
+    const out = [], C = RJ.cities;
+    if (C) for (const id in C.sites) { const S = C.sites[id], T = C.STYLE[id]; out.push({ id, x: S.x, z: S.z, r: (T && T.metro) || 7000 }); }
+    try { if (RJ.nyc) { const [x, z] = RJ.nyc.esbWorld(); out.push({ id: "nyc", x, z, r: 9000 }); } } catch (e) { /* no NYC */ }
+    try { if (RJ.world.gen.sfZone) { const Z = RJ.world.gen.sfZone; out.push({ id: "sf", x: Z.x, z: Z.z, r: 9000 }); } } catch (e) { /* no SF */ }
+    return (L._cn = out);
+  };
+  L.buildAmbient = function (grp) {
+    H.grp = new THREE.Group(); H.grp.name = "helicopters"; grp.add(H.grp);
+    buildFlags(grp);
+    // airports: a row of flags before the terminal, one on the tower, windsocks beside both runways
+    for (const a of L.airports) {
+      for (let k = -4; k <= 4; k++) { const [x, z] = a.W(k * 46, 395); site(x, z, a.E, 13, 2.6, k + 4); }
+      for (const [u, v] of [[-1600, -365], [1600, -365], [-1450, -750], [1450, -750]]) { const [x, z] = a.W(u, v); site(x, z, a.E, 6.5, 1, 0, true); }
+    }
+    crowdZones();
+    L.ambient = { update: ambientUpdate, helis: H, flags: FL };
+  };
+  function ambientUpdate(dt, cam) {
+    if (!FL.flags) return;
+    FL.time.value += dt;
+    const wx = RJ.world.wx ? RJ.world.wx() : null; FL.wind.value = RJ.damp(FL.wind.value, wx && wx.wind != null ? +wx.wind : 5, 0.5, dt);
+    FL.t -= dt; const C = cam.position;
+    if (FL.t <= 0 || !FL.at || Math.hypot(C.x - FL.at.x, C.z - FL.at.z) > 400) { FL.t = 1; FL.at = { x: C.x, z: C.z }; refreshFlags(cam); settleZones(cam); }
+    try { updateHelis(dt, cam); } catch (e) { console.warn("Helicopters failed", e); clearHelis(); H.list = []; L.cityNodes = () => []; }
+  }
+  /** Zones planned before their city loaded: take the real ground height once the camera is close. */
+  function settleZones(cam) {
+    for (const Z of L.zones) if (Z.settle && Math.hypot(Z.x - cam.position.x, Z.z - cam.position.z) < 3000) { const g = RJ.world.terrainHeight(Z.x, Z.z); if (g > -50) { Z.y = Math.max(0, g) + 0.2; Z.settle = false; Z._pp = null; Z._id = null; } }
+  }
 })(window.RJ);
