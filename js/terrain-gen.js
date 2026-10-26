@@ -77,8 +77,10 @@
     /* ---------------- landmark sites ---------------- */
     // plateau: flattened summit (castle) · flat: small level pad · lake: carved basin with water ·
     // pad: oriented runway pad (hidden airbase). Each site carries its own blend radius.
-    let SITES = [];
-    function setSites(list) { SITES = list || []; }
+    let SITES = [], COAST = false;
+    // Coast shaping (beaches, shelves, coves, wider island shores) switches on with the landmark sites. The atlas plans
+    // every landmark and city with the sites cleared, so placement keeps reading the original coasts and nothing moves.
+    function setSites(list) { SITES = list || []; COAST = SITES.length > 0; }
     function siteMask(st, x, z) {
       const dx = x - st.x, dz = z - st.z;
       if (st.type === "pad") {
@@ -300,12 +302,39 @@
       o.forest = lerp(o.forest, Math.max(pal, park * 0.55), m);
       o.nyc = m;
     }
+    // A coastal city's sea direction, found exactly as cities.js found it (original coasts, no sites): the first of 16
+    // bearings with water (< −4 m) 2.6–6.5 km out. Cached per site, since workers get fresh site objects per request.
+    const SEA = new Map();
+    function citySea(st) {
+      const key = st.kind + ":" + Math.round(st.x) + ":" + Math.round(st.z);
+      if (SEA.has(key)) return SEA.get(key);
+      const keep = SITES, kc = COAST; SITES = []; COAST = false;
+      let sea = null;
+      for (let j = 0; j < 16 && !sea; j++) {
+        const b = (j / 16) * Math.PI * 2, dx = Math.cos(b), dz = Math.sin(b);
+        for (let d = 2600; d <= 6500; d += 650) if (fields(st.x + dx * d, st.z + dz * d).h < -4) { if (d >= st.r + 500) sea = { dx, dz, d }; break; }
+      }
+      SITES = keep; COAST = kc;
+      SEA.set(key, sea);
+      return sea;
+    }
     function applySites(o, x, z) {
       for (const st of SITES) {
-        const dx = x - st.x, dz = z - st.z, R = Math.max((st.r || st.len) + (st.fall || 400), (st.plain || 0) * 1.1);
+        const sea = COAST && st.urban && st.type === "flat" ? (st._sea !== undefined ? st._sea : (st._sea = citySea(st))) : null;
+        const dx = x - st.x, dz = z - st.z, R = Math.max((st.r || st.len) + (st.fall || 400), (st.plain || 0) * 1.1, sea ? sea.d + 500 : 0);
         if (dx * dx + dz * dz > R * R) continue;
         // a megacity's plain: hills above the city level are pressed down toward it (lowland and sea untouched)
         if (st.plain && o.h > st.elev) { const d = Math.sqrt(dx * dx + dz * dz), k = 1 - smooth(st.plain * 0.75, st.plain * 1.1, d); if (k > 0) o.h = st.elev + (o.h - st.elev) * (1 - k * (1 - (st.plainK || 0.2))); }
+        if (sea) {
+          // the seafront: between the city and the sea, hills and cliffs are pulled down to a ramp that falls from the
+          // city level to a ~3 m promenade before the water, then the natural beach (water and lower ground untouched)
+          const s = dx * sea.dx + dz * sea.dz, q = Math.abs(dz * sea.dx - dx * sea.dz), W = st.r * 0.85;
+          const w = smooth(st.r * 0.4, st.r * 0.8, s) * (1 - smooth(sea.d, sea.d + 450, s)) * (1 - smooth(W * 0.7, W, q));
+          if (w > 0) {
+            const ramp = 3 + (st.elev - 3) * (1 - smooth(st.r, Math.max(st.r + 600, sea.d - 450), s));
+            if (o.h > ramp) o.h = lerp(o.h, ramp, w);
+          }
+        }
         const m = siteMask(st, x, z);
         if (m <= 0) continue;
         if (st.type === "plateau") {
@@ -335,14 +364,33 @@
     function setCastle(c) { SITES = SITES.filter((x) => x.kind !== "castle"); if (c) SITES.push(Object.assign({ type: "plateau", kind: "castle" }, c)); }
     function castleMask(x, z) { let m = 0; for (const st of SITES) if (st.kind === "castle") m = Math.max(m, siteMask(st, x, z)); return m; }
 
+    /* ---------------- shore profile ---------------- */
+    // Cubic Hermite from (x0, y0, slope m0) to (x1, y1, slope m1).
+    function herm(h, x0, y0, m0, x1, y1, m1) {
+      const dx = x1 - x0, t = (h - x0) / dx, t2 = t * t, t3 = t2 * t;
+      return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * dx * m0 + (3 * t2 - 2 * t3) * y1 + (t3 - t2) * dx * m1;
+    }
+    /** Monotonic height remap that keeps the waterline where it is but squeezes raw heights −1.2·Bu…Bu into a shallow
+     *  shelf (−3.5 m) and a beach (0…du m), rejoining the raw terrain at +260 m / −200 m. Steep raw shores become a
+     *  sandy strip backed by a steeper bank; deep sea and hills are untouched. */
+    function shoreMap(h, Bu, du) {
+      if (h >= 260 || h <= -200) return h;
+      if (h >= Bu) return herm(h, Bu, du, 0.2, 260, 260, 1);
+      if (h >= 0) return herm(h, 0, 0, 0.05, Bu, du, 0.2);
+      const Bd = Bu * 1.2;
+      if (h >= -Bd) return herm(h, -Bd, -3.5, 0.09, 0, 0, 0.05);
+      return herm(h, -200, -200, 1, -Bd, -3.5, 0.09);
+    }
+
     /* ---------------- height field ---------------- */
     function fields(x, z) {
       const X = x / 1000, Z = z / 1000;
       const wx = fbm(N2, X / 25, Z / 25, 2) * 6, wz = fbm(N3, X / 25 + 7.3, Z / 25 - 3.1, 2) * 6;
       const cont = fbm(N1, (X + wx) / 70, (Z + wz) / 70, 4);
       const cliff = smooth(0.15, 0.45, N3(X / 16 + 7, Z / 16 + 3));
-      let land = smooth(-0.22, -0.03, cont);
-      land = lerp(land, smooth(-0.12, -0.095, cont), cliff);
+      const landSoft = smooth(-0.22, -0.03, cont);
+      let land = lerp(landSoft, smooth(-0.12, -0.095, cont), cliff);
+      const land0 = land;
       const mtn = smooth(0.0, 0.4, fbm(N2, X / 38 + 31, Z / 38 - 17, 3));
       const dry = smooth(0.05, 0.33, fbm(N3, X / 50 - 60, Z / 50 + 44, 3)) * (1 - mtn * 0.85);
       const forest = smooth(-0.1, 0.35, N1(X / 1.7 + 5, Z / 1.7 - 3)) * (1 - dry);
@@ -514,18 +562,43 @@
       }
 
       // islands: beaches and rolling hills with a rugged spine instead of needle peaks
-      const i0 = Math.max(0, fbm(N2, X / 3.5 + 13, Z / 3.5 - 9, 4) - 0.26);
-      const isl = i0 > 0 ? smooth(0, 0.16, i0) * (300 + fbm(N3, X / 1.4, Z / 1.4, 3) * 140) + Math.pow(ridged(N1, X / 1.8 + 3, Z / 1.8, 3), 2) * 650 * smooth(0.08, 0.3, i0) : 0;
+      // (with coast shaping on, the shore ramp is ~2.6× wider around the same waterline: shoals and gentler island shores)
+      const i0 = fbm(N2, X / 3.5 + 13, Z / 3.5 - 9, 4) - 0.26, iw = COAST ? -0.16 : 0;
+      const isl = i0 > iw ? smooth(iw, COAST ? 0.26 : 0.16, i0) * (300 + fbm(N3, X / 1.4, Z / 1.4, 3) * 140) + (i0 > 0.08 ? Math.pow(ridged(N1, X / 1.8 + 3, Z / 1.8, 3), 2) * 650 * smooth(0.08, 0.3, i0) : 0) : 0;
       const sea = -240 + isl + fbm(N1, X / 2, Z / 2, 2) * 40;
-      h = lerp(sea, h, land);
-      if (wl > -1e8) wl = lerp(0, wl, land);
+      // ---- coastlines: beaches, shelves, coves (only the band near sea level, never deep inland) ----
+      // Rocky stretches (noise) keep the old sharp cliff coasts; elsewhere the sharp land edge relaxes to the gentle
+      // continental slope (the realms' land boosts are carried over), so cliffs are the exception, not the rule.
+      let rocky = 0, landH = land;
+      if (COAST && land0 > 0.002 && land0 < 0.998 || COAST && landSoft > 0.002 && landSoft < 0.998) {
+        rocky = smooth(0.28, 0.55, N3(X / 7.5 - 21, Z / 7.5 + 9) + cliff * 0.25);
+        landH = clamp(lerp(land0, landSoft, cliff * (1 - rocky)) + land - land0, 0, 1);
+      }
+      h = lerp(sea, h, landH);
+      if (wl > -1e8) wl = lerp(0, wl, landH);
+      // cg: how much shore shaping applies — none deep inland and inside the realms (they force land to 1)
+      const cg = COAST ? 1 - smooth(0.86, 0.97, landH) : 0;
+      if (cg > 0 && h > -200 && h < 260) {
+        if (landH < 0.002) rocky = smooth(0.28, 0.55, N3(X / 7.5 - 21, Z / 7.5 + 9)); // open sea and islands
+        const G = cg * (1 - rocky * 0.92);
+        if (G > 0.01) {
+          // coves and bays: the shore band is pushed in / out by km-scale noise, so the waterline wanders
+          const near = 1 - smooth(25, 140, Math.abs(h));
+          if (near > 0) h += (fbm(N1, X / 1.7 + 17, Z / 1.7 - 5, 2) * 70 + N2(X / 0.55 - 3, Z / 0.55 + 8) * 14) * near * G;
+          // squeeze the band around the waterline into a shelf and a beach whose width varies along the coast
+          const bw = 0.5 + 0.5 * N2(X / 4 + 9, Z / 4 - 41);
+          const Bu = 30 + bw * 60, du = 3 + bw * 1.5, hn = shoreMap(h, Bu, du);
+          h = lerp(h, hn, G);
+          if (wl > -1e8) wl = lerp(wl, shoreMap(wl, Bu, du), G); // rivers keep their water above the bed
+        }
+      }
 
       if (AB) {
         const m = airbaseMask(x, z);
         if (m > 0) { h = lerp(h, AB.elev, m); if (m > 0.2) wl = -1e9; }
       }
       const o = { h, land, mtn: Math.max(mtn, him), dry: dry * (1 - him) * (1 - lush) * (1 - snowZ), canyon, cv, wl,
-        forest: Math.max(forest * (1 - him) * (1 - ash), lush * 0.75, snowZ * smooth(1500, 700, h) * 0.8), lakeSite: 0, him, glac, snowZ, ash, urban: 0, nyc: 0, sf: 0 };
+        forest: Math.max(forest * (1 - him) * (1 - ash), lush * 0.75, snowZ * smooth(1500, 700, h) * 0.8), lakeSite: 0, him, glac, snowZ, ash, urban: 0, nyc: 0, sf: 0, rocky };
       applyNYC(o, x, z);
       applySF(o, x, z);
       if (SITES.length) applySites(o, x, z);
@@ -603,8 +676,15 @@
       }
       // riverbanks, beaches, seabed
       if (f.wl > -1e8 && h - f.wl < 8) mix3(out, out, C.bank, smooth(8, 1, h - f.wl) * 0.8);
-      if (h < 22) mix3(out, out, f.nyc > 0.5 || (f.sf > 0.5 && f.urban > 0.3) ? C.riprap : C.sand, smooth(22, 5, h) * (1 - f.dry * 0.3)); // NYC: bulkheads and riprap, not beaches
-      if (h < 1.5) mix3(out, out, C.wet, smooth(1.5, -1, h) * 0.6);
+      if (f.nyc > 0.5 || (f.sf > 0.5 && f.urban > 0.3)) { if (h < 22) mix3(out, out, C.riprap, smooth(22, 5, h) * (1 - f.dry * 0.3)); } // NYC: bulkheads and riprap, not beaches
+      else if (h < 22) {
+        // beaches: dry sand on the gentle strip above the waterline (its top wanders with noise), grass behind;
+        // steep or rocky shores show bare rock instead of sand
+        const rk = f.rocky || 0, top = 6 + v * 3 + (1 - rk) * 4;
+        mix3(out, out, C.sand, smooth(top + 6, top, h) * (1 - smooth(0.28, 0.55, slope)) * (1 - rk * 0.65) * (1 - f.dry * 0.2));
+        if (slope > 0.2) mix3(out, out, T3, smooth(0.2, 0.45, slope) * Math.max(rk, 0.5) * smooth(22, 6, h) * 0.8);
+      }
+      if (h < 1.5) mix3(out, out, C.wet, smooth(1.2, 0.1, h) * 0.65); // wet sand: a narrow strip at the waterline
       if (h < -2) mix3(out, out, C.seabed, smooth(-2, -30, h));
       if (f.urban > 0.01) { mix3(T1, C.urbanA, C.urbanB, clamp(0.5 + v2 * 0.7, 0, 1)); mix3(out, out, T1, f.urban); }
       if (AB) { const m = airbaseMask(x, z); if (m > 0.85) mix3(out, out, C.dryGrass, 0.35); }
@@ -612,7 +692,7 @@
         if (st.type !== "plateau" && st.type !== "flat" && st.type !== "pad") continue;
         const dx = x - st.x, dz = z - st.z, R = (st.r || st.len) + 50;
         // the megacities' metro rings: concrete, asphalt and roofs between the buildings, fading out at the city edge
-        if (st.urban && h > 0.8) { const d = Math.sqrt(dx * dx + dz * dz); if (d < st.urban * 1.06) { mix3(T1, C.urbanA, C.urbanB, clamp(0.5 + v2 * 0.7, 0, 1)); mix3(out, out, T1, (1 - smooth(st.urban * 0.8, st.urban * 1.06, d)) * 0.5 * smooth(0.8, 3, h)); } }
+        if (st.urban && h > 0.8) { const d = Math.sqrt(dx * dx + dz * dz); if (d < st.urban * 1.06) { mix3(T1, C.urbanA, C.urbanB, clamp(0.5 + v2 * 0.7, 0, 1)); mix3(out, out, T1, (1 - smooth(st.urban * 0.8, st.urban * 1.06, d)) * 0.5 * smooth(2.5, 6, h)); } } // the beach below ~4 m stays sand
         // Dubai sits in desert: sand and dry scrub for ~9 km around the city
         if (st.kind === "dubai") { const d = Math.sqrt(dx * dx + dz * dz), w = 1 - smooth(st.r + 1500, st.r + 9000, d); if (w > 0 && h > 0.5) mix3(out, out, C.sand, w * 0.85 * smooth(0.5, 4, h)); } if (dx * dx + dz * dz > R * R * 4) continue;
         const m = siteMask(st, x, z); if (m > 0.97) { mix3(out, out, C.dryGrass, 0.3); mix3(out, out, C.rock, st.type === "plateau" ? 0.25 : 0.1); }
