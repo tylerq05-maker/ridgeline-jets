@@ -139,6 +139,8 @@
       if (this.spec.flight.model && RJ.vehicles && RJ.vehicles.update(this, dt)) return;
       if (this.state === "ground") return this.updateGround(dt);
       const F = this.spec.flight, inp = this.input;
+      const mnv = !!(RJ.mnv && (this.mnv || this.psm || this.mnvP || this.mnvY));
+      if (mnv) RJ.mnv.pre(this, dt); // Cobra / Kulbit / post-stall mode (maneuvers.js)
       this.throttleAndFuel(dt);
 
       // control response: light fighters snap to the stick, heavy airframes wind up and coast down
@@ -147,6 +149,7 @@
       this.ctl.pitch = RJ.damp(this.ctl.pitch, inp.pitch, lam, dt);
       this.ctl.roll = RJ.damp(this.ctl.roll, inp.roll, lam * 1.2, dt);
       this.ctl.yaw = RJ.damp(this.ctl.yaw, inp.yaw, lam * 0.8, dt);
+      if (mnv) RJ.mnv.ctl(this);
 
       this.updateBasis();
       const v = Math.max(this.speed, 1), alt = this.pos.y, rho = RJ.rho(alt);
@@ -160,7 +163,8 @@
       const gCmd = p >= 0 ? neutral + p * (F.gmax - neutral) : neutral + p * (neutral + 3);
       // thrust vectoring: the nozzles add pitch force on top of wing lift, so TVC jets out-turn others when slow
       const tvcG = F.tvc ? 0.45 * this.throttle * F.mil / RJ.G0 * (1 + this.abLevel * 0.6) : 0;
-      const gLim = RJ.clamp(gCmd, -Math.min(3, liftG * 0.6), Math.min(F.gmax, liftG + tvcG));
+      let gLim = RJ.clamp(gCmd, -Math.min(3, liftG * 0.6), Math.min(F.gmax, liftG + tvcG));
+      if (this.mnvG != null) gLim = Math.min(gLim, this.mnvG); // maneuver unloads the wing
       // G onset: load builds over a fraction of a second (longer for big airplanes), no instant snaps
       this.gS = this.gS == null ? gLim : RJ.damp(this.gS, gLim, 7 / inert, dt);
       const gAct = this.gS;
@@ -255,6 +259,7 @@
       const aoaT = Math.max(RJ.clamp(0.26 * gAct * (F.vstall / v) * (F.vstall / v) / Math.max(rho, 0.04), -0.15, 0.42), ps * 1.1);
       if (ps > 0.05) this.speed -= ps * this.aoa * 14 * dt; // high-alpha drag bleeds energy fast
       this.aoa = RJ.damp(this.aoa, aoaT, 6, dt);
+      if (mnv) RJ.mnv.post(this, dt);
 
       this.checkBoom();
 
@@ -432,7 +437,7 @@
       if (this.lodFar) return; // drawn as an instanced silhouette (combat.drawCrowd)
       this.mesh.position.copy(this.pos);
       this.mesh.quaternion.copy(this.q);
-      if (this.state === "flying" && !this.spec.flight.model) { this.mesh.quaternion.multiply(tq2.setFromAxisAngle(AX, this.aoa)); if (this.beta) this.mesh.quaternion.multiply(tq2.setFromAxisAngle(AY, -this.beta)); }
+      if (this.state === "flying" && !this.spec.flight.model) { this.mesh.quaternion.multiply(tq2.setFromAxisAngle(AX, this.aoa)); if (this.beta) this.mesh.quaternion.multiply(tq2.setFromAxisAngle(AY, -this.beta)); if (this.mnvP || this.mnvY) RJ.mnv.pose(this, this.mesh.quaternion); }
       // keep world matrices current so cockpit camera and trail emitters don't lag a frame behind
       this.mesh.updateMatrixWorld(true);
     }
