@@ -284,21 +284,20 @@
       const a = Math.random() * Math.PI * 2;
       const ca = Math.cos(a), sa = Math.sin(a);
       const rx = right.x * ca + up.x * sa, ry = right.y * ca + up.y * sa, rz = right.z * ca + up.z * sa;
-      // a thin collar of vapor that blasts outward as a ring, not a filled ball
-      const r = R0 * (0.85 + Math.random() * 0.4);
-      const along = (Math.random() - 0.5) * L0 * 0.55;
+      // droplets condense on the cone surface (wider aft, heavier over the top) and are left behind in the air
+      const along = (Math.random() - 0.3) * L0 * 0.8, r = R0 * (0.55 + 0.45 * RJ.clamp(0.5 - along / L0, 0, 1)) * (0.9 + Math.random() * 0.2) * (sa > 0 ? 1 : 0.85);
       const px = c.x + rx * r - fwd.x * along, py = c.y + ry * r - fwd.y * along, pz = c.z + rz * r - fwd.z * along;
-      const out = 2 + Math.random() * 6;
+      const out = 0.4 + Math.random() * 1.2;
       const lit = 0.78 + 0.22 * Math.max(0, rx * sunDir.x + ry * sunDir.y + rz * sunDir.z);
-      FX.smokeP.spawn(px, py, pz, rx * out * 1.4 + vel.x * 0.05, ry * out * 1.4 + vel.y * 0.05, rz * out * 1.4 + vel.z * 0.05, 0.6 + Math.random() * 0.7, 1.8 + R0 * 0.2, 8 + R0 * 0.9, lit, lit, lit * 1.02, 0.42 * vis, 0, 2.2);
+      FX.smokeP.spawn(px, py, pz, rx * out * 1.4 + vel.x * 0.05, ry * out * 1.4 + vel.y * 0.05, rz * out * 1.4 + vel.z * 0.05, 0.35 + Math.random() * 0.5, 1.2 + R0 * 0.15, 4 + R0 * 0.5, lit, lit, lit * 1.02, 0.34 * vis, 0, 2.2);
     }
-    for (let i = 0; i < Math.round(70 * vis + 20); i++) {
+    for (let i = 0; i < Math.round(40 * vis); i++) {
       const a = Math.random() * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
       const rx = right.x * ca + up.x * sa, ry = right.y * ca + up.y * sa, rz = right.z * ca + up.z * sa;
       const r = R0 * (0.8 + Math.random() * 1.6);
       const along = (Math.random() - 0.2) * L0 * 2.5;
       FX.smokeP.spawn(c.x + rx * r - fwd.x * along, c.y + ry * r - fwd.y * along, c.z + rz * r - fwd.z * along,
-        rx * 6 + vel.x * 0.03, ry * 6 + vel.y * 0.03 + 1, rz * 6 + vel.z * 0.03, 3 + Math.random() * 2.5, 6, 26 + R0 * 2, 0.95, 0.96, 1, 0.18 * vis, 0.2, 0.5);
+        rx * 6 + vel.x * 0.03, ry * 6 + vel.y * 0.03 + 1, rz * 6 + vel.z * 0.03, 1.2 + Math.random() * 1.2, 4, 10 + R0 * 0.8, 0.95, 0.96, 1, 0.12 * vis, 0.2, 0.5);
     }
   };
   FX.sprayRing = (p, k, vel) => {

@@ -57,18 +57,18 @@
         // close to the airframe, feathering into wisps toward a ragged, uneven rim; streaks radiate along the flow
         "  if (radial > 0.5) { float y = vUv.y, rim = 0.72 + 0.22 * rjVN(vec2(vUv.x * 7.0 + seed, time * 0.3));",
         "    float core = smoothstep(0.0, 0.06, y) * (1.0 - smoothstep(rim - 0.42, rim, y));",
-        "    e = core * (0.45 + 0.95 * pow(1.0 - y, 1.5)) * (0.75 + 0.25 * rjVN(vec2(ang * 0.9 + seed * 2.0, time * 0.2))); }",
+        "    e = core * (0.45 + 0.95 * pow(1.0 - y, 1.5)) * (0.4 + 0.6 * rjVN(vec2(ang * 0.9 + seed * 2.0, time * 0.2))) * (0.7 + 0.3 * rjVN(vec2(ang * 3.0 - seed, y * 4.0 + time * 0.6))); }",
         "  vec3 V = normalize(cameraPosition - vWP); vec3 Nn = normalize(vNW);",
         "  float fres = abs(dot(Nn, V));",
         // thin sheet: edge-on it reads dense, face-on it is a translucent streaky veil
         // a soft veil: only slightly denser where seen edge-on, so the silhouette never draws a bright outline
-        "  float a = dens * e * mix(mix(0.72, 0.62, fres), mix(1.15, 0.5, fres), radial) * opacity;",
+        "  float a = dens * e * mix(mix(0.72, 0.62, fres), mix(1.15, 0.38, fres), radial) * opacity;",
         "  if (a < 0.003) discard;",
         "  float lit = abs(dot(Nn, sunDir));",
         "  float fwd = pow(max(dot(-V, sunDir), 0.0), 6.0);",
         "  vec3 col = mix(shadeCol, sunCol, 0.45 + 0.55 * lit) + sunCol * fwd * 1.5 + sunCol * n * 0.12;",
         // vapor cone: real condensation reads against the sky by its grey-blue shaded side and a slightly darker rim
-        "  if (radial > 0.5) col = mix(shadeCol * vec3(0.78, 0.82, 0.9), sunCol * 0.97, 0.3 + 0.55 * lit) * (0.8 + 0.2 * (1.0 - vUv.y)) * (0.9 + 0.14 * n) + sunCol * fwd * 0.6;",
+        "  if (radial > 0.5) col = mix(shadeCol * vec3(0.78, 0.82, 0.9), sunCol * 0.97, 0.3 + 0.55 * lit) * (0.8 + 0.2 * (1.0 - vUv.y)) * (0.9 + 0.14 * n) + sunCol * (fwd * 0.9 + pow(max(dot(-V, sunDir), 0.0), 2.0) * 0.18);",
         "  gl_FragColor = vec4(col, a);",
         "#include <fog_fragment>",
         "}"
@@ -143,20 +143,23 @@
   S.trigger = function (ac) {
     const W = RJ.world, d = ac.vis.dims;
     const hum = S.humidity(ac);
-    const vis = RJ.clamp(hum, 0.22, 1);
+    const vis = RJ.clamp((hum - 0.12) / 0.6, 0, 1); // dry air: the shock is still there, but nothing condenses
+    ac._boomPulse = vis;
     const [R0, L0] = vcSize(d);
     const center = ac.mesh.localToWorld(tv.set(0, 0, d.minZ + d.len * 0.48)).clone();
     const ev = { t: 0, ac, center, q: ac.q.clone(), vel: ac.vel.clone(), R0, L0, vis, meshes: [] };
     const add = (geo, o) => { const m = new THREE.Mesh(geo, makeMat(o)); m.position.copy(center); m.quaternion.copy(ev.q); m.frustumCulled = false; m.renderOrder = 10; m.layers.set(RJ.LATE); S.scene.add(m); ev.meshes.push(m); return m; };
     // the cloud at its peak detaches into the air mass: two layers that stretch aft, erode and evaporate
+    if (vis > 0.02) {
     ev.shell = add(S.vcGeo, { fx: 9, fy: 2.2, flow: -0.8, ends: 1 });
     ev.inner = add(S.vcGeo, { fx: 7, fy: 2.0, flow: -0.6, ends: 1 });
     for (const mm of [ev.shell, ev.inner]) { mm.material.uniforms.top.value = 0.25; mm.material.uniforms.radial.value = 1; }
     S.events.push(ev);
+    }
     // sunlit particle burst + lingering wisps
     const near = W.cloudNear || 0;
     const inCloud = (W.inCloud || 0) > 0.1 || near > 0.05 || W.cloudDensityAt(ac.pos, 1.4) > 0;
-    RJ.fx.boomBurst(center, ac.fwd, ac.up, ac.right, ac.vel, R0, L0, vis * (inCloud ? 1.5 : 1), W.sunDir);
+    if (vis > 0.02) RJ.fx.boomBurst(center, ac.fwd, ac.up, ac.right, ac.vel, R0, L0, vis * (inCloud ? 1.5 : 1), W.sunDir);
     if (inCloud) W.punchHole(center, 0.55 + vis * 0.6);
     const gnd = W.ground(ac.pos.x, ac.pos.z);
     const agl = ac.pos.y - gnd;
@@ -180,11 +183,13 @@
       if (tr > 0.01) {
         const hum = S.humidity(ac);
         // sparse air (high, cold, dry) gives a faint veil; humid low air a dense, bright cloud
-        const a = tr * (0.32 + hum * 0.78);
+        ac._boomPulse = Math.max(0, (ac._boomPulse || 0) - dt * 2.2);
+        const a = (tr * RJ.smooth(0.1, 0.3, hum) * (0.3 + hum * 0.8)) * (1 + 0.7 * ac._boomPulse);
         const cone = coneFor(ac);
         cone.visible = a > 0.015;
         const ud = cone.userData, grow = 0.55 + 0.45 * RJ.smooth(0.92, 1.0, m), aft = RJ.smooth(1.0, 1.08, m);
-        cone.scale.set(grow, grow, 1 + aft * 0.6);
+        const tt = ac.time, wob = 0.07 * (0.4 + tr);
+        cone.scale.set(grow * (1 + wob * Math.sin(tt * 5.3 + ac.uid)), grow * (1 + wob * Math.sin(tt * 4.1 + 1.7 + ac.uid)), (1 + aft * 0.6) * (1 + 0.05 * Math.sin(tt * 6.7)));
         cone.position.z = ud.z0 + aft * ud.len * 0.35;                       // the shock walks aft past Mach 1
         cone.children.forEach((mm, i) => {
           const U = mm.material.uniforms;
@@ -205,13 +210,14 @@
       const R = ev.R0, L = ev.L0, v = ev.vis;
       // left behind in the air: it billows a little wider, stretches aft as the flow relaxes, and evaporates
       const sr = 1 + 0.35 * (1 - Math.exp(-t * 2.2)), sl = 1 + 2.0 * (1 - Math.exp(-t * 1.6));
-      ev.shell.scale.set(R * sr, R * sr * 1.04, L * sl);
-      ev.inner.scale.set(R * sr * 0.86, R * sr * 0.9, L * sl * 0.85);
-      const fade = Math.exp(-t * 1.4) * RJ.smooth(0, 0.05, t);
+      const wx = 1 + 0.08 * Math.sin(t * 3.1 + ev.R0), wy = 1 - 0.06 * Math.sin(t * 2.3);
+      ev.shell.scale.set(R * sr * wx, R * sr * 1.04 * wy, L * sl);
+      ev.inner.scale.set(R * sr * 0.86 * wy, R * sr * 0.9 * wx, L * sl * 0.85);
+      const fade = Math.exp(-t * 2.1) * RJ.smooth(0, 0.05, t);
       ev.shell.material.uniforms.opacity.value = v * 0.85 * fade;
       ev.inner.material.uniforms.opacity.value = v * 0.55 * fade;
       for (const mm of [ev.shell, ev.inner]) mm.material.uniforms.erosion.value = 0.4 + t * 0.35;
-      if (t > 3.4) {
+      if (t > 2.4) {
         for (const mm of ev.meshes) { S.scene.remove(mm); mm.material.dispose(); }
         S.events.splice(i, 1);
       }
@@ -235,7 +241,7 @@
       const p = tv.copy(s.pos).project(camera);
       const rWorld = s.R0 * 1.4 + s.t * 340;
       const rad = rWorld / dist / (2 * tanH);
-      out.push([(p.x + 1) / 2, (p.y + 1) / 2, rad, 0.022 * (s.k || 1) * fade * RJ.clamp(220 / dist, 0.25, 1)]);
+      out.push([(p.x + 1) / 2, (p.y + 1) / 2, rad, 0.012 * (s.k || 1) * fade * RJ.clamp(220 / dist, 0.25, 1)]);
     }
     return out.slice(-3);
   };
