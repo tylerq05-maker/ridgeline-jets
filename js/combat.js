@@ -68,6 +68,7 @@
 
   /* ======================= GUNS ======================= */
   /** Fire the gun for this frame if the trigger is held. Gun heat stops a held trigger from working forever. */
+  const _nose = new THREE.Vector3();
   C.fireGun = function (ac, dt, aimDir) {
     const g = ac.spec.gun;
     ac.firing = false;
@@ -77,7 +78,8 @@
     let fired = 0;
     while (ac.gunAcc >= 1) {
       ac.gunAcc -= 1;
-      spawnBullet(ac, aimDir || ac.fwd, g, fired);
+      // nose pointed off the flight path (Cobra, post-stall): the gun fires where the nose points
+      spawnBullet(ac, aimDir || ((ac.mnvP || ac.mnvY) ? _nose.set(0, 0, -1).applyQuaternion(ac.mesh.quaternion) : ac.fwd), g, fired);
       fired++;
       ac.gunHeat += g.heat;
       if (ac.gunHeat >= 1) { ac.gunHeat = 1; ac.overheated = true; ac.firing = false; break; }
@@ -552,6 +554,7 @@
         // defensive barrel roll / missile-defeat roll now and then, so the sky isn't full of identical flat turns
         if ((this.mode === "defend" || this.mode === "evade") && !(this.rollT > 0) && Math.random() < 0.18 * sk.evade) { this.rollT = RJ.rand(1.1, 2.0); this.rollDir = Math.random() < 0.5 ? -1 : 1; }
       }
+      if (RJ.mnv && this.role !== "route") RJ.mnv.ai(this, threat, tgo, gunner, gd, tgt); // Cobra, Kulbit, post-stall (capable jets)
       this.avoidTerrain();
     }
     /** Big battles: steer clear of the nearest friendly on a collision course (formation slots excepted). */

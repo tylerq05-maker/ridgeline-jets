@@ -144,6 +144,53 @@
     if (ac.mnvP) quat.multiply(tq.setFromAxisAngle(AX, ac.mnvP));
   };
 
+  /* ---------- AI pilots (combat.js Pilot.think, every reaction tick) ----------
+     Veterans and aces in capable jets use the maneuvers for a reason: a Cobra to make a closing gunner overshoot
+     or to spoil a missile's endgame, a Kulbit to reset a close turning fight, and (TVC jets) short post-stall
+     bursts to point the nose and guns at a bandit the wing alone can't reach. Cooldowns keep it occasional. */
+  const _r = new THREE.Vector3(), _n = new THREE.Vector3();
+  let sayT = 0;
+  const say = (ac, what) => {
+    const pl = RJ.game && RJ.game.mode && RJ.game.mode.player;
+    if (!pl || !pl.alive || RJ.fx.time - sayT < 6 || ac.pos.distanceTo(pl.pos) > 3000) return;
+    sayT = RJ.fx.time || 0;
+    const foe = ac.team !== pl.team;
+    RJ.ui.flash((foe ? "BANDIT " : "WINGMAN ") + what, foe ? "Watch the overshoot" : null, 1);
+  };
+  M.ai = (P, threat, tgo, gunner, gd, tgt) => {
+    const ac = P.ac, sk = P.sk, F = ac.spec.flight, dt = sk.react;
+    if (ac.mnv || sk.evade < 0.7 || !M.can(ac, "cobra") || ac.agl < 600) { if (ac.psm && ac.agl < 600) M.togglePSM(ac); return; }
+    if (ac.psm) {
+      // nose-pointing burst: the normal steering points the nose; shoot when the nose is on
+      P.psmT -= dt;
+      if (tgt) {
+        _r.copy(tgt.pos).sub(ac.pos); const d = _r.length();
+        _n.set(0, 0, -1).applyQuaternion(ac.mesh.quaternion);
+        if (d < 1100 && _r.dot(_n) / d > Math.cos(sk.aim * 2.5)) P.fireWish = true;
+      }
+      if (P.psmT <= 0 || !tgt || ac.speed < F.vstall * 0.8) { M.togglePSM(ac); P.mnvCd = RJ.rand(5, 10); }
+      return;
+    }
+    P.mnvCd = (P.mnvCd == null ? RJ.rand(3, 8) : P.mnvCd) - dt;
+    if (P.mnvCd > 0) return;
+    const go = (type, label) => { if (M.start(ac, type)) { P.tactic = label; P.mnvCd = RJ.rand(8, 16) / sk.evade; say(ac, label.toUpperCase() + "!"); return true; } return false; };
+    if (gunner && gd < 900) {
+      // a gunner closing fast from behind: yank the nose up, bleed speed and let him fly through
+      const closing = _r.copy(gunner.vel).sub(ac.vel).dot(_n.copy(ac.pos).sub(gunner.pos).normalize());
+      if (closing > 25 && Math.random() < 0.45 * sk.evade && go(M.can(ac, "kulbit") && Math.random() < 0.35 ? "kulbit" : "cobra", "cobra")) return;
+    }
+    if (threat && tgo < 1.6 && Math.random() < 0.3 * sk.evade && go("cobra", "cobra")) return;
+    if (tgt && F.tvc) {
+      _r.copy(tgt.pos).sub(ac.pos); const d = _r.length(), off = Math.acos(RJ.clamp(_r.dot(ac.fwd) / d, -1, 1));
+      // close turning fight with the bandit just outside the turn: point the nose with the nozzles
+      if (d > 250 && d < 1300 && off > 0.45 && off < 1.6 && Math.random() < 0.5 * sk.evade) {
+        M.togglePSM(ac); P.psmT = RJ.rand(1.8, 3.2); P.tactic = "post-stall"; say(ac, "POST-STALL"); return;
+      }
+      // head-on pass inside 700 m: a Kulbit at the merge
+      if (d < 700 && off < 0.5 && _r.copy(tgt.fwd).dot(ac.fwd) < -0.6 && Math.random() < 0.3 * sk.evade && go("kulbit", "kulbit")) return;
+    }
+  };
+
   let hinted = false;
   /** Player keys (main.js): 5 Cobra, 6 Kulbit, 7 post-stall mode. */
   M.player = (pl, I) => {
