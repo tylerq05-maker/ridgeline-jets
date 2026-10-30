@@ -341,6 +341,7 @@
     if (HV.model) { HV.scene.remove(HV.model); HV.model.traverse((o) => { if (o.geometry && o.geometry.type !== "ConeGeometry") o.geometry.dispose(); }); }
     HV.id = id;
     HV.model = RJ.buildAircraft(id, (RJ.settings.paint || {})[id] || null);
+    if (RJ.lighting) RJ.lighting.untrack(HV.model.userData.materials); // the showroom keeps its studio environment
     const d = HV.model.userData.dims;
     HV.size = Math.max(d.len, d.span);
     HV.model.position.y = d.gearH || d.height * 0.5 + 1.8;
@@ -464,6 +465,7 @@
   }
   function showRender(dt, s, motion, exposure) {
     RJ.world.update(dt, camera, s.pos, s.vel, s.pos.y - RJ.world.ground(s.pos.x, s.pos.z));
+    if (RJ.lighting) RJ.lighting.update(dt);
     RJ.fx.update(dt, camera, renderer);
     postInputs(s, s, "cinematic", dt);
     if (motion != null) RJ.post.fx.motion = motion;
@@ -654,6 +656,7 @@
     const camMode = spect ? mode.camera(camera, dt) : cam.update(dt, focus);
     RJ.nav.update(player, camera, dt);
     RJ.world.update(dt, camera, focus.pos, focus.vel, focus.agl);
+    if (RJ.lighting) RJ.lighting.update(dt);
     RJ.fx.update(dt, camera, renderer);
     // clouds rushing past
     if ((RJ.world.cloudNear || 0) > 0 && focus.speed > 120) RJ.fx.cloudStreak(camera.position, tv.set(0, 0, -1).applyQuaternion(camera.quaternion), focus.vel, Math.min(1, RJ.world.cloudNear * 2 + 0.2));

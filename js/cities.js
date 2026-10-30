@@ -251,6 +251,10 @@
     const treeKind = (r) => T.trees.kind === "mix" ? (r() < 0.4 ? "palm" : "tree") : T.trees.kind;
     const r = W.gen.mulberry32(id.split("").reduce((a, ch) => a * 31 + ch.charCodeAt(0), 7) >>> 0);
     const { grp, c, groundAt, keep, peakH } = X;
+    // real land use under the satellite imagery (satellite.js): no buildings on imagery water; woods thin out the outskirts
+    const LU = RJ.sat && RJ.sat.landUseFn ? RJ.sat.landUseFn(id) : null, luStats = { water: 0, veg: 0 };
+    const luSkip = (x, z, outer) => { if (!LU) return false; const k = LU(x, z); if (k === 2 && (outer || bdOf(x, z) > coreR * 0.5)) { luStats.water++; return true; } if (k === 1 && outer && ((x * 7.13 + z * 3.71) % 1 + 1) % 1 < 0.8) { luStats.veg++; return true; } return false; };
+    const bdOf = (x, z) => Math.hypot(x - S.x, z - S.z);
     const yaw = Math.atan2(S.px, S.pz), g = T.block, coreR = SPEC[id].R;
     const cs = Math.round(T.canyon.s / g) * g, cw = T.canyon.width, canyonEnd = T.canyon.half;
     const heights = (s, p, d) => { let h = T.base(d) * RJ.lerp(0.4, 1.3, r()); for (const b of T.bumps) { const q = ((s - b.s) ** 2 + (p - b.p) ** 2) / (b.r * b.r); if (q < 6) h += b.h * Math.exp(-q) * RJ.lerp(0.45, 1.15, Math.pow(r(), 0.7)); } return h; };
@@ -355,6 +359,7 @@
         if (nearHw(s, p, (lw - T.street) * 0.5 + 12)) continue;
         const [x, z] = c(s, p), gy = groundAt(x, z);
         if (gy < 1.5 || keep.some(([kx, kz, kr]) => Math.hypot(kx - x, kz - z) < kr)) continue;
+        if (luSkip(x, z, outer)) continue;
         const hp = peakH(x, z); if (hp > gy - 3 && hp > -1e9) continue;
         const half = (lw - T.street) * 0.5;
         if (outer) { // on the natural ground: skip steep plots
@@ -401,6 +406,7 @@
         const [x, z] = c(bs, bp), gy = groundAt(x, z);
         if (S.others && S.others.some((o) => o.city ? Math.hypot(o.x - x, o.z - z) < bd : Math.hypot(o.x - x, o.z - z) < o.r + 2000)) continue; // a neighbour's ground
         if (gy < 1.6 || keep.some(([kx, kz, kr]) => Math.hypot(kx - x, kz - z) < kr + 60)) continue;
+        if (luSkip(x, z, true)) continue;
         if (peakH(x, z) > gy - 3 && peakH(x, z) > -1e9) continue;
         let lo = gy, hi = gy; for (const [ox, oz] of [[-half2, -half2], [half2, -half2], [half2, half2], [-half2, half2]]) { const yy = groundAt(...at(x, z, ox, oz)); lo = Math.min(lo, yy); hi = Math.max(hi, yy); }
         if (lo < 1 || hi - lo > (kind === "suburb" ? 18 : 12)) continue;
@@ -455,7 +461,7 @@
         }
       }
     }
-    X.lm.metroBlocks = metroCount.blocks;
+    X.lm.metroBlocks = metroCount.blocks; X.lm.landUseSkipped = luStats;
     const roofCols = [Pal.roof || 0x8a4a32, Pal.roof2 || 0x5a5c60];
     for (const L of lots) {
       if (L.outer) {

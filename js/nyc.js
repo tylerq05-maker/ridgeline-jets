@@ -841,11 +841,12 @@
         .replace("#include <project_vertex>", "#include <project_vertex>\nvWP = (modelMatrix * vec4(transformed, 1.0)).xyz;");
       sh.fragmentShader = sh.fragmentShader
         .replace("#include <common>", "#include <common>\n" + glsl.replace("varying vec3 vWP;", "varying vec3 vWP;\nvec3 sCol0;"))
-        .replace("#include <color_fragment>", "#include <color_fragment>\nrjStreet(); diffuseColor.rgb = sCol;")
+        .replace("#include <color_fragment>", "#include <color_fragment>\nrjStreet(); diffuseColor.rgb = sCol;" + (RJ.sat ? "\ndiffuseColor.rgb = mix(sCol, rjSat(sCol, vWP.xz), smoothstep(1500.0, 6000.0, length(vWP - cameraPosition)) * 0.8);" : ""))
         .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = sRough;")
         .replace("#include <metalnessmap_fragment>", "#include <metalnessmap_fragment>\nmetalnessFactor = sMetal;")
         .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance += sEmis;");
       if (RJ.world.addCloudShadows) RJ.world.addCloudShadows(sh, "vWP");
+      if (RJ.sat) { RJ.sat.attach(sh.uniforms); sh.fragmentShader = sh.fragmentShader.replace("#include <common>", "#include <common>\n" + RJ.sat.GLSL); }
     };
     return m;
   }

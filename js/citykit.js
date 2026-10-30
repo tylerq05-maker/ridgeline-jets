@@ -197,7 +197,7 @@
     "}"
   ].join("\n");
   function facadeMat(glass, P) {
-    const m = new THREE.MeshStandardMaterial({ roughness: glass ? 0.22 : 0.78, metalness: glass ? 0.55 : 0.06 });
+    const m = new THREE.MeshStandardMaterial({ roughness: glass ? 0.22 : 0.78, metalness: glass ? 0.55 : 0.06, envMapIntensity: glass ? 1.35 : 0.8 });
     m.extensions = { derivatives: true };
     m.onBeforeCompile = (sh) => {
       sh.uniforms.rjNight = NIGHT; sh.uniforms.rjWet = WET;

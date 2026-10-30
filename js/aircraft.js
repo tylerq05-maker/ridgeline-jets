@@ -965,6 +965,38 @@
     };
     return mat;
   }
+  function canopyGlass(c) {
+    const col = new THREE.Color(c), coated = col.r > col.b * 1.15;
+    return new THREE.MeshStandardMaterial({ color: c, roughness: 0.035, metalness: coated ? 0.45 : 0.12, transparent: true, opacity: coated ? 0.5 : 0.36, envMapIntensity: coated ? 1.35 : 1.2 });
+  }
+  /** Canopy detail on fighter bubbles: a dark sealant sill where the glass meets the fuselage, and the bow
+   * frame(s) of framed canopies (one-piece bubbles like the F-16 / F-22 / YF-23 stay frameless). */
+  const FRAMELESS = { f16: 1, f22: 1, yf23: 1 };
+  function canopyDetail(g, M, a) {
+    const ring = (rx, ry, cx, cy, cz, t0, t1, n, plane, r, mat) => {
+      const pts = [];
+      for (let i = 0; i <= n; i++) {
+        const t = t0 + (t1 - t0) * (i / n);
+        pts.push(plane === "xz" ? V3(cx + rx * Math.cos(t), cy, cz + ry * Math.sin(t)) : V3(cx + rx * Math.cos(t), cy + ry * Math.sin(t), cz));
+      }
+      const closed = Math.abs(t1 - t0 - Math.PI * 2) < 1e-3;
+      if (closed) pts.pop();
+      const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts, closed), n, r, 6, closed), mat);
+      g.add(m); return m;
+    };
+    for (const m of g.children.slice()) {
+      if (!m.isMesh || m.material !== M.glass || m.geometry.type !== "SphereGeometry") continue;
+      const s = m.scale, p = m.position;
+      if (s.x > 0.7 || s.z < 1.4 || p.y < 0.4) continue; // fighter-style bubble canopies only
+      ring(s.x * 1.01, s.z * 1.005, p.x, p.y + 0.02, p.z, 0, Math.PI * 2, 48, "xz", 0.03, M.dark);
+      if (FRAMELESS[a.build]) continue;
+      const bows = s.z > 2.4 ? [-0.32, 0.1] : [-0.3];
+      for (const f of bows) {
+        const k = Math.sqrt(1 - f * f) * 1.02;
+        ring(s.x * k, s.y * k, p.x, p.y, p.z + s.z * f, 0, Math.PI, 20, "xy", 0.045, M.trim);
+      }
+    }
+  }
   const std = (c, rough, metal, extra) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: rough, metalness: metal, side: THREE.DoubleSide }, extra || {}));
 
   /* ---------- moving control surfaces, derived from each wing and fin planform ---------- */
@@ -1040,7 +1072,7 @@
     const hist = a.cat === "historic";
     const suit = new THREE.MeshStandardMaterial({ color: hist ? 0x5b4a33 : 0x4f5a3a, roughness: 0.9, metalness: 0 });
     const helm = new THREE.MeshStandardMaterial({ color: hist ? 0x3b2f22 : 0xd9dcd6, roughness: 0.35, metalness: 0.1 });
-    const visor = new THREE.MeshStandardMaterial({ color: 0x15130f, roughness: 0.05, metalness: 0.9, envMapIntensity: 1.6 });
+    const visor = new THREE.MeshStandardMaterial({ color: 0x15130f, roughness: 0.08, metalness: 0.9, envMapIntensity: 1.2 });
     const seat = new THREE.MeshStandardMaterial({ color: 0x23262a, roughness: 0.7, metalness: 0.2 });
     const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(E.x + x, E.y + y, E.z + z); g.add(m); return m; };
     add(new THREE.SphereGeometry(0.135, 14, 10), helm, 0, 0.0, 0.07);
@@ -1086,7 +1118,7 @@
     const H = liner ? RJ.clamp(a.buildOpts.R * 0.75, 1.2, 2.8) : heavy ? RJ.clamp(d.height * 0.55, 2.2, 3.6) : RJ.clamp(d.height * 0.5, 1.1, 2.3);
     const wr = heavy ? 0.6 : 0.33;
     const leg = (x, z, h, r, nose, twin) => {
-      const grp = new THREE.Group(); grp.position.set(x, yb, z);
+      const grp = new THREE.Group(); grp.position.set(x, yb, z); grp.userData.rjGear = true;
       const strut = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.22, r * 0.28, h, 8), M.strut); strut.position.y = -h / 2; grp.add(strut);
       const wheelGeo = new THREE.CylinderGeometry(r, r, r * 0.65, 16); wheelGeo.rotateZ(Math.PI / 2);
       const offs = twin ? [-r * 0.55, r * 0.55] : [0];
@@ -1167,7 +1199,8 @@
     if (PJ && PJ.body != null) { body = PJ.body; trim = PJ.trim; }
     if (PJ && PJ.pattern) { body = PJ.c[0]; trim = PJ.c[1]; }
     const stealthy = a.stealth > 1.5;
-    const rB = PJ && PJ.rough != null ? PJ.rough : stealthy ? 0.72 : 0.46, mB = PJ && PJ.metal != null ? PJ.metal : stealthy ? 0.12 : 0.38;
+    // paint is a dielectric: low metalness; only bare-metal liveries (chrome, gold) go metallic
+    const rB = PJ && PJ.rough != null ? PJ.rough : stealthy ? 0.72 : 0.5, mB = PJ && PJ.metal != null ? PJ.metal : stealthy ? 0.1 : 0.18;
     // a design: one set of uniforms shared by the body, trim and faceted panels (dimensions filled in once built)
     const pat = PJ && PJ.pattern ? { rjPat: { value: PJ.pattern }, rjC1: { value: new THREE.Color(PJ.c[0]) }, rjC2: { value: new THREE.Color(PJ.c[1]) }, rjC3: { value: new THREE.Color(PJ.c[2]) }, rjDim: { value: new THREE.Vector2(-8, 16) } } : null;
     // wear and gloss by kind of airframe: airliners glossy and clean, warbirds and attack jets well used, stealth coatings smooth
@@ -1176,21 +1209,23 @@
       a.cat === "airliner" || a.cat === "civil" ? 0.55 : PJ && PJ.metal > 0.7 ? 0.3 : 0) } };
     const pm = (m) => { if (pat) m.userData.rjPat = pat; m.userData.rjAir = air; return panelize(m); };
     // reflections by finish: glossy airliner paint and bare metal mirror the sky, stealth coatings stay dull
-    const eB = stealthy ? 0.7 : a.cat === "airliner" || a.cat === "civil" ? 1.35 : 1.15;
+    const eB = stealthy ? 0.6 : a.cat === "airliner" || a.cat === "civil" ? 1.15 : 0.95;
     const M = {
       body: pm(std(body, rB, mB, { envMapIntensity: eB })),
-      trim: pm(std(trim, PJ && PJ.rough != null ? PJ.rough + 0.06 : stealthy ? 0.74 : 0.55, PJ && PJ.metal != null ? PJ.metal : stealthy ? 0.12 : 0.3, { envMapIntensity: eB * 0.95 })),
+      trim: pm(std(trim, PJ && PJ.rough != null ? PJ.rough + 0.06 : stealthy ? 0.74 : 0.55, PJ && PJ.metal != null ? PJ.metal : stealthy ? 0.1 : 0.16, { envMapIntensity: eB * 0.95 })),
       facet: pm(std(body, 0.62, 0.2, { flatShading: true })),
-      glass: new THREE.MeshStandardMaterial({ color: a.colors.glass, roughness: 0.04, metalness: 1.0, transparent: true, opacity: 0.6, envMapIntensity: 1.7 }),
+      // canopy: thin glass/acrylic. Gold-tinted (ITO-coated) stealth canopies keep some metallic sheen; clear ones are dielectric
+      glass: canopyGlass(a.colors.glass),
       dark: std(0x1c1e21, 0.82, 0.2),
-      metal: std(0x707176, 0.3, 0.9, { emissive: 0x000000, envMapIntensity: 1.45 }),
+      metal: std(0x707176, 0.34, 0.9, { emissive: 0x000000, envMapIntensity: 1.2 }),
       white: std(0xe8e8e4, 0.45, 0.08, { envMapIntensity: 1.1 }),
       accent: std(PJ && PJ.accent != null ? PJ.accent : a.colors.accent || trim, 0.45, 0.3),
       glow: new THREE.MeshBasicMaterial({ color: a.colors.accent || 0x3d7dff }),
       rubber: std(0x151515, 0.92, 0),
-      strut: std(0xb9bdc2, 0.32, 0.85, { envMapIntensity: 1.35 })
+      strut: std(0xb9bdc2, 0.36, 0.85, { envMapIntensity: 1.15 })
     };
     BUILDERS[a.build](g, M, a.buildOpts || {});
+    canopyDetail(g, M, a);
     addSurfaces(g, M, a);
     if (livery === "aggressor" || livery === "wingman") {
       // team marker: a colored band on the fins/tail for quick identification
@@ -1213,6 +1248,8 @@
     g.userData.materials = M;
     g.traverse((o) => { if (o.isMesh && o.material !== M.glass && o.material.blending !== THREE.AdditiveBlending) o.castShadow = true; });
     if (!RJ.noMerge) mergeStatic(g);
+    if (RJ.lighting && RJ.lighting.track) RJ.lighting.track(M);
+    if (RJ.models && RJ.models.has(id)) RJ.models.apply(g, id);
     return g;
   };
 

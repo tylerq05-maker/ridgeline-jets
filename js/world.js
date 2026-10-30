@@ -129,6 +129,7 @@
     initTerrainMaterials();
     initVegetation();
     initFar(); initSky(); initWater(); initClouds(); initRain(); initWaterfallMat();
+    if (RJ.lighting && RJ.lighting.envMap) W.setWaterEnv(RJ.lighting.envMap);
     initWorkers();
     W.setQuality(RJ.settings.quality);
     W.setEnvironment({ time: "golden", weather: "scattered" });
@@ -188,6 +189,7 @@
         .replace("#include <common>", "#include <common>\nvarying vec2 vShade; varying vec3 vWP; varying vec3 vWN; varying float vVD;\n" + GLSL_NOISE)
         .replace("#include <color_fragment>", [
           "#include <color_fragment>",
+          RJ.sat ? "diffuseColor.rgb = rjSat(diffuseColor.rgb, vWP.xz);" : "",
           "float rjFade = 1.0 - smoothstep(700.0, 3200.0, vVD);",
           // large-scale tonal variation so repeated slopes never read as copies
           "float rjMac = rjVN(vWP.xz * 0.0011) * 0.6 + rjVN(vWP.xz * 0.0042 + 3.1) * 0.4;",
@@ -227,16 +229,18 @@
       Object.assign(shader.uniforms, { rjGA: W.giant.a, rjGB: W.giant.b, rjGN: W.giant.n, rjGOn: W.giant.on, rjGSun: W.giant.sun });
       shader.fragmentShader = shader.fragmentShader.replace("#include <common>", "#include <common>\nuniform vec4 rjGA[6]; uniform vec4 rjGB[6]; uniform float rjGN; uniform float rjGOn; uniform vec3 rjGSun;");
       W.addCloudShadows(shader, "vWP");
+      if (RJ.sat) { RJ.sat.attach(shader.uniforms); shader.fragmentShader = shader.fragmentShader.replace("#include <common>", "#include <common>\n" + RJ.sat.GLSL); }
     };
     // Low quality: cheap Lambert with baked shading folded into the albedo
     W.terrainLam = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
     W.terrainLam.onBeforeCompile = (shader) => {
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec2 shade; varying vec2 vShade;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvShade = shade;");
+        .replace("#include <common>", "#include <common>\nattribute vec2 shade; varying vec2 vShade; varying vec3 vWP;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvShade = shade; vWP = (modelMatrix * vec4(transformed, 1.0)).xyz;");
       shader.fragmentShader = shader.fragmentShader
-        .replace("#include <common>", "#include <common>\nvarying vec2 vShade;")
-        .replace("#include <color_fragment>", "#include <color_fragment>\ndiffuseColor.rgb *= mix(0.5, 1.0, vShade.x) * mix(0.75, 1.0, vShade.y);");
+        .replace("#include <common>", "#include <common>\nvarying vec2 vShade; varying vec3 vWP;\n" + (RJ.sat ? RJ.sat.GLSL : ""))
+        .replace("#include <color_fragment>", "#include <color_fragment>\n" + (RJ.sat ? "diffuseColor.rgb = rjSat(diffuseColor.rgb, vWP.xz);\n" : "") + "diffuseColor.rgb *= mix(0.5, 1.0, vShade.x) * mix(0.75, 1.0, vShade.y);");
+      if (RJ.sat) RJ.sat.attach(shader.uniforms);
     };
   }
 
@@ -735,16 +739,17 @@
         sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunCol: { value: new THREE.Color(1, 1, 1) },
         skyAmb: { value: new THREE.Color(0.4, 0.5, 0.6) }, gndAmb: { value: new THREE.Color(0.2, 0.2, 0.2) },
         fogCol: { value: new THREE.Color(0.7, 0.8, 0.9) }, hole: { value: 10000 }
-      }, W.atmoUniforms()),
+      }, W.atmoUniforms(), RJ.sat ? RJ.sat.attach({}) : {}),
       vertexShader: "varying vec3 vC; varying vec3 vN; varying vec3 vW; " + W.GLSL_CURVE + " void main(){ vC = color; vN = normal; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vec4 mv = viewMatrix * w; mv.xyz = rjCurve(mv.xyz); gl_Position = projectionMatrix * mv; }",
       fragmentShader: [
         "uniform vec3 sunDir; uniform vec3 sunCol; uniform vec3 skyAmb; uniform vec3 gndAmb; uniform vec3 fogCol; uniform float hole;",
         "uniform vec3 fogSunDir; uniform vec3 fogSunCol; uniform vec4 fogParams;",
         "varying vec3 vC; varying vec3 vN; varying vec3 vW;",
+        RJ.sat ? RJ.sat.GLSL : "vec3 rjSat(vec3 b, vec2 p) { return b; }",
         "void main(){",
         "  if (length(vW.xz - cameraPosition.xz) < hole) discard;",
         "  vec3 n = normalize(vN);",
-        "  vec3 col = vC * (sunCol * max(dot(n, sunDir), 0.0) * 0.9 + mix(gndAmb, skyAmb, n.y * 0.5 + 0.5));",
+        "  vec3 col = rjSat(vC, vW.xz) * (sunCol * max(dot(n, sunDir), 0.0) * 0.9 + mix(gndAmb, skyAmb, n.y * 0.5 + 0.5));",
         "  vec3 D = vW - cameraPosition; float L = length(D); vec3 N = D / L;",
         "  float Hs = max(fogParams.y, 1.0); float e0 = exp(-max(cameraPosition.y, 0.0) / Hs), e1 = exp(-max(vW.y, 0.0) / Hs);",
         "  float K = abs(D.y) > 1.0 ? (e0 - e1) * Hs / D.y : e0;",
@@ -762,6 +767,7 @@
     // the ultra-far ring shares every uniform with the far ring except its own hole
     W.far2Mat = W.farMat.clone(); W.far2Mat.uniforms = Object.assign({}, W.farMat.uniforms, { hole: { value: 40000 } });
     W.farCam.layers.set(W.BACK);
+    if (RJ.sat) { RJ.sat.attach(W.far2Mat.uniforms); }
   }
   W.far2 = { mesh: null, center: null, pending: false, reqId: 0 };
   function applyFar(d) {
@@ -1226,7 +1232,7 @@
         skyTop: { value: new THREE.Color(0.3, 0.5, 0.9) }, skyHor: { value: new THREE.Color(0.7, 0.8, 0.9) },
         deep: { value: new THREE.Color(0.02, 0.1, 0.16) }, shallow: { value: new THREE.Color(0.1, 0.38, 0.4) },
         reflTex: { value: null }, texMatrix: { value: new THREE.Matrix4() }, useRefl: { value: 0 }, reflY: { value: 0 }, rain: { value: 0 }, sea: { value: 1 }
-      }]), W.atmoUniforms()),
+      }]), W.atmoUniforms(), { rjEnv: { value: null } }),
       vertexShader: [
         "attribute vec2 winfo; varying vec3 vW; varying vec2 vInfo; varying vec4 vRefl;", W.GLSL_CURVE,
         "uniform mat4 texMatrix;",
@@ -1241,6 +1247,18 @@
         "uniform sampler2D reflTex; uniform float useRefl; uniform float reflY; uniform float rain; uniform float sea;",
         "varying vec3 vW; varying vec2 vInfo; varying vec4 vRefl;",
         "#include <fog_pars_fragment>",
+        // optional HDRI from lighting.js (agent A): its cloud structure, re-lit by the live sky colour
+        "#ifdef RJ_ENV_UV",
+        "uniform sampler2D rjEnv;",
+        "vec4 envMapTexelToLinear(vec4 v) {",
+        "#ifdef RJ_ENV_RGBE",
+        "  return vec4(v.rgb * exp2(v.a * 255.0 - 128.0), 1.0);",
+        "#else",
+        "  return v;",
+        "#endif",
+        "}",
+        "#include <cube_uv_reflection_fragment>",
+        "#endif",
         // each wave octave fades out once its wavelength nears the pixel footprint (no moiré rings far away)
         "float rjFp = 0.0;",
         "vec2 wave(vec2 p, vec2 d, float k, float a, float s){ float ph = dot(p, d) * k + time * s; return d * (a * k * cos(ph)) * (1.0 - smoothstep(0.35, 1.2, k * rjFp)); }",
@@ -1269,6 +1287,12 @@
         "  float fres = 0.02 + 0.98 * pow(1.0 - max(dot(V, N), 0.0), 5.0);",
         "  vec3 R = reflect(-V, N); R.y = abs(R.y);",
         "  vec3 refl = skyCol(R);",
+        "#ifdef RJ_ENV_UV",
+        "  { float dl = smoothstep(0.04, 0.3, sunDir.y); if (dl > 0.0 && dist < 9000.0) {",
+        "    vec3 eR = R; vec3 e1 = textureCubeUV(rjEnv, eR, 0.08).rgb, e2 = textureCubeUV(rjEnv, eR, 0.9).rgb;",
+        "    float k = clamp(dot(e1, vec3(0.333)) / max(dot(e2, vec3(0.333)), 1e-3), 0.55, 1.6);",
+        "    refl = mix(refl, refl * k, dl * (1.0 - smoothstep(4000.0, 9000.0, dist))); } }",
+        "#endif",
         "  if (useRefl > 0.5 && abs(vW.y - reflY) < 1.6) { vec2 uv = vRefl.xy / vRefl.w + N.xz * 0.05 * att * mix(0.5, 1.0, vInfo.y); refl = mix(refl, texture2D(reflTex, uv).rgb, 0.9); }",
         "  float depth = vInfo.x;",
         "  vec3 body = mix(shallow, deep, smoothstep(0.0, 22.0, depth));",
@@ -1287,6 +1311,18 @@
       ].join("\n")
     });
   }
+
+  /** Use lighting.js's pre-filtered HDRI (PMREM, CubeUV) for cloud detail in water reflections, when it exists. */
+  W.setWaterEnv = function (env) {
+    const m = W.waterMat; if (!m) return;
+    const ok = !!(env && env.mapping === THREE.CubeUVReflectionMapping);
+    m.uniforms.rjEnv.value = ok ? env : null;
+    const d = m.defines || (m.defines = {}), had = !!d.RJ_ENV_UV;
+    if (ok) { d.RJ_ENV_UV = ""; d.ENVMAP_TYPE_CUBE_UV = ""; if (env.encoding === THREE.RGBEEncoding) d.RJ_ENV_RGBE = ""; else delete d.RJ_ENV_RGBE; }
+    else { delete d.RJ_ENV_UV; delete d.ENVMAP_TYPE_CUBE_UV; delete d.RJ_ENV_RGBE; }
+    if (had !== ok || ok) m.needsUpdate = true;
+  };
+  if (RJ.on) { RJ.on("envready", (e) => W.setWaterEnv(e)); RJ.on("envchange", (e) => W.setWaterEnv(e)); }
 
   /* ---------- planar reflection for sea-level water (High/Ultra) ---------- */
   function setupReflection() {
@@ -1657,6 +1693,7 @@
     W.skyMat.uniforms.time.value += dt;
     W.waterMat.uniforms.time.value += dt;
     W.fallMat.uniforms.time.value += dt;
+    if (RJ.sat) RJ.sat.update(dt, focus);
     const wx = W.wx();
     W.windOff.x += wx.wind * dt; W.windOff.y += wx.wind * 0.45 * dt;
     for (const m of [W.cloudMat, W.mistMat]) { m.uniforms.camPos.value.copy(cam.position); m.uniforms.wind.value.copy(W.windOff); }

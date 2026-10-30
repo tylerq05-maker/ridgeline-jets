@@ -473,6 +473,7 @@ body.is-touch #lever { top: 22%; }
 
 <!-- ============ MAIN MENU ============ -->
 <div class="screen scrim-left" id="scr-main" hidden>
+  <p class="map-credit" style="position:absolute;right:12px;bottom:8px;margin:0;max-width:60vw;font-size:10px;opacity:.6;text-align:right;pointer-events:auto">Satellite imagery: Sentinel-2 cloudless – <a href="https://s2maps.eu" target="_blank" rel="noopener" style="color:inherit">s2maps.eu</a> by EOX IT Services GmbH (contains modified Copernicus Sentinel data 2016), CC BY 4.0 · Sky: Poly Haven (CC0)</p>
   <div class="mainwrap">
     <div>
       <p class="eyebrow">Jet City Air Range · Flight operations</p>
@@ -827,12 +828,14 @@ body.is-touch #lever { top: 22%; }
 
 <div id="comp-status" hidden></div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="js/vendor/RGBELoader.js"></script>
 <script src="js/core.js"></script>
 <script src="js/noise.js"></script>
 <script src="js/terrain-gen.js"></script>
 <script src="js/dem-everest.js"></script>
 <script src="js/dem-sf.js"></script>
 <script src="js/world.js"></script>
+<script src="js/satellite.js"></script>
 <script src="js/castle.js"></script>
 <script src="js/atlas-plan.js"></script>
 <script src="js/carrier.js"></script>
@@ -858,6 +861,8 @@ body.is-touch #lever { top: 22%; }
 <script src="js/weather.js"></script>
 <script src="js/ships.js"></script>
 <script src="js/life.js"></script>
+<script src="js/lighting.js"></script>
+<script src="js/models.js"></script>
 <script src="js/aircraft.js"></script>
 <script src="js/vehicles.js"></script>
 <script src="js/fx.js"></script>
