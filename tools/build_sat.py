@@ -41,6 +41,7 @@ COAST = {
     "rio":     (-22.9030, -43.1735, 75),  # Praca XV, Guanabara Bay to the ENE
     "hk":      (22.2860, 114.1580, 0),    # Central waterfront, Victoria Harbour to the N
     "chicago": (41.8800, -87.6140, 90),   # Grant Park lakefront, Lake Michigan to the E
+    "tampa":   (27.9400, -82.4590, 180),  # downtown waterfront at the river mouth, Hillsborough Bay to the S
 }
 for cid, (la, lo, brg) in COAST.items():
     c = inland(la, lo, brg, 3000)

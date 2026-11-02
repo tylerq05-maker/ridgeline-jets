@@ -95,7 +95,7 @@
     drone: { name: "Drone Race", region: "forest", n: 20, step: 150, alt: [5, 12], clear: 4, turnCost: 3, weather: "clear", ringR: 7, aircraft: "racedrone" }
   };
   // city race routes (cities.js / citykit.js, nyc.js, sf.js): fixed gates through canyons, slaloms, under bridges
-  const CITY_RUNS = [["nyc", "New York Skyline Run"], ["sf", "San Francisco Bay Run"], ["tokyo", "Tokyo Neon Run"], ["dubai", "Dubai Supertall Run"], ["rio", "Rio Coastline Run"], ["hk", "Hong Kong Harbour Run"], ["chicago", "Chicago River Run"]];
+  const CITY_RUNS = [["nyc", "New York Skyline Run"], ["sf", "San Francisco Bay Run"], ["tokyo", "Tokyo Neon Run"], ["dubai", "Dubai Supertall Run"], ["rio", "Rio Coastline Run"], ["hk", "Hong Kong Harbour Run"], ["chicago", "Chicago River Run"], ["tampa", "Tampa Bay Run"]];
   for (const [id, name] of CITY_RUNS) M.COURSES["run_" + id] = { name, region: id, n: 0, ringR: id === "nyc" || id === "sf" ? 20 : 30, weather: "clear", points: () => M.cityRoute(id) };
   M.cityRoute = function (id) {
     let pts = id === "nyc" && RJ.nyc && RJ.nyc.route ? RJ.nyc.route() : id === "sf" && RJ.sf && RJ.sf.route ? RJ.sf.route() : RJ.cities ? RJ.cities.route(id) : null;
@@ -116,13 +116,14 @@
     { id: "run_rio", name: "Rio Coastline Run", desc: "Under the bridge to Niterói, down the city canyon and through the tower slalom." },
     { id: "run_hk", name: "Hong Kong Harbour Run", desc: "Under Tsing Ma, through Central's packed canyon, a tower slalom and up past ICC." },
     { id: "run_chicago", name: "Chicago River Run", desc: "Up the river under the bridges, through the Loop canyon and up the Willis Tower." },
+    { id: "run_tampa", name: "Tampa Bay Run", desc: "Down the Hillsborough River, through the downtown towers and under the Sunshine Skyway." },
     { id: "lowlevel", name: "Low-level challenge", desc: "3 minutes. Score time spent below 60 m above the ground." }
   ];
   M.REGIONS = [
     { id: "mountains", name: "Mountains" }, { id: "canyon", name: "Canyons" }, { id: "desert", name: "Desert" },
     { id: "ocean", name: "Ocean and islands" }, { id: "forest", name: "Forest valleys" }, { id: "clouds", name: "Above the clouds" },
     { id: "nyc", name: "New York City" }, { id: "sf", name: "San Francisco Bay" }, { id: "ye", name: "The Ye Monument" },
-    { id: "tokyo", name: "Tokyo" }, { id: "dubai", name: "Dubai" }, { id: "rio", name: "Rio de Janeiro" }, { id: "hk", name: "Hong Kong" }, { id: "chicago", name: "Chicago" }
+    { id: "tokyo", name: "Tokyo" }, { id: "dubai", name: "Dubai" }, { id: "rio", name: "Rio de Janeiro" }, { id: "hk", name: "Hong Kong" }, { id: "chicago", name: "Chicago" }, { id: "tampa", name: "Tampa" }
   ];
 
   /* ======================= FREE FLIGHT ======================= */

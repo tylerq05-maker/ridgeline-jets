@@ -15,7 +15,8 @@
     dubai: { name: "Dubai", sub: "Burj Khalifa, Burj Al Arab and the Palm", R: 3000, grid: 80, icon: "city", xp: 400 },
     rio: { name: "Rio de Janeiro", sub: "Sugarloaf, Corcovado and Christ the Redeemer", R: 2600, grid: 58, icon: "city", xp: 400 },
     hk: { name: "Hong Kong", sub: "Victoria Harbour, the Peak and a forest of towers", R: 2600, grid: 58, icon: "city", xp: 400 },
-    chicago: { name: "Chicago", sub: "Willis Tower, the river and the lakefront", R: 3000, grid: 100, icon: "city", xp: 400 }
+    chicago: { name: "Chicago", sub: "Willis Tower, the river and the lakefront", R: 3000, grid: 100, icon: "city", xp: 400 },
+    tampa: { name: "Tampa", sub: "Downtown on the Hillsborough River, Bayshore Boulevard and the Sunshine Skyway", R: 2600, grid: 90, icon: "city", xp: 400 }
   };
   CI.SPEC = SPEC;
   if (RJ.atlas && RJ.atlas.DEFS) for (const id in SPEC) if (!RJ.atlas.DEFS.some((d) => d.id === id)) RJ.atlas.DEFS.push({ id, name: SPEC[id].name, sub: SPEC[id].sub, icon: SPEC[id].icon, r: 6000, xp: SPEC[id].xp });
@@ -24,14 +25,14 @@
   CI.plan = function (gen, home, sites) {
     const zones = Object.values(gen.zones || {});
     const taken = sites.map((s) => [s.x, s.z, (s.r || s.len || 0) + 9000]);
-    for (const id of ["dubai", "rio", "tokyo", "hk", "chicago"]) {
+    for (const id of ["dubai", "rio", "tokyo", "hk", "chicago", "tampa"]) {
       let best = null;
       const mtn = id === "rio" || id === "hk";
-      for (let r = 34000; r <= (id === "dubai" || id === "hk" || id === "chicago" ? 150000 : 96000) && !(best && best.sc < 0.2); r += 2500) for (let k = 0; k < 40; k++) {
+      for (let r = 34000; r <= (id === "dubai" || id === "hk" || id === "chicago" || id === "tampa" ? 150000 : 96000) && !(best && best.sc < 0.2); r += 2500) for (let k = 0; k < 40; k++) {
         const a = (k / 40) * TAU + r * 1e-5, x = home.x + Math.cos(a) * r, z = home.z + Math.sin(a) * r;
         const f = gen.fields(x, z);
         if (f.land < 0.97 || f.h < 2 || f.h > 90 || f.him > 0 || f.nyc > 0 || f.sf > 0 || f.snowZ > 0 || f.ash > 0) continue;
-        if ((id === "tokyo" || id === "chicago") && f.dry > 0.5) continue;
+        if ((id === "tokyo" || id === "chicago" || id === "tampa") && f.dry > 0.5) continue;
         if (zones.some((zn) => Math.hypot(zn.x - x, zn.z - z) < zn.r + 6000) || taken.some(([sx, sz, sr]) => Math.hypot(sx - x, sz - z) < sr)) continue;
         // the sea must be 3–6.5 km away in some direction (the city sits on the coast, flattened core stays dry)
         let sea = null;
@@ -52,7 +53,7 @@
       best.px = -best.sz; best.pz = best.sx; // along the coast
       CI.sites[id] = best;
       taken.push([best.x, best.z, 30000]);
-      sites.push(best.siteRef = { type: "flat", kind: id, x: best.x, z: best.z, r: SPEC[id].R, fall: 700, elev: best.elev, urban: (STYLE[id] && STYLE[id].metro) || 0, plain: { chicago: 17000, tokyo: 15000, dubai: 16000 }[id] || 0, plainK: { chicago: 0.12, tokyo: 0.3, dubai: 0.22 }[id] });
+      sites.push(best.siteRef = { type: "flat", kind: id, x: best.x, z: best.z, r: SPEC[id].R, fall: 700, elev: best.elev, urban: (STYLE[id] && STYLE[id].metro) || 0, plain: { chicago: 17000, tokyo: 15000, dubai: 16000, tampa: 17000 }[id] || 0, plainK: { chicago: 0.12, tokyo: 0.3, dubai: 0.22, tampa: 0.08 }[id] });
     }
     CI.bounds(gen);
   };
@@ -240,6 +241,32 @@
         { s: -520, p: 230, w: 34, h: 179, form: "cyl", glass: false, st: 1 }
       ],
       pier: { p: 900, len: 1000, name: "Navy Pier" }
+    },
+    // Tampa: a compact, mid-height glass-and-stucco downtown on the Hillsborough River, Bayshore Boulevard's palm
+    // promenade along the bay, Port Tampa Bay to the east, the Westshore business district inland and a vast flat
+    // sprawl of low Florida houses; the Sunshine Skyway's yellow cable fans span the bay
+    tampa: {
+      P: { stone: [0xe8dcc4, 0xd9c8a8, 0xf0e6d6, 0xc9b79a, 0xe6d2b5, 0xf3efe6], glass: [0x3a5a6e, 0x4f7487, 0x2e4756, 0x6d93a6, 0x5d7f73], warm: 0xffe2b0, cool: 0xd8eef4, crown: 0xffffff, styles: [0, 3, 0, 1, 3, 0], gstyles: [2, 1, 6, 2], forms: ["box", "setback", "podium", "notch", "taper", "box", "ellipse"], crownP: 0.35, metal: 0xc4c8cc, roof: 0x8a8478, roof2: 0xb5653e, tank: 0x8a7a68 },
+      trees: { kind: "mix", cols: [0x3f7a2e, 0x4f8a36, 0x6a9a40] },
+      parks: [{ s: "coast", p: -1700, rs: 110, rp: 1100, name: "Bayshore Boulevard" }, { s: "coast", p: -250, rs: 150, rp: 220, name: "Curtis Hixon Waterfront Park" }],
+      highway: [[-2400, -4200, -2400, 4200]],
+      block: 90, street: 20, aveEvery: 2, outer: 6000, base: (d) => RJ.lerp(42, 8, RJ.smooth(400, 4500, d)),
+      metro: 16000, rail: { A: -1600, B: 1400 },
+      districts: [{ s: -4200, p: -6200, r: 1300, kind: "cbd", h: [50, 120] }, { s: 300, p: 4600, r: 2600, kind: "industrial" }, { s: -1500, p: 2400, r: 1300, kind: "residential" }, { s: -9000, p: 0, r: 5200, kind: "suburb" }, { s: -6000, p: 6500, r: 3000, kind: "suburb" }],
+      metroStyle: { house: [10, 14], houseH: [5, 8], perBlock: 6, res: [10, 24], resForms: ["box", "box", "slab"], green: 0.7 },
+      bumps: [{ s: -500, p: -250, r: 650, h: 120 }],
+      canyon: { s: -700, half: 1300, width: 140, h: [110, 170] }, slalom: { n: 5, gap: 340, off: 0.27, h: [120, 175], w: 30 },
+      neon: [],
+      river: { p: -600, from: 0, to: -4200, width: 110 },
+      heroes: [
+        { s: -520, p: -300, w: 52, h: 177, form: "notch", glass: false, crown: 1, name: "Bank of America Plaza" },
+        { s: -380, p: -60, w: 50, h: 176, form: "setback", glass: true, crown: 1, name: "100 North Tampa" },
+        { s: -620, p: 120, w: 48, h: 163, form: "box", glass: true, name: "One Tampa City Center" },
+        { s: -300, p: 240, w: 46, h: 161, form: "taper", glass: true, crown: 1, name: "SunTrust Financial Centre" },
+        { s: -760, p: -470, w: 42, h: 138, form: "cyl", glass: false, st: 1, name: "Rivergate Tower" },
+        { s: -200, p: 520, w: 34, h: 140, form: "box", glass: true, name: "Element" }
+      ],
+      bridge: { p: 2700, span: 1100, deck: 59, towerH: 131, color: 0xf2c230, island: 650, name: "Sunshine Skyway Bridge" }
     }
   };
   CI.STYLE = STYLE;
