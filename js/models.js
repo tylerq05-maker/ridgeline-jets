@@ -31,7 +31,13 @@
     return loaderP.then(() => new THREE.GLTFLoader());
   }
   function fetchModel(url) {
-    if (!cache[url]) cache[url] = loader().then((ld) => new Promise((res, rej) => ld.load(url, (gl) => res(gl.scene), undefined, rej)));
+    // hosts that can't serve .glb (the claude.ai artifact) get the same bytes as base64 text: url + ".b64.txt"
+    const viaText = (ld) => fetch(url + ".b64.txt").then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); }).then((t) => {
+      const bin = atob(t.trim()), u8 = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+      return new Promise((res, rej) => ld.parse(u8.buffer, url.replace(/[^/]*$/, ""), (gl) => res(gl.scene), rej));
+    });
+    if (!cache[url]) cache[url] = loader().then((ld) => new Promise((res, rej) => ld.load(url, (gl) => res(gl.scene), undefined, rej)).catch(() => viaText(ld)));
     return cache[url];
   }
 
