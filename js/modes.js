@@ -125,7 +125,7 @@
     { id: "mountains", name: "Mountains" }, { id: "canyon", name: "Canyons" }, { id: "desert", name: "Desert" },
     { id: "ocean", name: "Ocean and islands" }, { id: "forest", name: "Forest valleys" }, { id: "clouds", name: "Above the clouds" },
     { id: "nyc", name: "New York City" }, { id: "sf", name: "San Francisco Bay" }, { id: "ye", name: "The Ye Monument" },
-    { id: "tokyo", name: "Tokyo" }, { id: "dubai", name: "Dubai" }, { id: "rio", name: "Rio de Janeiro" }, { id: "hk", name: "Hong Kong" }, { id: "chicago", name: "Chicago" }, { id: "tampa", name: "Tampa" }
+    { id: "tokyo", name: "Tokyo" }, { id: "dubai", name: "Dubai" }, { id: "rio", name: "Rio de Janeiro" }, { id: "hk", name: "Hong Kong" }, { id: "chicago", name: "Chicago" }, { id: "tampa", name: "Tampa" }, { id: "leaf", name: "Hidden Leaf Village" }
   ];
 
   /* ======================= FREE FLIGHT ======================= */

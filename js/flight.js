@@ -276,7 +276,7 @@
         if (okLanding) this.touchdown(gnd);
         else this.destroy(null, gnd <= 0.5 ? "water" : "terrain");
       }
-      if (this.state === "flying" && (RJ.atlas && RJ.atlas.built ? RJ.atlas.solidAt(this.pos) : RJ.world.castle && RJ.castle.solidAt(this.pos))) this.destroy(null, "terrain");
+      if (this.state === "flying" && ((RJ.atlas && RJ.atlas.built ? RJ.atlas.solidAt(this.pos) : RJ.world.castle && RJ.castle.solidAt(this.pos)) || (RJ.village && RJ.village.solidAt(this.pos)))) this.destroy(null, "terrain");
       // very fast movers sweep through more than a building's width per step: test the midpoint too
       if (this.state === "flying" && this.speed * dt > 5) {
         const mx = this.pos.x - this.vel.x * dt * 0.5, my = this.pos.y - this.vel.y * dt * 0.5, mz = this.pos.z - this.vel.z * dt * 0.5;

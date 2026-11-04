@@ -39,9 +39,9 @@
     const viaText = (ld) => get(url + ".b64.txt").catch(() => parts(0, "")).then((t) => {
       const bin = atob(t.trim()), u8 = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
-      return new Promise((res, rej) => ld.parse(u8.buffer, url.replace(/[^/]*$/, ""), (gl) => res(gl.scene), rej));
+      return new Promise((res, rej) => ld.parse(u8.buffer, url.replace(/[^/]*$/, ""), (gl) => { gl.scene.animations = gl.animations || []; res(gl.scene); }, rej));
     });
-    if (!cache[url]) cache[url] = loader().then((ld) => new Promise((res, rej) => ld.load(url, (gl) => res(gl.scene), undefined, rej)).catch(() => viaText(ld)));
+    if (!cache[url]) cache[url] = loader().then((ld) => new Promise((res, rej) => ld.load(url, (gl) => { gl.scene.animations = gl.animations || []; res(gl.scene); }, undefined, rej)).catch(() => viaText(ld)));
     return cache[url];
   }
 
@@ -99,5 +99,7 @@
   Mo.register("x15", { url: SF + "x15.glb", rotY: -Math.PI / 2, credit: "North American X-15 Plane by cmoreau (CC BY 4.0)" });
   // the intro opens on the Blue Angels: start fetching their model with the page, not when the jets are built
   setTimeout(() => fetchModel(REG["fa18e:blueangels"].url).catch(() => {}), 0);
+  Mo.register("f16", { url: SF + "f16.glb", rotY: 0, credit: "F16-C Falcon by Carlos.Maciel (CC BY 4.0)" });
+  Mo.register("a10", { url: SF + "a10.glb", rotY: Math.PI, credit: "A10 Thunderbolt II by blarg (CC BY 4.0)" });
   Mo.register("f35a", { url: SF + "f35a.glb", rotY: Math.PI / 2, hide: /landingOn|spw\d|refuel/i, credit: "F-35 Lightning II by CloudHub (CC BY 4.0)" });
 })(window.RJ);

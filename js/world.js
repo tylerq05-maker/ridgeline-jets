@@ -589,6 +589,7 @@
     if (type === "nyc" && RJ.nyc) { const s = RJ.nyc.spawn(); return { x: s.x, z: s.z, yaw: s.yaw, alt: s.alt }; }
     if (type === "sf" && RJ.sf) return RJ.sf.spawn();
     if (type === "ye" && RJ.ye && RJ.ye.spawn()) return RJ.ye.spawn();
+    if (type === "leaf" && RJ.village && RJ.village.spawn()) return RJ.village.spawn();
     if (RJ.cities && RJ.cities.SPEC[type]) { const s = RJ.cities.spawn(type); if (s) { RJ.cities.ensure(type); return s; } }
     if (regionCache[type]) return regionCache[type];
     const test = REGION_TEST[type] || REGION_TEST.mountains;
@@ -1682,6 +1683,7 @@
   let envT = 0, mistT = 0, fallFxT = 0;
   const _ahead = new THREE.Vector3();
   W.update = function (dt, cam, focus, focusVel, focusAgl) {
+    if (RJ.village) RJ.village.update(cam);
     W.camera = cam;
     // very fast flight: stream terrain around a point ~3 s ahead so the world is ready before you arrive
     if (focusVel && focusVel.lengthSq() > 350 * 350) { _ahead.copy(focusVel).multiplyScalar(Math.min(4, 3500 / focusVel.length())).add(focus); W.updateChunks(_ahead, 6); }

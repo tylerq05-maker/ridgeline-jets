@@ -28,7 +28,13 @@ CC-BY license and a reachable download was found for the F-22, F-35, F-16, F/A-1
 - XB-70 — "North American XB-70 Valkyrie" by Muhamad Mirza Arrafi — https://sketchfab.com/3d-models/north-american-xb-70-valkyrie-d33aff9d58f8469cbd1073c60b19f152 — CC BY 4.0
 - B-52 — "Boeing B-52 Stratofortress" by hruschak30 — https://sketchfab.com/3d-models/boeing-b-52-stratofortress-44b4fdb01ef640c0ad7c5ba0f9ac30ca — CC BY 4.0
 - X-15 — "North American X-15 Plane" by cmoreau — https://sketchfab.com/3d-models/north-american-x-15-plane-bf491206ba844282949734b48b938c53 — CC BY 4.0
+- F-16C — "F16-C Falcon" by Carlos.Maciel — https://sketchfab.com/3d-models/f16-c-falcon-4bc2ff75dc584af2afd0aa6bd8b79015 — CC BY 4.0
+- A-10 — "A10 Thunderbolt II" by blarg — https://sketchfab.com/3d-models/a10-thunderbolt-ii-77f1687fbdf3413aad9557233bb23ade — CC BY 4.0
 
 ## Weapon models (CC BY-NC-SA 4.0 — non-commercial; adaptations under the same licence)
 - "Missile & Bomb Collection - Fighter Jets - Free" by bohmerang — https://sketchfab.com/3d-models/missile-bomb-collection-fighter-jets-free-d203b678424a43568703bf85ba680f47 — CC BY-NC-SA 4.0. Adapted: textures downscaled to <= 512 px (assets/weapons/pack.glb, same licence); split into separate weapons at runtime.
 - Fat Man — "Fat Man Bomb" by raphi14 — https://sketchfab.com/3d-models/fat-man-bomb-721603c94a5248db988e2396c65296ad — CC BY 4.0 (textures downscaled)
+
+## Landmarks
+- Hidden Leaf Village — "Naruto hiddenly village" by kyrox — https://sketchfab.com/3d-models/naruto-hiddenly-village-bd95c17d67c44756b4fa5097bce9a547 — CC BY 4.0 (fan art of the Naruto setting; texture recompressed)
+- Black dragon — "Black Dragon with Idle Animation" by 3DHaupt — https://sketchfab.com/3d-models/black-dragon-with-idle-animation-fb0053a2e59b43868e934c239bf4eb36 — CC BY-NC 4.0 (non-commercial; textures downscaled)
