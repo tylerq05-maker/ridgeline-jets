@@ -32,7 +32,10 @@
   }
   function fetchModel(url) {
     // hosts that can't serve .glb (the claude.ai artifact) get the same bytes as base64 text: url + ".b64.txt"
-    const viaText = (ld) => fetch(url + ".b64.txt").then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); }).then((t) => {
+    // big models come in numbered parts (url + ".b64.0.txt", ".b64.1.txt", …) to stay under the host's per-file limit
+    const get = (u) => fetch(u).then((r) => { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); });
+    const parts = (i, acc) => get(url + ".b64." + i + ".txt").then((t) => parts(i + 1, acc + t.trim()), (e) => { if (!i) throw e; return acc; });
+    const viaText = (ld) => get(url + ".b64.txt").catch(() => parts(0, "")).then((t) => {
       const bin = atob(t.trim()), u8 = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
       return new Promise((res, rej) => ld.parse(u8.buffer, url.replace(/[^/]*$/, ""), (gl) => res(gl.scene), rej));
@@ -87,5 +90,6 @@
   Mo.register("su57", { url: SF + "su57.glb", rotY: -Math.PI / 2, credit: "Sukhoi Su-57 Felon by andertan (CC BY 4.0)" });
   Mo.register("sr71", { url: SF + "sr71.glb", rotY: -0.9146, credit: "SR-71 by manilov.ap (CC BY 4.0)" });
   Mo.register("b2", { url: SF + "b2.glb", rotY: 0, credit: "Lowpoly B-2 Spirit bomber by SIpriv (CC BY 4.0)" });
+  Mo.register("f117", { url: SF + "f117.glb", rotY: Math.PI, credit: "F-117 Nighthawk with GBU-12 by Jeyhun1985 (CC BY 4.0)" });
   Mo.register("f35a", { url: SF + "f35a.glb", rotY: Math.PI / 2, hide: /landingOn|spw\d|refuel/i, credit: "F-35 Lightning II by CloudHub (CC BY 4.0)" });
 })(window.RJ);

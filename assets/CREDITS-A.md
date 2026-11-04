@@ -22,3 +22,4 @@ CC-BY license and a reachable download was found for the F-22, F-35, F-16, F/A-1
 - SR-71 — "Sr71" by manilov.ap — https://sketchfab.com/3d-models/sr71-908985d8ec544638bcd661bc315597ad — CC BY 4.0
 - B-2 Spirit — "Lowpoly B2 Spirit bomber" by SIpriv — https://sketchfab.com/3d-models/lowpoly-b2-spirit-bomber-2ab3be1422064393a70485ee26e84cbe — CC BY 4.0
 - F-35 — "F-35 Lightning II" by CloudHub — https://sketchfab.com/3d-models/f-35-lightning-ii-938c9a60d6894f9090a69e8ea5de2c3d — CC BY 4.0
+- F-117 Nighthawk — "F-117 Nighthawk with GBU-12" by Jeyhun1985 — https://sketchfab.com/3d-models/f-117-nighthawk-with-gbu-12-c9a2211f357d48bbb3d1cd0bc790e4c0 — CC BY 4.0
