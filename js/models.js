@@ -97,5 +97,7 @@
   Mo.register("xb70", { url: SF + "xb70.glb", rotY: 0, credit: "North American XB-70 Valkyrie by Muhamad Mirza Arrafi (CC BY 4.0)" });
   Mo.register("b52", { url: SF + "b52.glb", rotY: Math.PI, credit: "Boeing B-52 Stratofortress by hruschak30 (CC BY 4.0)" });
   Mo.register("x15", { url: SF + "x15.glb", rotY: -Math.PI / 2, credit: "North American X-15 Plane by cmoreau (CC BY 4.0)" });
+  // the intro opens on the Blue Angels: start fetching their model with the page, not when the jets are built
+  setTimeout(() => fetchModel(REG["fa18e:blueangels"].url).catch(() => {}), 0);
   Mo.register("f35a", { url: SF + "f35a.glb", rotY: Math.PI / 2, hide: /landingOn|spw\d|refuel/i, credit: "F-35 Lightning II by CloudHub (CC BY 4.0)" });
 })(window.RJ);
