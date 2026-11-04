@@ -1253,7 +1253,7 @@
     g.traverse((o) => { if (o.isMesh && o.material !== M.glass && o.material.blending !== THREE.AdditiveBlending) o.castShadow = true; });
     if (!RJ.noMerge) mergeStatic(g);
     if (RJ.lighting && RJ.lighting.track) RJ.lighting.track(M);
-    if (RJ.models && RJ.models.has(id)) RJ.models.apply(g, id);
+    if (RJ.models && RJ.models.has(id, livery)) RJ.models.apply(g, id, livery);
     if (RJ.weapons) RJ.weapons.mount(g, id);
     curBuild = null;
     return g;

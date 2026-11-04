@@ -23,6 +23,11 @@ CC-BY license and a reachable download was found for the F-22, F-35, F-16, F/A-1
 - B-2 Spirit — "Lowpoly B2 Spirit bomber" by SIpriv — https://sketchfab.com/3d-models/lowpoly-b2-spirit-bomber-2ab3be1422064393a70485ee26e84cbe — CC BY 4.0
 - F-35 — "F-35 Lightning II" by CloudHub — https://sketchfab.com/3d-models/f-35-lightning-ii-938c9a60d6894f9090a69e8ea5de2c3d — CC BY 4.0
 - F-117 Nighthawk — "F-117 Nighthawk with GBU-12" by Jeyhun1985 — https://sketchfab.com/3d-models/f-117-nighthawk-with-gbu-12-c9a2211f357d48bbb3d1cd0bc790e4c0 — CC BY 4.0
+- Blue Angels F/A-18 — "Blue Angels FA/18" by Aidan McTaggart — https://sketchfab.com/3d-models/blue-angels-fa18-af0fde87125844bb947322526a9611fe — CC BY 4.0
+- YF-23 — "YF-23 Black Jet Fighter" by Mymeria — https://sketchfab.com/3d-models/yf-23-black-jet-fighter-fc92d4ffd1d7455ebc4f4dcfd9bd7cc9 — CC BY 4.0
+- XB-70 — "North American XB-70 Valkyrie" by Muhamad Mirza Arrafi — https://sketchfab.com/3d-models/north-american-xb-70-valkyrie-d33aff9d58f8469cbd1073c60b19f152 — CC BY 4.0
+- B-52 — "Boeing B-52 Stratofortress" by hruschak30 — https://sketchfab.com/3d-models/boeing-b-52-stratofortress-44b4fdb01ef640c0ad7c5ba0f9ac30ca — CC BY 4.0
+- X-15 — "North American X-15 Plane" by cmoreau — https://sketchfab.com/3d-models/north-american-x-15-plane-bf491206ba844282949734b48b938c53 — CC BY 4.0
 
 ## Weapon models (CC BY-NC-SA 4.0 — non-commercial; adaptations under the same licence)
 - "Missile & Bomb Collection - Fighter Jets - Free" by bohmerang — https://sketchfab.com/3d-models/missile-bomb-collection-fighter-jets-free-d203b678424a43568703bf85ba680f47 — CC BY-NC-SA 4.0. Adapted: textures downscaled to <= 512 px (assets/weapons/pack.glb, same licence); split into separate weapons at runtime.

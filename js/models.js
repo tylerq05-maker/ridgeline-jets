@@ -17,7 +17,7 @@
   RJ.models = Mo;
 
   Mo.register = function (id, o) { REG[id] = Object.assign({ rotY: 0 }, o); };
-  Mo.has = (id) => !!REG[id];
+  Mo.has = (id, livery) => !!(REG[id + ":" + livery] || REG[id]);
   Mo.load = (url) => fetchModel(url); // shared .glb loading (weapons.js), with the base64 text fallback
 
   function loader() {
@@ -46,8 +46,8 @@
   }
 
   /** Called by RJ.buildAircraft after the procedural build. Never throws; the procedural model stays on failure. */
-  Mo.apply = function (g, id) {
-    const o = REG[id];
+  Mo.apply = function (g, id, livery) {
+    const o = REG[id + ":" + livery] || REG[id]; // a paint-specific model (e.g. "fa18e:blueangels") wins
     if (!o) return;
     fetchModel(o.url).then((src) => {
       if (g.userData.disposed) return;
@@ -57,7 +57,7 @@
       if (o.hide) { const re = o.hide, drop = []; skin.traverse((q) => { if (q !== skin && re.test(q.name || "")) drop.push(q); }); for (const q of drop) if (q.parent) q.parent.remove(q); }
       // the files' own exhaust plumes would double the game's afterburner flames
       if (o.hideMat) { const drop = []; skin.traverse((q) => { if (q.isMesh) { const ms = Array.isArray(q.material) ? q.material : [q.material]; if (ms.some((mt) => o.hideMat.test(mt.name || ""))) drop.push(q); } }); for (const q of drop) q.parent.remove(q); } // removed, so they don't stretch the fitted length
-      skin.rotation.y = o.rotY || 0;
+      if (o.quat) skin.quaternion.fromArray(o.quat); else skin.rotation.y = o.rotY || 0; // quat: files posed off-axis
       skin.updateMatrixWorld(true);
       // fit to the procedural airframe: same length, centred on its bounding box
       const bb = new THREE.Box3().setFromObject(skin), sz = bb.getSize(new THREE.Vector3());
@@ -92,5 +92,10 @@
   Mo.register("sr71", { url: SF + "sr71.glb", rotY: -0.9146, credit: "SR-71 by manilov.ap (CC BY 4.0)" });
   Mo.register("b2", { url: SF + "b2.glb", rotY: 0, credit: "Lowpoly B-2 Spirit bomber by SIpriv (CC BY 4.0)" });
   Mo.register("f117", { url: SF + "f117.glb", rotY: Math.PI, credit: "F-117 Nighthawk with GBU-12 by Jeyhun1985 (CC BY 4.0)" });
+  Mo.register("fa18e:blueangels", { url: SF + "fa18e_ba.glb", rotY: -Math.PI / 2, credit: "Blue Angels FA/18 by Aidan McTaggart (CC BY 4.0)" });
+  Mo.register("yf23", { url: SF + "yf23.glb", quat: [-0.4967, 0.1579, -0.0924, 0.8484], credit: "YF-23 Black Jet Fighter by Mymeria (CC BY 4.0)" });
+  Mo.register("xb70", { url: SF + "xb70.glb", rotY: 0, credit: "North American XB-70 Valkyrie by Muhamad Mirza Arrafi (CC BY 4.0)" });
+  Mo.register("b52", { url: SF + "b52.glb", rotY: Math.PI, credit: "Boeing B-52 Stratofortress by hruschak30 (CC BY 4.0)" });
+  Mo.register("x15", { url: SF + "x15.glb", rotY: -Math.PI / 2, credit: "North American X-15 Plane by cmoreau (CC BY 4.0)" });
   Mo.register("f35a", { url: SF + "f35a.glb", rotY: Math.PI / 2, hide: /landingOn|spw\d|refuel/i, credit: "F-35 Lightning II by CloudHub (CC BY 4.0)" });
 })(window.RJ);
