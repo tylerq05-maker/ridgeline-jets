@@ -43,6 +43,10 @@
       if (g.userData.disposed) return;
       const M = g.userData.materials || {}, d = g.userData.dims;
       const skin = src.clone(true);
+      // parts the file carries in alternative states (gear down, spare weapon rails) are left out
+      if (o.hide) { const re = o.hide, drop = []; skin.traverse((q) => { if (q !== skin && re.test(q.name || "")) drop.push(q); }); for (const q of drop) if (q.parent) q.parent.remove(q); }
+      // the files' own exhaust plumes would double the game's afterburner flames
+      if (o.hideMat) { const drop = []; skin.traverse((q) => { if (q.isMesh) { const ms = Array.isArray(q.material) ? q.material : [q.material]; if (ms.some((mt) => o.hideMat.test(mt.name || ""))) drop.push(q); } }); for (const q of drop) q.parent.remove(q); } // removed, so they don't stretch the fitted length
       skin.rotation.y = o.rotY || 0;
       skin.updateMatrixWorld(true);
       // fit to the procedural airframe: same length, centred on its bounding box
@@ -69,4 +73,13 @@
       g.userData.gltf = holder;
     }).catch((e) => console.warn("Aircraft model " + id + " unavailable; using the procedural airframe", e && e.message ? e.message : e));
   };
+
+  /* Airframes from Sketchfab, all CC BY 4.0 (credits in assets/CREDITS-A.md and on the main menu). Textures were
+     downscaled to <= 2048 px. rotY turns each file's nose onto -Z (measured from the meshes). */
+  const SF = "assets/aircraft/";
+  Mo.register("f22", { url: SF + "f22.glb", rotY: -Math.PI / 2, hideMat: /plume/i, credit: "Lockheed Martin F-22 Raptor by andertan (CC BY 4.0)" });
+  Mo.register("su57", { url: SF + "su57.glb", rotY: -Math.PI / 2, credit: "Sukhoi Su-57 Felon by andertan (CC BY 4.0)" });
+  Mo.register("sr71", { url: SF + "sr71.glb", rotY: -0.9146, credit: "SR-71 by manilov.ap (CC BY 4.0)" });
+  Mo.register("b2", { url: SF + "b2.glb", rotY: 0, credit: "Lowpoly B-2 Spirit bomber by SIpriv (CC BY 4.0)" });
+  Mo.register("f35a", { url: SF + "f35a.glb", rotY: Math.PI / 2, hide: /landingOn|spw\d|refuel/i, credit: "F-35 Lightning II by CloudHub (CC BY 4.0)" });
 })(window.RJ);
