@@ -473,7 +473,7 @@ body.is-touch #lever { top: 22%; }
 
 <!-- ============ MAIN MENU ============ -->
 <div class="screen scrim-left" id="scr-main" hidden>
-  <p class="map-credit" style="position:absolute;right:12px;bottom:8px;margin:0;max-width:60vw;font-size:10px;opacity:.6;text-align:right;pointer-events:auto">Satellite imagery: Sentinel-2 cloudless – <a href="https://s2maps.eu" target="_blank" rel="noopener" style="color:inherit">s2maps.eu</a> by EOX IT Services GmbH (contains modified Copernicus Sentinel data 2016), CC BY 4.0 · Sky: Poly Haven (CC0) · Aircraft models (CC BY 4.0, Sketchfab): F-22 &amp; Su-57 by andertan, F-35 by CloudHub, SR-71 by manilov.ap, B-2 by SIpriv, F-117 by Jeyhun1985</p>
+  <p class="map-credit" style="position:absolute;right:12px;bottom:8px;margin:0;max-width:60vw;font-size:10px;opacity:.6;text-align:right;pointer-events:auto">Satellite imagery: Sentinel-2 cloudless – <a href="https://s2maps.eu" target="_blank" rel="noopener" style="color:inherit">s2maps.eu</a> by EOX IT Services GmbH (contains modified Copernicus Sentinel data 2016), CC BY 4.0 · Sky: Poly Haven (CC0) · Aircraft models (CC BY 4.0, Sketchfab): F-22 &amp; Su-57 by andertan, F-35 by CloudHub, SR-71 by manilov.ap, B-2 by SIpriv, F-117 by Jeyhun1985 · Missile &amp; bomb models: bohmerang (CC BY-NC-SA 4.0)</p>
   <div class="mainwrap">
     <div>
       <p class="eyebrow">Jet City Air Range · Flight operations</p>
@@ -618,6 +618,10 @@ body.is-touch #lever { top: 22%; }
     <dl class="facts" id="hg-facts"></dl>
     <p class="eyebrow" style="margin:6px 0 4px">Paint</p>
     <div class="chips" id="hg-paint"></div>
+    <p class="eyebrow" style="margin:6px 0 4px" id="hg-wpn-t">Missiles</p>
+    <div class="chips" id="hg-wpn"></div>
+    <p class="eyebrow" style="margin:6px 0 4px" id="hg-bomb-t">Bombs</p>
+    <div class="chips" id="hg-bomb"></div>
     <div class="lockbox" id="hg-lock" hidden></div>
     <div class="row">
       <button class="btn" id="hg-select" style="font-size:18px">SELECT</button>
@@ -873,6 +877,7 @@ body.is-touch #lever { top: 22%; }
 <script src="js/maneuvers.js"></script>
 <script src="js/combat.js"></script>
 <script src="js/missilefx.js"></script>
+<script src="js/weapons.js"></script>
 <script src="js/x99.js"></script>
 <script src="js/airspace.js"></script>
 <script src="js/hud.js"></script>

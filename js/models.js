@@ -18,6 +18,7 @@
 
   Mo.register = function (id, o) { REG[id] = Object.assign({ rotY: 0 }, o); };
   Mo.has = (id) => !!REG[id];
+  Mo.load = (url) => fetchModel(url); // shared .glb loading (weapons.js), with the base64 text fallback
 
   function loader() {
     if (THREE.GLTFLoader) return Promise.resolve(new THREE.GLTFLoader());

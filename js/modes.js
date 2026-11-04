@@ -15,8 +15,10 @@
   const yawFromDir = (d) => Math.atan2(-d.x, -d.z);
 
   function makePlayer(id, pos, yaw, speed, ground) {
+    if (RJ.weapons) RJ.weapons.next(id); // hang the hangar-selected missiles on the player's jet
     const ac = new RJ.Aircraft(id, { team: "blue", player: true, assist: RJ.settings.assist, callsign: "You", livery: (RJ.settings.paint || {})[id] || null });
     ac.place(pos, yaw, speed, { ground: !!ground });
+    if (RJ.weapons) RJ.weapons.arm(ac);
     RJ.combat.add(ac);
     RJ.audio.setPlayerEngine(ac.spec);
     return ac;

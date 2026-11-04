@@ -340,6 +340,14 @@
     // paint jobs: saved per aircraft, applied to the hangar model and to your jet in every mode
     const paint = (RJ.settings.paint || {})[a.id] || "factory";
     $("hg-paint").innerHTML = Object.entries(RJ.PAINTS).filter(([, v]) => !v.hidden).map(([k, v]) => `<button class="chip" data-paint="${k}" aria-pressed="${k === paint}">${esc(v.name)}</button>`).join("");
+    // missile and bomb loadout (weapons.js): the selected model hangs on the stations and is what you fire
+    if (RJ.weapons) {
+      const ws = RJ.weapons.selection(a.id), chips = (kind, cur) => `<button class="chip" data-wpn="" data-kind="${kind}" aria-pressed="${!cur}">Standard</button>` +
+        RJ.weapons.LIST.filter((w) => w.kind === kind).map((w) => `<button class="chip" data-wpn="${w.id}" data-kind="${kind}" aria-pressed="${!!cur && cur.id === w.id}">${esc(w.name)}</button>`).join("");
+      const hasM = !!(a.msl && a.msl.n), hasB = !!a.bombs;
+      $("hg-wpn").innerHTML = hasM ? chips("m", ws.m) : ""; $("hg-wpn").hidden = $("hg-wpn-t").hidden = !hasM;
+      $("hg-bomb").innerHTML = hasB ? chips("b", ws.b) : ""; $("hg-bomb").hidden = $("hg-bomb-t").hidden = !hasB;
+    }
     $("hg-lock").hidden = un;
     if (!un) $("hg-lock").innerHTML = `<b>Locked for Dogfight.</b> ${esc(UI.unlockText(a))} You can still take it on a test flight in Free Flight.`;
     const sel = $("hg-select");
@@ -542,6 +550,12 @@
     hold("t-gun", "gun"); hold("t-ab", "ab"); hold("t-brk", "brake");
     const tap = (id, action) => $(id).addEventListener("pointerdown", (e) => { e.preventDefault(); RJ.input.touchEdges.add(action); });
     tap("t-msl", "missile"); tap("t-flr", "flares"); tap("t-tgt", "target"); tap("t-cam", "camera"); tap("t-gear", "gear");
+    for (const box of ["hg-wpn", "hg-bomb"]) $(box).addEventListener("click", (e) => {
+      const b = e.target.closest("[data-kind]"); if (!b || !RJ.weapons) return;
+      UI.click();
+      RJ.weapons.select(UI.hangar.sel, b.dataset.kind, b.dataset.wpn);
+      UI.renderHangar(); RJ.hangarView.setAircraft(UI.hangar.sel);
+    });
     $("hg-paint").addEventListener("click", (e) => {
       const b = e.target.closest("[data-paint]"); if (!b) return;
       UI.click();

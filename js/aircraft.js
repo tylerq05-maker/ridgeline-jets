@@ -199,7 +199,10 @@
     g.userData.flames.push({ flame, glow, mat, core, coreMat, halo, r, small: !!o.small, rocket: !!o.rocket, nozzle, lip });
     g.userData.nozzles.push(V3(x, y, z + r * 0.3));
   }
+  let curBuild = null; // aircraft id being built (weapons.js swaps the stock missiles on the player's jet)
   function missile(g, M, x, y, z, len = 3, r = 0.09) {
+    // the player's selected missile goes on this station instead (weapons.js): an empty, unmerged station group
+    if (RJ.weapons && RJ.weapons.buildingFor(curBuild)) { const st = new THREE.Group(); st.position.set(x, y, z); g.add(st); (g.userData.stores = g.userData.stores || []).push({ grp: st, len, r }); return; }
     tube(g, r, r, len, x, y, z, M.white);
     const nose = new THREE.Mesh(new THREE.ConeGeometry(r, r * 4, 8), M.white);
     nose.geometry.rotateX(-Math.PI / 2); nose.position.set(x, y, z - len / 2 - r * 2); g.add(nose);
@@ -1190,6 +1193,7 @@
     gold: { name: "Gold", body: 0xd4a640, trim: 0x8f6b22, accent: 0x111111, rough: 0.2, metal: 1.0 }
   };
   RJ.buildAircraft = function (id, livery) {
+    curBuild = id;
     const a = A[id];
     const g = new THREE.Group();
     g.userData = { flames: [], nozzles: [], stabs: [], sweep: [], props: [], droop: [], cockpit: V3(0, 1, -5), tips: [], _plates: [], _fins: [] };
@@ -1250,6 +1254,8 @@
     if (!RJ.noMerge) mergeStatic(g);
     if (RJ.lighting && RJ.lighting.track) RJ.lighting.track(M);
     if (RJ.models && RJ.models.has(id)) RJ.models.apply(g, id);
+    if (RJ.weapons) RJ.weapons.mount(g, id);
+    curBuild = null;
     return g;
   };
 

@@ -234,8 +234,9 @@
   C.launchMissile = function (ac, target) {
     const m = ac.spec.msl || {};
     if (!target) return false;
-    const MF = RJ.missileFx, type = MF ? MF.typeFor(ac) : null;
+    const MF = RJ.missileFx, wpn = MF && ac._wpn, type = MF ? (wpn ? wpn.fx : MF.typeFor(ac)) : null;
     const mesh = MF ? MF.mesh(type) : C.missileTpl.clone();
+    if (wpn) RJ.weapons.dress(mesh, wpn); // the hangar-selected missile model, with its own motor and trail
     RJ.scene.add(mesh);
     const side = (ac.missiles + (ac.stats ? ac.stats.msl : 0)) % 2 ? 1 : -1;
     const p = ac.pos.clone().addScaledVector(ac.right, side * Math.min(3, ac.vis.dims.span * 0.25)).addScaledVector(ac.up, -1.2);
@@ -254,6 +255,7 @@
       msl.speed = msl.vel.length();
     }
     C.missiles.push(msl);
+    if (wpn) RJ.weapons.sync(ac); // that station is empty now
     target.incoming.push(msl);
     RJ.emit("missile", { msl, by: ac });
     return true;
@@ -390,7 +392,7 @@
   C.dropBomb = function (ac) {
     if (!ac.alive || ac.bombs <= 0 || ac.bombCd > 0) return false;
     ac.bombs--; ac.bombCd = 0.3;
-    const mesh = C.bombTpl.clone(); RJ.scene.add(mesh);
+    const mesh = ac._bombW && RJ.weapons.ready ? RJ.weapons.bombMesh(ac._bombW) : C.bombTpl.clone(); RJ.scene.add(mesh);
     const side = ac.bombs % 2 ? 1 : -1;
     C.bombs.push({ p: ac.pos.clone().addScaledVector(ac.right, side * 2).addScaledVector(ac.up, -2), v: ac.vel.clone().addScaledVector(ac.up, -6), mesh, owner: ac, life: 40 });
     RJ.emit("bomb", ac);

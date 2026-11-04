@@ -340,6 +340,7 @@
   HV.setAircraft = function (id) {
     if (HV.model) { HV.scene.remove(HV.model); HV.model.traverse((o) => { if (o.geometry && o.geometry.type !== "ConeGeometry") o.geometry.dispose(); }); }
     HV.id = id;
+    if (RJ.weapons) RJ.weapons.next(id);
     HV.model = RJ.buildAircraft(id, (RJ.settings.paint || {})[id] || null);
     if (RJ.lighting) RJ.lighting.untrack(HV.model.userData.materials); // the showroom keeps its studio environment
     const d = HV.model.userData.dims;
