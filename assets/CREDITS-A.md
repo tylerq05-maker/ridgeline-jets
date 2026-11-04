@@ -31,3 +31,4 @@ CC-BY license and a reachable download was found for the F-22, F-35, F-16, F/A-1
 
 ## Weapon models (CC BY-NC-SA 4.0 — non-commercial; adaptations under the same licence)
 - "Missile & Bomb Collection - Fighter Jets - Free" by bohmerang — https://sketchfab.com/3d-models/missile-bomb-collection-fighter-jets-free-d203b678424a43568703bf85ba680f47 — CC BY-NC-SA 4.0. Adapted: textures downscaled to <= 512 px (assets/weapons/pack.glb, same licence); split into separate weapons at runtime.
+- Fat Man — "Fat Man Bomb" by raphi14 — https://sketchfab.com/3d-models/fat-man-bomb-721603c94a5248db988e2396c65296ad — CC BY 4.0 (textures downscaled)

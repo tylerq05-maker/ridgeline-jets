@@ -26,9 +26,11 @@
     ["jdam", "JDAM", "GBU-31 JDAM", "b", null, { len: 3.9 }],
     ["jdam2", "JDAM (2)", "GBU-38 JDAM", "b", null, { len: 2.4 }],
     ["gbu12", "GBU-12 Paveway II", "GBU-12 Paveway II", "b", null, { len: 3.3 }],
-    ["kab500", "KAB-500L", "KAB-500L", "b", null, { len: 3.05 }]
+    ["kab500", "KAB-500L", "KAB-500L", "b", null, { len: 3.05 }],
+    // its own file: "Fat Man Bomb" by raphi14 (CC BY 4.0); airbursts as an atomic explosion (nuke.js)
+    ["fatman", null, "Fat Man (atomic)", "b", null, { len: 3.25, nuke: true }, "assets/weapons/fatman.glb"]
   ];
-  W.LIST = LIST.map(([id, node, name, kind, base, o]) => ({ id, node, name, kind, base, o, fx: base ? "w_" + id : null, len: o.len }));
+  W.LIST = LIST.map(([id, node, name, kind, base, o, url]) => ({ id, node, name, kind, base, o, url, nuke: !!o.nuke, fx: base ? "w_" + id : null, len: o.len }));
   W.byId = (id) => W.LIST.find((w) => w.id === id) || null;
 
   // effects profiles: copies of the stock missile types with this weapon's own motor, trail and warhead
@@ -86,6 +88,9 @@
     }).catch((e) => { console.warn("Weapon models unavailable; stock missiles stay", e && e.message ? e.message : e); return TPL; });
     return loading;
   };
+  /** A weapon in a file of its own (not the pack): loaded only when it's equipped. */
+  const own = {};
+  W.loadOwn = (w) => own[w.id] || (own[w.id] = RJ.models.load(w.url).then((scene) => { TPL[w.id] = template(scene); W.ready = true; }).catch((e) => console.warn("Weapon model " + w.id + " unavailable", e && e.message)));
   /** A model of weapon w, `len` metres long, nose -Z. */
   W.model = (w, len) => { const t = TPL[w.id]; if (!t) return null; const m = t.clone(true); m.scale.setScalar(len || w.len); return m; };
 
@@ -109,7 +114,8 @@
     const s = W.selection(ac.spec.id);
     ac._wpn = s.m && ac.mesh.userData.wpn ? s.m : null;
     ac._bombW = s.b && ac.bombs > 0 ? s.b : null;
-    if (ac._wpn || ac._bombW) W.load();
+    if (ac._wpn || (ac._bombW && !ac._bombW.url)) W.load();
+    if (ac._bombW && ac._bombW.url) W.loadOwn(ac._bombW);
   };
   /** Empty stations as missiles leave the rails. */
   W.sync = function (ac) {

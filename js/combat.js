@@ -38,6 +38,7 @@
   };
 
   C.reset = function () {
+    if (RJ.nuke) RJ.nuke.reset();
     C.aircraft.forEach((a) => a.dispose());
     C.aircraft = [];
     C.missiles.forEach((m) => RJ.scene.remove(m.mesh)); C.missiles = [];
@@ -392,9 +393,9 @@
   C.dropBomb = function (ac) {
     if (!ac.alive || ac.bombs <= 0 || ac.bombCd > 0) return false;
     ac.bombs--; ac.bombCd = 0.3;
-    const mesh = ac._bombW && RJ.weapons.ready ? RJ.weapons.bombMesh(ac._bombW) : C.bombTpl.clone(); RJ.scene.add(mesh);
+    const mesh = ac._bombW && RJ.weapons.model(ac._bombW) ? RJ.weapons.bombMesh(ac._bombW) : C.bombTpl.clone(); RJ.scene.add(mesh);
     const side = ac.bombs % 2 ? 1 : -1;
-    C.bombs.push({ p: ac.pos.clone().addScaledVector(ac.right, side * 2).addScaledVector(ac.up, -2), v: ac.vel.clone().addScaledVector(ac.up, -6), mesh, owner: ac, life: 40 });
+    C.bombs.push({ p: ac.pos.clone().addScaledVector(ac.right, side * 2).addScaledVector(ac.up, -2), v: ac.vel.clone().addScaledVector(ac.up, -6), mesh, owner: ac, life: 40, nuke: !!(ac._bombW && ac._bombW.nuke) });
     RJ.emit("bomb", ac);
     return true;
   };
@@ -407,6 +408,8 @@
       b.mesh.position.copy(b.p);
       b.mesh.quaternion.setFromUnitVectors(Z, tv.copy(b.v).normalize().negate());
       const gnd = RJ.world.ground(b.p.x, b.p.z);
+      // atomic bomb: airburst about 500 m above the ground (or on impact if dropped lower)
+      if (b.nuke && RJ.nuke && (b.p.y < gnd + 500 && b.v.y < 0 || b.life <= 0)) { RJ.nuke.detonate(b.p, b.owner); RJ.scene.remove(b.mesh); C.bombs.splice(i, 1); continue; }
       if (b.p.y < gnd + 1 || b.life <= 0) {
         b.p.y = Math.max(b.p.y, gnd);
         RJ.fx.explosion(b.p, 2.2, null);
@@ -993,6 +996,7 @@
 
   /* ======================= PER-FRAME ======================= */
   C.update = function (dt0) {
+    if (RJ.nuke) RJ.nuke.update(dt0);
     C.crowd = C.aircraft.length > 16 || !!C.forceCrowd; // big battles (and Free Flight traffic) switch on the crowd optimisations (LOD, staggered updates)
     for (const ac of C.aircraft) {
       let dt = dt0;

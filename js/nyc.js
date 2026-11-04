@@ -483,19 +483,21 @@
   function facadeMaterial() {
     const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, metalness: 0.0, envMapIntensity: 1.0 });
     m.extensions = { derivatives: true };
-    m.userData.u = { uNight: { value: 0 }, uTime: { value: 0 }, uWet: RJ.cityKit ? RJ.cityKit.WET : { value: 0 }, uProbe: { value: null }, uProbeK: { value: 0 } };
+    m.userData.u = { uNight: { value: 0 }, uTime: { value: 0 }, uWet: RJ.cityKit ? RJ.cityKit.WET : { value: 0 }, uProbe: { value: null }, uProbeK: { value: 0 }, uBlast: RJ.blastU || (RJ.blastU = { value: new THREE.Vector4(0, 0, 0, 0) }) };
     m.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, m.userData.u);
       sh.vertexShader = sh.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec4 aF; attribute vec2 aB; varying vec4 vF; varying vec2 vB; varying vec3 vWP; varying vec3 vWN;")
+        .replace("#include <common>", "#include <common>\nattribute vec4 aF; attribute vec2 aB; varying vec4 vF; varying vec2 vB; varying vec3 vWP; varying vec3 vWN; uniform vec4 uBlast; varying float vBurn;")
+        // atomic blast (nuke.js): blocks inside the passing shock front collapse to rubble and burn
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvBurn = 0.0; if (uBlast.w > 0.0) { vec3 bw = (modelMatrix * vec4(transformed, 1.0)).xyz; float bd = distance(bw.xz, uBlast.xy); vBurn = step(bd, uBlast.z) * (1.0 - smoothstep(uBlast.w * 0.55, uBlast.w, bd)); float hh = fract(sin(dot(floor(bw.xz / 9.0), vec2(12.99, 78.23))) * 43758.5); transformed.y = mix(transformed.y, 4.0 + max(transformed.y - 4.0, 0.0) * (0.04 + 0.22 * hh), vBurn * step(4.5, transformed.y)); }")
         .replace("#include <project_vertex>", "#include <project_vertex>\nvF = aF; vB = aB; vWP = (modelMatrix * vec4(transformed, 1.0)).xyz; vWN = normalize(mat3(modelMatrix) * objectNormal);");
       sh.fragmentShader = sh.fragmentShader
-        .replace("#include <common>", "#include <common>\n" + FACADE_GLSL)
-        .replace("#include <color_fragment>", "#include <color_fragment>\nrjFacade(); diffuseColor.rgb = fCol;")
+        .replace("#include <common>", "#include <common>\nvarying float vBurn;\n" + FACADE_GLSL)
+        .replace("#include <color_fragment>", "#include <color_fragment>\nrjFacade(); diffuseColor.rgb = mix(fCol, vec3(0.05, 0.045, 0.04), vBurn * 0.9);")
         .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = clamp(fRough * (1.0 - 0.45 * uWet), 0.04, 1.0); diffuseColor.rgb *= 1.0 - 0.18 * uWet * (1.0 - fGlass);")
         .replace("#include <metalnessmap_fragment>", "#include <metalnessmap_fragment>\nmetalnessFactor = fMetal;")
         .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\nnormal = normalize(normal + (viewMatrix * vec4(fNW, 0.0)).xyz);")
-        .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance += fEmis;")
+        .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance += fEmis * (1.0 - vBurn) + vec3(1.0, 0.32, 0.08) * vBurn * 2.5 * step(0.9, fract(sin(dot(floor(vWP.xz / 5.0) + floor(vWP.y / 7.0), vec2(12.9, 78.2))) * 43758.5));")
         // glass mirrors the real surroundings from the city probe (Fresnel-weighted, darker at normal incidence)
         .replace("#include <output_fragment>", [
           "if (uProbeK > 0.5 && fGlass > 0.01) {",
