@@ -12,7 +12,7 @@
  * Everything degrades gracefully: if the loader or file is missing, the game keeps its procedural lighting. */
 (function (RJ) {
   "use strict";
-  const HDR_URL = "assets/env/kloofendal_48d_partly_cloudy_puresky_1k.hdr";
+  const HDR_URL = "assets/tex/sky_clear_1k.hdr" // Poly Haven "Kloppenheim 05" (CC0), downscaled from 4K;
   const L = { envMap: null, ready: false, failed: false, sunAz: 0, skyLum: 1, active: false, cinematic: true, gain: 0.5 }; // gain: HDRI sky brightness relative to world.js sky fill (tuned by eye)
   RJ.lighting = L;
 

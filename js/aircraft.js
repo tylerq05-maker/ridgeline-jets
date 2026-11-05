@@ -1228,6 +1228,8 @@
       rubber: std(0x151515, 0.92, 0),
       strut: std(0xb9bdc2, 0.36, 0.85, { envMapIntensity: 1.15 })
     };
+    // photo-scanned panel plating on the skin and heat-scaled metal on the nozzles (textures.js)
+    if (RJ.tex) { for (const k of ["body", "trim"]) RJ.tex.detail(M[k], "metal", { space: "object", scale: 1.4, albedo: 0.22, normal: 0.45, rough: 1 }); RJ.tex.detail(M.metal, "rust", { space: "object", scale: 0.9, albedo: 0.4, normal: 0.6 }); }
     BUILDERS[a.build](g, M, a.buildOpts || {});
     canopyDetail(g, M, a);
     addSurfaces(g, M, a);

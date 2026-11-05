@@ -230,6 +230,7 @@
       shader.fragmentShader = shader.fragmentShader.replace("#include <common>", "#include <common>\nuniform vec4 rjGA[6]; uniform vec4 rjGB[6]; uniform float rjGN; uniform float rjGOn; uniform vec3 rjGSun;");
       W.addCloudShadows(shader, "vWP");
       if (RJ.sat) { RJ.sat.attach(shader.uniforms); shader.fragmentShader = shader.fragmentShader.replace("#include <common>", "#include <common>\n" + RJ.sat.GLSL); }
+      if (RJ.tex) RJ.tex.terrain(shader); // photo-scanned grass / rock / snow / sand detail (textures.js)
     };
     // Low quality: cheap Lambert with baked shading folded into the albedo
     W.terrainLam = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
@@ -675,9 +676,10 @@
     const L = ab.len;
     const mat = (c, r = 0.9, m = 0) => new THREE.MeshStandardMaterial({ color: c, roughness: r, metalness: m });
     const flat = (w, l, x, z, y, m) => { const p = new THREE.Mesh(new THREE.PlaneGeometry(w, l), m); p.rotation.x = -Math.PI / 2; p.position.set(x, y, z); p.receiveShadow = true; grp.add(p); return p; };
-    flat(90, L + 300, 0, 0, 0.15, mat(0x5f6258, 1));
-    flat(46, L, 0, 0, 0.35, new THREE.MeshStandardMaterial({ map: runwayTexture(), roughness: 0.85 }));
-    const tarmac = mat(0x3c3f40, 0.92);
+    const tx = (m, k, s) => (RJ.tex ? RJ.tex.detail(m, k, { scale: s, albedo: 0.55, normal: 0.6 }) : m); // real concrete / asphalt grain
+    flat(90, L + 300, 0, 0, 0.15, tx(mat(0x5f6258, 1), "concrete", 6));
+    flat(46, L, 0, 0, 0.35, tx(new THREE.MeshStandardMaterial({ map: runwayTexture(), roughness: 0.85 }), "concrete", 7));
+    const tarmac = tx(mat(0x3c3f40, 0.92), "asphalt", 9);
     flat(24, L * 0.8, 160, 0, 0.3, tarmac);
     for (const z of [-L * 0.38, 0, L * 0.38]) flat(140, 22, 80, z, 0.28, tarmac);
     flat(220, 520, 330, 0, 0.26, mat(0x4a4d4e, 0.9));

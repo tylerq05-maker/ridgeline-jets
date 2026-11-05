@@ -38,3 +38,7 @@ CC-BY license and a reachable download was found for the F-22, F-35, F-16, F/A-1
 ## Landmarks
 - Hidden Leaf Village — "Naruto hiddenly village" by kyrox — https://sketchfab.com/3d-models/naruto-hiddenly-village-bd95c17d67c44756b4fa5097bce9a547 — CC BY 4.0 (fan art of the Naruto setting; texture recompressed)
 - Black dragon — "Black Dragon with Idle Animation" by 3DHaupt — https://sketchfab.com/3d-models/black-dragon-with-idle-animation-fb0053a2e59b43868e934c239bf4eb36 — CC BY-NC 4.0 (non-commercial; textures downscaled)
+
+## Surface textures and sky (Poly Haven, CC0 — no attribution required)
+- aerial_grass_rock, aerial_rocks_02, snow_02, aerial_beach_01, concrete_floor_02, aerial_asphalt_01, metal_plate_02, rusty_metal_sheet — https://polyhaven.com (CC0), downscaled to 1K in assets/tex/
+- Kloppenheim 05 HDRI — https://polyhaven.com/a/kloppenheim_05 (CC0), downscaled to 1K (assets/tex/sky_clear_1k.hdr)
