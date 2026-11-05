@@ -20,6 +20,31 @@
   Mo.has = (id, livery) => !!(REG[id + ":" + livery] || REG[id]);
   Mo.load = (url) => fetchModel(url); // shared .glb loading (weapons.js), with the base64 text fallback
 
+  let skelP = null;
+  const skel = () => THREE.SkeletonUtils ? Promise.resolve() : (skelP = skelP || new Promise((res, rej) => { const s = document.createElement("script"); s.src = "js/vendor/SkeletonUtils.js"; s.onload = res; s.onerror = rej; document.head.appendChild(s); }));
+  const isRigged = (o) => { let r = false; o.traverse((q) => { if (q.isSkinnedMesh) r = true; }); return r; };
+  const _v = new THREE.Vector3();
+  /** World-space sample points of a model, posed by its skeleton where it has one (rigged files' raw vertices are not to scale). */
+  function points(o, max = 6000) {
+    o.updateMatrixWorld(true); const out = [];
+    o.traverse((m) => {
+      if (!m.isMesh) return;
+      const P = m.geometry.attributes.position, step = Math.max(1, Math.floor(P.count / 1500));
+      for (let i = 0; i < P.count && out.length < max; i += step) { _v.fromBufferAttribute(P, i); if (m.isSkinnedMesh) m.boneTransform(i, _v); out.push(_v.clone().applyMatrix4(m.matrixWorld)); }
+    });
+    return out;
+  }
+  /** Yaw that turns the nose to -Z: the longest horizontal axis is the fuselage, and the nose is its narrower end. */
+  function autoYaw(pts) {
+    let mx = 0, mz = 0; for (const p of pts) { mx += p.x; mz += p.z; } mx /= pts.length; mz /= pts.length;
+    let a = 0, b = 0, c = 0; for (const p of pts) { const x = p.x - mx, z = p.z - mz; a += x * x; b += x * z; c += z * z; }
+    const th = 0.5 * Math.atan2(2 * b, a - c), dx = Math.cos(th), dz = Math.sin(th);
+    let lo = Infinity, hi = -Infinity; for (const p of pts) { const t = (p.x - mx) * dx + (p.z - mz) * dz; lo = Math.min(lo, t); hi = Math.max(hi, t); }
+    const span = (sel) => { let m = 0; for (const p of pts) { const t = ((p.x - mx) * dx + (p.z - mz) * dz - lo) / (hi - lo); if (sel(t)) m = Math.max(m, Math.abs(-(p.x - mx) * dz + (p.z - mz) * dx)); } return m; };
+    const s = span((t) => t < 0.15) < span((t) => t > 0.85) ? -1 : 1;
+    const nx = dx * s, nz = dz * s; // three.js yaw θ maps (x, z) to (x cosθ + z sinθ, -x sinθ + z cosθ); want (0, -1)
+    return Math.atan2(nx, -nz);
+  }
   function loader() {
     if (THREE.GLTFLoader) return Promise.resolve(new THREE.GLTFLoader());
     if (!loaderP) loaderP = new Promise((res, rej) => {
@@ -49,18 +74,18 @@
   Mo.apply = function (g, id, livery) {
     const o = REG[id + ":" + livery] || REG[id]; // a paint-specific model (e.g. "fa18e:blueangels") wins
     if (!o) return;
-    fetchModel(o.url).then((src) => {
+    fetchModel(o.url).then((src) => (isRigged(src) ? skel().then(() => src) : src)).then((src) => {
       if (g.userData.disposed) return;
       const M = g.userData.materials || {}, d = g.userData.dims;
-      const skin = src.clone(true);
+      const skin = isRigged(src) ? THREE.SkeletonUtils.clone(src) : src.clone(true);
       // parts the file carries in alternative states (gear down, spare weapon rails) are left out
       if (o.hide) { const re = o.hide, drop = []; skin.traverse((q) => { if (q !== skin && re.test(q.name || "")) drop.push(q); }); for (const q of drop) if (q.parent) q.parent.remove(q); }
       // the files' own exhaust plumes would double the game's afterburner flames
       if (o.hideMat) { const drop = []; skin.traverse((q) => { if (q.isMesh) { const ms = Array.isArray(q.material) ? q.material : [q.material]; if (ms.some((mt) => o.hideMat.test(mt.name || ""))) drop.push(q); } }); for (const q of drop) q.parent.remove(q); } // removed, so they don't stretch the fitted length
-      if (o.quat) skin.quaternion.fromArray(o.quat); else skin.rotation.y = o.rotY || 0; // quat: files posed off-axis
+      if (o.quat) skin.quaternion.fromArray(o.quat); else skin.rotation.y = o.auto ? autoYaw(points(skin)) : o.rotY || 0; // quat: files posed off-axis
       skin.updateMatrixWorld(true);
       // fit to the procedural airframe: same length, centred on its bounding box
-      const bb = new THREE.Box3().setFromObject(skin), sz = bb.getSize(new THREE.Vector3());
+      const bb = isRigged(skin) ? new THREE.Box3().setFromPoints(points(skin)) : new THREE.Box3().setFromObject(skin), sz = bb.getSize(new THREE.Vector3());
       const s = d.len / Math.max(1e-3, sz.z);
       const holder = new THREE.Group();
       holder.add(skin);
@@ -101,5 +126,9 @@
   setTimeout(() => fetchModel(REG["fa18e:blueangels"].url).catch(() => {}), 0);
   Mo.register("f16", { url: SF + "f16.glb", rotY: 0, credit: "F16-C Falcon by Carlos.Maciel (CC BY 4.0)" });
   Mo.register("a10", { url: SF + "a10.glb", rotY: Math.PI, credit: "A10 Thunderbolt II by blarg (CC BY 4.0)" });
+  Mo.register("fa18e", { url: SF + "fa18e.glb", rotY: -1.0751, credit: "US Navy F/A-18E Super Hornet by johnnokomis (CC BY 4.0)" });
+  Mo.register("f14", { url: SF + "f14.glb", rotY: Math.PI, credit: "F-14 TOMCAT by Ryan.Qin (CC BY 4.0)" });
+  Mo.register("f15c", { url: SF + "f15c.glb", auto: true, credit: "F 15C Desert by Uxman (CC BY 4.0)" });
+  Mo.register("a380", { url: SF + "a380.glb", rotY: Math.PI, credit: "Airbus A380 - 841 Lufthansa 100th Year by Nobilis 2 (CC BY 4.0)" });
   Mo.register("f35a", { url: SF + "f35a.glb", rotY: Math.PI / 2, hide: /landingOn|spw\d|refuel/i, credit: "F-35 Lightning II by CloudHub (CC BY 4.0)" });
 })(window.RJ);

@@ -30,6 +30,10 @@ CC-BY license and a reachable download was found for the F-22, F-35, F-16, F/A-1
 - X-15 — "North American X-15 Plane" by cmoreau — https://sketchfab.com/3d-models/north-american-x-15-plane-bf491206ba844282949734b48b938c53 — CC BY 4.0
 - F-16C — "F16-C Falcon" by Carlos.Maciel — https://sketchfab.com/3d-models/f16-c-falcon-4bc2ff75dc584af2afd0aa6bd8b79015 — CC BY 4.0
 - A-10 — "A10 Thunderbolt II" by blarg — https://sketchfab.com/3d-models/a10-thunderbolt-ii-77f1687fbdf3413aad9557233bb23ade — CC BY 4.0
+- F/A-18E — "US Navy F/A-18E Super Hornet" by johnnokomis — https://sketchfab.com/3d-models/us-navy-fa-18e-super-hornet — CC BY 4.0
+- F-14 — "F-14 TOMCAT" by Ryan.Qin — https://sketchfab.com/3d-models/f-14-tomcat-082e08 — CC BY 4.0
+- F-15C — "F 15C Desert" by Uxman — https://sketchfab.com/3d-models/f-15c-desert-1b801c — CC BY 4.0
+- A380 — "Airbus A380 - 841 Lufthansa 100th Year" by Nobilis 2 — https://sketchfab.com/nobilishornet2 — CC BY 4.0
 
 ## Weapon models (CC BY-NC-SA 4.0 — non-commercial; adaptations under the same licence)
 - "Missile & Bomb Collection - Fighter Jets - Free" by bohmerang — https://sketchfab.com/3d-models/missile-bomb-collection-fighter-jets-free-d203b678424a43568703bf85ba680f47 — CC BY-NC-SA 4.0. Adapted: textures downscaled to <= 512 px (assets/weapons/pack.glb, same licence); split into separate weapons at runtime.
