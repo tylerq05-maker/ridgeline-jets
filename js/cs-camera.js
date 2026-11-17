@@ -286,9 +286,26 @@
               want(f ? "headon" : "wide", 1, { soft: f ? 0 : 1.2, hold: 5 });
             }
             break;
+          case "terminal": {
+            // a missile about to arrive: a fixed camera off the target's beam, watching it close in, in slow motion
+            const m = dd.msl; if (!st.auto || !m || !alive(m.target)) break;
+            const dir = t1.copy(m.vel).normalize(), side = t2.set(-dir.z, 0, dir.x); if (side.lengthSq() < 1e-4) side.set(1, 0, 0); side.normalize();
+            const c = m.target.pos.clone().addScaledVector(side, (st.n % 2 ? 1 : -1) * 140).addScaledVector(dir, -60).addScaledVector(UP, 30);
+            const g = gnd(c.x, c.z) + 15; if (c.y < g) c.y = g;
+            const prev = st.msl; st.msl = m;
+            if (want("missile", 5, { hold: 4, lock: 3, force: true })) { st.impact = { pos: m.target.pos.clone(), tgt: m.target, cam: c, t: -1.8 }; st.snap = true; M.slowMo(2.2, 0.3); }
+            else st.msl = prev;
+            break;
+          }
+          case "maneuver":
+            // Cobra, Kulbit, post-stall: side-on so the nose swinging past vertical reads, in slow motion
+            if (!st.auto || (st.shot === "missile" && live(st.msl))) break;
+            st.focusAc = ac; st.focusT = st.rt + 3.5;
+            if (want(dd.type === "psm" ? "overwing" : "profile", 4, { hold: 3.5, lock: 2.5, force: true })) M.slowMo(dd.type === "kulbit" ? 2.2 : 1.6, 0.45);
+            break;
           case "merge": case "nearmiss":
             if (st.shot === "missile" && live(st.msl)) break;
-            st.alt ^= 1; if (want(st.alt ? "profile" : "flyby", 3, { hold: 4, force: true })) M.slowMo(1.2);
+            st.alt ^= 1; if (want(st.alt ? "profile" : "flyby", e.type === "nearmiss" ? 4 : 3, { hold: 4, force: true })) M.slowMo(e.type === "nearmiss" ? 1.6 : 1.2, e.type === "nearmiss" ? 0.3 : 0.35);
             break;
           case "launch": {
             const m = dd.msl; if (!m) break;

@@ -247,6 +247,18 @@
         if (!m._csHit) { this.emit("defeated", m.target, { from: m.owner }); this.emit("missed", m.owner, { target: m.target }); }
       }
       this.trackM = RJ.combat.missiles.filter((m) => m.owner === this.A || m.owner === this.B);
+      // the moment of truth: a missile in its last ~1.5 s before reaching its target (once per missile)
+      for (const m of this.trackM) if (!m._csTerm && m.target && m.target.alive && !m.lost && !m.decoyed) {
+        const d = m.pos.distanceTo(m.target.pos), cl = tv.copy(m.vel).sub(m.target.vel).dot(tv2.copy(m.target.pos).sub(m.pos).normalize());
+        if (cl > 60 && d < 1600 && d / cl < 1.5) { m._csTerm = true; this.emit("terminal", m.target, { msl: m, from: m.owner, tgo: d / cl }); }
+      }
+      // advanced maneuvers (maneuvers.js): Cobra, Kulbit and post-stall bursts, on the edge they start
+      for (const ac of [this.A, this.B]) {
+        if (!ac.alive) continue;
+        const k = ac.mnv ? ac.mnv.type : ac.psm ? "psm" : null, wm = W(ac, "mnv");
+        if (k && k !== wm.v) this.emit("maneuver", ac, { type: k });
+        wm.v = k;
+      }
       // the merge: closing fast through 600 m
       if (sep < 600 && clos < -120 && this.t - (this.mergeT || -99) > 10) { this.mergeT = this.t; this.emit("merge", this.A, { sep: Math.round(sep), closing: Math.round(-clos) }); }
       if (sep < 180 && this.t - (this.nearT || -99) > 8) { this.nearT = this.t; this.emit("nearmiss", this.A, { sep: Math.round(sep) }); }
