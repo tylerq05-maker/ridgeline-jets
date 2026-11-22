@@ -82,10 +82,22 @@
     }
     return s;
   }
+  /** True when the ground rises above the straight line between a and b (sampled; cheap). */
+  function terrainBlocks(a, b) {
+    for (let i = 1; i < 10; i++) {
+      const t = i / 10, x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t, z = a.z + (b.z - a.z) * t;
+      if (RJ.world.ground(x, z) > y + 2) return true;
+    }
+    return false;
+  }
   function cinematicTarget(f, dt, outP, outQ) {
     const d = f.vis.dims;
     cam.shotT -= dt;
-    if (!cam.shot || cam.shotT <= 0 || (cam.shot.pos && cam.shot.pos.distanceTo(f.pos) > 2500)) { cam.shot = newShot(f); cam.shotT = cam.shot.dur; cam.blend = 1; }
+    if (!cam.shot || cam.shotT <= 0 || (cam.shot.pos && cam.shot.pos.distanceTo(f.pos) > 2500) || cam.blocked > 0.4) {
+      // pick a shot whose line of sight to the jet is clear of terrain (a few tries, then take the last)
+      for (let k = 0; k < 5; k++) { cam.shot = newShot(f); if (!cam.shot.pos || !terrainBlocks(cam.shot.pos, f.pos)) break; }
+      cam.shotT = cam.shot.dur; cam.blend = 1; cam.blocked = 0;
+    }
     const s = cam.shot; s.t += dt;
     let fov = 45, look = f.pos;
     if (s.type === "flyby" || s.type === "ground") {
@@ -105,6 +117,8 @@
       fov = 62;
     }
     outP.y = Math.max(outP.y, RJ.world.ground(outP.x, outP.z) + 2.5);
+    // a hill or mountain moved between the camera and the jet: cut to a fresh shot after a moment
+    cam.blocked = terrainBlocks(outP, f.pos) ? (cam.blocked || 0) + dt : 0;
     const upv = s.type === "tail" || s.type === "wing" ? f.up : V3(0, 1, 0);
     outQ.setFromRotationMatrix(new THREE.Matrix4().lookAt(outP, look, upv));
     return fov;

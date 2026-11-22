@@ -5,6 +5,8 @@
  * Ground state: takeoff roll, rotation, lift-off and landing on the gear. */
 (function (RJ) {
   "use strict";
+  // turbojets of the 1950s–60s that trail visible smoke at military power (J79 on the F-4, J57 on the B-52)
+  const SMOKY = { f4: 1, b52: 1.3, x15: 0 };
   const V3 = RJ.V3, DEG = RJ.DEG;
   const AX = V3(1, 0, 0), AY = V3(0, 1, 0), AZ = V3(0, 0, 1), UP = V3(0, 1, 0);
   const WXA = {};
@@ -384,6 +386,12 @@
       this.stats.dmgTaken += amount;
       if (attacker && attacker !== this) { this.lastHitBy = attacker; this.lastHitAt = this.time; attacker.stats.dmgDealt += amount; }
       RJ.emit("damage", { ac: this, amount, attacker, kind });
+      // the hit itself: a shower of sparks and a puff of torn skin where the rounds or the warhead struck
+      if (amount > 0 && RJ.fx && RJ.fx.spark && this.mesh && this.mesh.visible && !this.lodFar) {
+        const n = Math.min(14, 4 + Math.round(amount / 4)), r = this.radius * 0.5;
+        for (let i = 0; i < n; i++) RJ.fx.spark(tv.set(this.pos.x + RJ.rand(-r, r), this.pos.y + RJ.rand(-r * 0.4, r * 0.4), this.pos.z + RJ.rand(-r, r)), tv2.copy(this.vel).multiplyScalar(0.8));
+        RJ.fx.smoke(this.pos, tv2.copy(this.vel).multiplyScalar(0.3), 1.5 + this.radius * 0.1, 0.25, 1.2, 0.5);
+      }
       if (this.hp <= 0) this.destroy(attacker, kind);
     }
 
@@ -557,12 +565,29 @@
       const gThresh = F.gmax > 5 ? 4.5 : 1.8;
       const hum = RJ.sonic ? RJ.sonic.humidity(this) : 0.5;
       if (RJ.fx.wingVapor) RJ.fx.wingVapor(this); // wingtip vortices and over-wing vapor in hard pulls (fx.js)
+      // battle damage, in stages: a thin grey haze, then a fuel leak streaming off one wing, then black smoke and a
+      // flickering engine fire with sparks. Which engine and wing is hit is fixed per aircraft so the trail stays put.
       const hpF = this.hp / this.maxHp;
-      if (hpF < 0.5) {
-        const n = vis.nozzles[0] || V3(0, 0, 4);
+      if (hpF < 0.8 && this.alive) {
+        const dmg = 1 - hpF, side = (this.uid || 0) % 2;
+        const n = vis.nozzles[side % Math.max(1, vis.nozzles.length)] || V3(0, 0, 4);
         const p = m.localToWorld(tv.copy(n));
-        RJ.fx.smoke(p, tv2.copy(this.vel).multiplyScalar(0.05), 2 + this.radius * 0.1, hpF < 0.25 ? 0.12 : 0.45, 3.5, 0.6);
-        if (hpF < 0.25) RJ.fx.fire(p, tv2.copy(this.vel).multiplyScalar(0.3), 2.2);
+        if (Math.random() < 0.3 + dmg) RJ.fx.smoke(p, tv2.copy(this.vel).multiplyScalar(0.05), (1.4 + this.radius * 0.08) * (0.6 + dmg * 1.5), hpF < 0.35 ? 0.1 : hpF < 0.6 ? 0.32 : 0.62, 2.5 + dmg * 3, 0.22 + dmg * 0.5);
+        const tips = m.userData.tips;
+        if (hpF < 0.6 && tips && tips[side] && Math.random() < 0.7) {
+          const w = m.localToWorld(tv.copy(tips[side]).multiplyScalar(0.55));
+          RJ.fx.vapor(w, tv2.copy(this.vel).multiplyScalar(0.03), 0.5 + this.radius * 0.04, 0.22 + dmg * 0.2); // fuel venting from a holed tank
+        }
+        if (hpF < 0.3) {
+          const flick = 0.7 + Math.random() * 0.6;
+          RJ.fx.fire(p, tv2.copy(this.vel).multiplyScalar(0.3), (1.4 + dmg * 2.6 + this.radius * 0.04) * flick);
+          if (Math.random() < 0.12) RJ.fx.spark(p, tv2.copy(this.vel).multiplyScalar(0.6));
+        }
+      }
+      // old turbojets leave their famous smoke trail at military power (the afterburner burns it off)
+      const smoky = SMOKY[this.id];
+      if (smoky && this.alive && this.throttle > 0.55 && this.abLevel < 0.2 && !(this.mesh.userData.flames || []).some((f) => f.rocket)) {
+        for (const n of vis.nozzles) if (Math.random() < 0.6) RJ.fx.smoke(m.localToWorld(tv.copy(n)), tv2.copy(this.vel).multiplyScalar(0.04), (1.6 + this.radius * 0.05) * smoky, 0.3, 4 + smoky * 3, 0.18 + 0.22 * smoky * (this.throttle - 0.5));
       }
       if (this.fuel != null && this.throttle > 0.03 && this.fuel > 0) {
         for (const n of vis.nozzles) RJ.fx.smoke(m.localToWorld(tv.copy(n)), tv2.copy(this.vel).multiplyScalar(0.05), 1.5, 0.85, 2.5, 0.25);
