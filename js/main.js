@@ -364,7 +364,7 @@
     const sc = HV.key.shadow.camera; sc.left = sc.bottom = -45; sc.right = sc.top = 45; sc.near = 10; sc.far = 220;
     HV.scene.add(HV.key, HV.key.target);
     const rim = new THREE.DirectionalLight(0x8ab8ff, 0.9); rim.position.set(-50, 30, -60); HV.scene.add(rim);
-    const floor = new THREE.Mesh(new THREE.CircleGeometry(400, 64), new THREE.MeshStandardMaterial({ color: 0x1a2028, roughness: 0.35, metalness: 0.4 }));
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(400, 64), new THREE.MeshStandardMaterial({ color: 0x161b22, roughness: 0.62, metalness: 0.05, envMapIntensity: 0.35 }));
     floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; HV.scene.add(floor);
     for (let i = 1; i <= 12; i++) {
       const r = new THREE.Mesh(new THREE.RingGeometry(i * 9, i * 9 + 0.12, 96), new THREE.MeshBasicMaterial({ color: i % 4 === 0 ? 0xffb81c : 0x2a3440, transparent: true, opacity: i % 4 === 0 ? 0.35 : 0.6 }));
@@ -398,12 +398,27 @@
     const sc = HV.key.shadow.camera, half = HV.size * 0.75 + 6;
     sc.left = sc.bottom = -half; sc.right = sc.top = half; sc.updateProjectionMatrix();
     HV.scene.add(HV.model);
+    // soft contact shadow under the airframe so it sits on the floor even where the shadow map is coarse
+    if (!HV.blob) {
+      const c = document.createElement("canvas"); c.width = c.height = 128;
+      const g = c.getContext("2d"), gr = g.createRadialGradient(64, 64, 4, 64, 64, 64);
+      gr.addColorStop(0, "rgba(0,0,0,0.75)"); gr.addColorStop(0.55, "rgba(0,0,0,0.35)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = gr; g.fillRect(0, 0, 128, 128);
+      HV.blob = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false }));
+      HV.blob.rotation.x = -Math.PI / 2; HV.blob.position.y = 0.04; HV.blob.renderOrder = 1; HV.scene.add(HV.blob);
+    }
+    HV.blob.scale.set(d.span * 1.15, d.len * 1.1, 1);
   };
   HV.render = function (dt) {
     const h = RJ.ui.hangar;
     if (h.auto) h.yaw += dt * 0.22;
     if (HV.model) for (const p of HV.model.userData.props) p.hub.rotation.z += dt * 2;
-    const r = HV.size * 1.55 * h.dist + 6;
+    // frame the jet inside the viewer panel (the camera renders the whole screen with a view offset, so the panel
+    // only sees part of the field of view): fit both the panel's height and width, then apply the user's zoom
+    const vr = $("hg-view").getBoundingClientRect(), fr = HV.cam.fov * Math.PI / 360;
+    const fh = Math.max(0.15, vr.height / innerHeight), fw = Math.max(0.15, vr.width / innerWidth);
+    const fitV = (HV.size * 0.36) / Math.tan(fr * fh), fitH = (HV.size * 0.52) / Math.tan(Math.atan(Math.tan(fr) * HV.cam.aspect) * fw);
+    const r = Math.max(fitV, fitH, HV.size * 0.9) * h.dist + 4;
     const target = V3(0, HV.model ? HV.model.position.y * 0.8 : 3, 0);
     HV.cam.position.set(Math.sin(h.yaw) * Math.cos(h.pitch) * r, target.y + Math.sin(h.pitch) * r, Math.cos(h.yaw) * Math.cos(h.pitch) * r);
     HV.cam.lookAt(target);
@@ -412,7 +427,7 @@
     if (el.width > 10) HV.cam.setViewOffset(W, H, W / 2 - (el.left + el.width / 2), H / 2 - (el.top + el.height / 2), W, H);
     HV.cam.updateProjectionMatrix();
     const P = RJ.post.fx;
-    P.motion = 0; P.heat = []; P.shocks = []; P.flash = 0;
+    P.motion = 0; P.heat = []; P.shocks = []; P.flash = 0; P.sun = null; P.chroma = 0; // indoors: no sun shafts or lens flare
     P.dof = [r, Math.max(10, HV.size * 1.2), 0.6];
     RJ.post.render(HV.scene, HV.cam, null, { exposure: 1.05, sat: 1.04, contrast: 1.06, tint: [1, 1, 1], bloom: 0.45 }, dt);
   };
