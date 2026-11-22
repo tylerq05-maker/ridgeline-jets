@@ -968,6 +968,7 @@
     };
     return mat;
   }
+  RJ.acGlassify = glassify; // models.js gives the glTF canopies the same Fresnel glass
   function canopyGlass(c) {
     const col = new THREE.Color(c), coated = col.r > col.b * 1.15;
     return new THREE.MeshStandardMaterial({ color: c, roughness: 0.035, metalness: coated ? 0.45 : 0.12, transparent: true, opacity: coated ? 0.5 : 0.36, envMapIntensity: coated ? 1.35 : 1.2 });
@@ -1254,6 +1255,7 @@
     g.userData.materials = M;
     g.traverse((o) => { if (o.isMesh && o.material !== M.glass && o.material.blending !== THREE.AdditiveBlending) o.castShadow = true; });
     if (!RJ.noMerge) mergeStatic(g);
+    if (RJ.acLights) RJ.acLights.attach(g, a); // position lights, strobes, beacons, landing lights, nozzle glow
     if (RJ.lighting && RJ.lighting.track) RJ.lighting.track(M);
     if (RJ.models && RJ.models.has(id, livery)) RJ.models.apply(g, id, livery);
     if (RJ.weapons) RJ.weapons.mount(g, id);

@@ -70,6 +70,118 @@
     return cache[url];
   }
 
+  /* ---------- PBR clean-up of the downloaded materials ----------
+   * The Sketchfab exports are inconsistent: glTF's default metallicFactor is 1 (so untextured paint renders as a
+   * dark mirror), some are unlit (KHR_materials_unlit: no shading at all), roughness ranges from mirror to chalk
+   * and canopies are flat alpha planes. Each source material is fixed once (cached), shared by every clone. */
+  const pbrCache = new Map();
+  const GLASS = /glass|canopy|window|windshield|visor|lens/i, METAL = /metal|chrome|engine|nozzle|exhaust|steel|titan|burner|dvig/i;
+  function glassMat(src, ac) {
+    const c = src.color ? src.color.clone() : new THREE.Color(0x9fb3c4);
+    // stealth canopies carry a gold (ITO) coating; others are a faint smoky blue-grey
+    const gold = ac.stealth > 1.5;
+    if (c.r + c.g + c.b > 2.4 || c.r + c.g + c.b < 0.15) c.set(gold ? 0x8a7a4a : 0x6d7f8f);
+    const m = new THREE.MeshPhysicalMaterial({
+      name: src.name, color: c, map: src.map && src.map.image ? src.map : null, roughness: 0.035, metalness: gold ? 0.5 : 0.12,
+      // files with an opaque canopy may have nothing modelled underneath: keep those mostly opaque, glossy glass
+      clearcoat: 1, clearcoatRoughness: 0.03, transparent: true, opacity: src.transparent ? RJ.clamp(src.opacity, gold ? 0.5 : 0.32, 0.6) : 0.84,
+      depthWrite: false, side: src.side, envMapIntensity: 1.45
+    });
+    if (RJ.acGlassify) RJ.acGlassify(m); // Fresnel: clear head-on, mirror-like at grazing angles (aircraft.js)
+    m.userData.rjGlass = true;
+    return m;
+  }
+  function pbr(src, ac) {
+    if (!src || src.userData.rjPBR) return src;
+    if (pbrCache.has(src)) return pbrCache.get(src);
+    let m = src;
+    const name = src.name || "";
+    const isGlass = GLASS.test(name) || (src.transmission > 0) || (src.transparent && src.opacity < 0.75 && !src.alphaMap && !/plume|flame/i.test(name));
+    if (src.isMeshStandardMaterial && src.type !== "MeshStandardMaterial" && src.type !== "MeshPhysicalMaterial") m = src; // spec-gloss extension material: leave its own model
+    else if (isGlass && (src.isMeshStandardMaterial || src.isMeshBasicMaterial)) m = glassMat(src, ac);
+    else if (src.isMeshBasicMaterial) {
+      // unlit export: give it real shading
+      m = new THREE.MeshStandardMaterial({ name, color: src.color, map: src.map, alphaMap: src.alphaMap, transparent: src.transparent, opacity: src.opacity, alphaTest: src.alphaTest, side: src.side, vertexColors: src.vertexColors, roughness: 0.5, metalness: 0.15 });
+    } else if (src.isMeshStandardMaterial) {
+      const stealth = ac.stealth > 1.5, metal = METAL.test(name);
+      // painted skin is a dielectric: several exports set metallicFactor 1 (some over a metal/rough map), which renders paint as a dark mirror
+      if (!metal && src.metalness > 0.35) src.metalness = stealth ? 0.08 : src.metalnessMap ? 0.15 : 0.2;
+      if (metal) { src.metalness = Math.max(src.metalness, 0.75); src.roughness = RJ.clamp(src.roughness, 0.22, 0.6); }
+      else if (!src.roughnessMap) src.roughness = RJ.clamp(src.roughness, stealth ? 0.5 : 0.32, stealth ? 0.8 : 0.72);
+      if (src.isMeshPhysicalMaterial) { src.clearcoat = Math.min(src.clearcoat || 0, stealth ? 0.15 : 0.5); src.clearcoatRoughness = Math.max(src.clearcoatRoughness || 0, 0.08); src.transmission = 0; }
+      if (src.envMapIntensity === 1) src.envMapIntensity = stealth ? 0.7 : metal ? 1.15 : 0.95;
+    }
+    m.userData.rjPBR = true;
+    pbrCache.set(src, m);
+    return m;
+  }
+
+  /* ---------- control surfaces ----------
+   * Models whose ailerons, flaps, elevators and rudders are separate named nodes get them hinged (pivot at the
+   * leading edge; all-moving tails at ~35 % chord) and handed to the flight code's existing surface lists, which
+   * drive them from the stick, rudder and speed brake. Files without separable nodes keep a static skin. */
+  const SURF = [
+    [/elev|stabilat|h[-_ ]?stab/i, "stabs", 0.35],
+    [/aileron|flaperon/i, "ailerons", 0],
+    [/flap/i, "flaps", 0],
+    [/rudder/i, "rudders", 0]
+  ];
+  /** World box of the vertices a bone carries (rigged files hinge their surfaces with bones). */
+  function boneBox(root, bone) {
+    const wb = new THREE.Box3(), v = new THREE.Vector3();
+    root.traverse((m) => {
+      if (!m.isSkinnedMesh || !m.skeleton) return;
+      const bi = m.skeleton.bones.indexOf(bone);
+      if (bi < 0) return;
+      const SI = m.geometry.attributes.skinIndex, SW = m.geometry.attributes.skinWeight, P = m.geometry.attributes.position;
+      if (!SI || !SW) return;
+      for (let i = 0; i < P.count; i++) {
+        let w = 0;
+        for (let k = 0; k < 4; k++) if (SI.getComponent(i, k) === bi) w += SW.getComponent(i, k);
+        if (w < 0.5) continue;
+        v.fromBufferAttribute(P, i); m.boneTransform(i, v); wb.expandByPoint(v.applyMatrix4(m.matrixWorld));
+      }
+    });
+    return wb;
+  }
+  function localBox(g, o, root) {
+    const wb = o.isBone ? boneBox(root, o) : new THREE.Box3().setFromObject(o);
+    if (wb.isEmpty()) return null;
+    const inv = new THREE.Matrix4().copy(g.matrixWorld).invert(), lb = new THREE.Box3(), p = new THREE.Vector3();
+    for (let i = 0; i < 8; i++) lb.expandByPoint(p.set(i & 1 ? wb.max.x : wb.min.x, i & 2 ? wb.max.y : wb.min.y, i & 4 ? wb.max.z : wb.min.z).applyMatrix4(inv));
+    return lb;
+  }
+  function rigSurfaces(g, skin) {
+    const U = g.userData, found = [];
+    skin.traverse((q) => {
+      if (q === skin || !q.name) return;
+      for (const [re, list, at] of SURF) if (re.test(q.name)) { found.push({ q, list, at }); break; }
+    });
+    // keep only the outermost match (a named group and its own named mesh child would rotate twice)
+    const set = new Set(found.map((f) => f.q));
+    const top = found.filter((f) => { for (let p = f.q.parent; p; p = p.parent) if (set.has(p)) return false; return true; });
+    if (!top.length) return 0;
+    g.updateMatrixWorld(true);
+    const span = U.dims ? U.dims.span : 10, rigged = { stabs: [], ailerons: [], flaps: [], rudders: [] };
+    for (const { q, list, at } of top) {
+      const b = localBox(g, q, skin);
+      if (!b) continue;
+      const c = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3());
+      if (sz.z < 0.05 || sz.z > U.dims.len * 0.5) continue; // not a surface (or a whole-airframe node)
+      const piv = new THREE.Group();
+      piv.position.set(c.x, c.y, b.min.z + sz.z * at);
+      g.add(piv); piv.updateMatrixWorld(true);
+      piv.attach(q);
+      const s = Math.abs(c.x) < span * 0.03 ? 0 : Math.sign(c.x);
+      rigged[list].push(list === "stabs" ? { grp: piv, s: s || 1, canard: false } : { grp: piv, s: list === "rudders" ? s : s || 1, kind: list });
+    }
+    // the glTF surfaces replace the (now hidden) procedural ones of the same kind
+    let n = 0;
+    for (const k in rigged) if (rigged[k].length) { U[k] = rigged[k]; n += rigged[k].length; }
+    U.gltfSurfaces = n;
+    return n;
+  }
+
   /** Called by RJ.buildAircraft after the procedural build. Never throws; the procedural model stays on failure. */
   Mo.apply = function (g, id, livery) {
     const o = REG[id + ":" + livery] || REG[id]; // a paint-specific model (e.g. "fa18e:blueangels") wins
@@ -92,11 +204,14 @@
       holder.scale.setScalar(s);
       const c = bb.getCenter(new THREE.Vector3()).multiplyScalar(s);
       holder.position.set(-c.x, d.minY + d.height * 0.5 - c.y, (d.minZ + d.maxZ) * 0.5 - c.z);
+      const ac = (RJ.AIRCRAFT && RJ.AIRCRAFT[id]) || {};
       skin.traverse((m) => {
         if (!m.isMesh) return;
         m.castShadow = true; m.receiveShadow = true;
+        if (Array.isArray(m.material)) m.material = m.material.map((mt) => pbr(mt, ac));
+        else m.material = pbr(m.material, ac);
         const mats = Array.isArray(m.material) ? m.material : [m.material];
-        for (const mt of mats) { if (mt.isMeshStandardMaterial && mt.envMapIntensity === 1) mt.envMapIntensity = 0.9; }
+        if (mats.some((mt) => mt.userData.rjGlass)) m.castShadow = false;
         if (RJ.lighting && RJ.lighting.track) RJ.lighting.track(mats);
       });
       // hide the procedural skin, keeping gear, flames, nozzles, lights, pilot and anything animated
@@ -106,6 +221,8 @@
       g.traverse((m) => { if (m.isMesh && skinMats.has(m.material) && !keep.has(m)) m.visible = false; });
       g.add(holder);
       g.userData.gltf = holder;
+      try { rigSurfaces(g, skin); } catch (e) { console.warn("control surfaces of " + id + " left static", e && e.message); }
+      if (RJ.acLights) RJ.acLights.refit(g, ac, holder); // lamps onto the real model's wingtips, spine and tail
     }).catch((e) => console.warn("Aircraft model " + id + " unavailable; using the procedural airframe", e && e.message ? e.message : e));
   };
 
