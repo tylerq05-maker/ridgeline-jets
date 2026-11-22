@@ -153,6 +153,7 @@
     return lb;
   }
   function rigSurfaces(g, skin) {
+    if (RJ.noRig) return 0;
     const U = g.userData, found = [];
     skin.traverse((q) => {
       if (q === skin || !q.name) return;
@@ -223,6 +224,12 @@
       g.traverse((m) => { if (m.isMesh && skinMats.has(m.material) && !keep.has(m)) m.visible = false; });
       g.add(holder);
       g.userData.gltf = holder;
+      // a few files model their own landing gear (always down, sometimes rigged to bones): the game's animated gear
+      // legs stay in charge, so collapse the file's copy (bones are scaled to nothing, plain meshes hidden)
+      skin.traverse((q) => {
+        if (!/gear/i.test(q.name || "") || (q.parent && /gear/i.test(q.parent.name || ""))) return;
+        if (q.isBone) q.scale.setScalar(1e-4); else q.visible = false;
+      });
       try { rigSurfaces(g, skin); } catch (e) { console.warn("control surfaces of " + id + " left static", e && e.message); }
       if (RJ.acLights) RJ.acLights.refit(g, ac, holder); // lamps onto the real model's wingtips, spine and tail
     }).catch((e) => console.warn("Aircraft model " + id + " unavailable; using the procedural airframe", e && e.message ? e.message : e));
@@ -247,7 +254,9 @@
   Mo.register("a10", { url: SF + "a10.glb", rotY: Math.PI, credit: "A10 Thunderbolt II by blarg (CC BY 4.0)" });
   Mo.register("fa18e", { url: SF + "fa18e.glb", rotY: -1.0751, credit: "US Navy F/A-18E Super Hornet by johnnokomis (CC BY 4.0)" });
   Mo.register("f14", { url: SF + "f14.glb", rotY: Math.PI, credit: "F-14 TOMCAT by Ryan.Qin (CC BY 4.0)" });
-  Mo.register("f15c", { url: SF + "f15c.glb", auto: true, credit: "F 15C Desert by Uxman (CC BY 4.0)" });
+  // F-15C file disabled: its rig is posed inconsistently (tails, intakes and canopy float off the airframe and the
+  // tails hang below it in flight), so the built-in F-15 is used until a cleaner model is downloaded
+  // Mo.register("f15c", { url: SF + "f15c.glb", auto: true, credit: "F 15C Desert by Uxman (CC BY 4.0)" });
   Mo.register("a380", { url: SF + "a380.glb", rotY: Math.PI, credit: "Airbus A380 - 841 Lufthansa 100th Year by Nobilis 2 (CC BY 4.0)" });
   Mo.register("f35a", { url: SF + "f35a.glb", rotY: Math.PI / 2, hide: /landingOn|spw\d|refuel/i, credit: "F-35 Lightning II by CloudHub (CC BY 4.0)" });
 })(window.RJ);
