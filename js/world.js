@@ -52,6 +52,7 @@
       "uniform vec3 fogColor; uniform float fogNear; uniform float fogFar;",
       "uniform vec3 fogSunDir; uniform vec3 fogSunCol; uniform vec4 fogParams;",
       "varying float vFogDist; varying vec3 vFogWDir;",
+      "#define RJ_AP vec3(0.8, 0.96, 1.3)",
       "#endif"
     ].join("\n");
     SC.fog_fragment = [
@@ -62,8 +63,10 @@
       "  float rjHc = max(cameraPosition.y, 0.0);",
       "  float rjE0 = exp(-rjHc / rjHs), rjE1 = exp(-max(cameraPosition.y + rjD.y, 0.0) / rjHs);",
       "  float rjK = abs(rjD.y) > 1.0 ? (rjE0 - rjE1) * rjHs / rjD.y : rjE0;",
-      "  float rjF = 1.0 - exp(-fogParams.x * rjL * max(rjK, 0.0));",
-      "  rjF = max(rjF, smoothstep(fogNear, fogFar, vFogDist));",
+      // aerial perspective: Rayleigh scattering is wavelength dependent, so blue hazes in first and distant
+      // terrain and skylines recede through blue-grey to the horizon colour
+      "  vec3 rjF = 1.0 - exp(-fogParams.x * rjL * max(rjK, 0.0) * RJ_AP);",
+      "  rjF = max(rjF, vec3(smoothstep(fogNear, fogFar, vFogDist)));",
       "  float rjS = pow(max(dot(rjN, fogSunDir), 0.0), 8.0) * fogParams.z;",
       "  gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor + fogSunCol * rjS, clamp(rjF, 0.0, 1.0));",
       "}",
@@ -757,9 +760,9 @@
         "  float Hs = max(fogParams.y, 1.0); float e0 = exp(-max(cameraPosition.y, 0.0) / Hs), e1 = exp(-max(vW.y, 0.0) / Hs);",
         "  float K = abs(D.y) > 1.0 ? (e0 - e1) * Hs / D.y : e0;",
         // distant ranges always keep some aerial haze, even their high summits
-        "  float f = 1.0 - exp(-fogParams.x * L * max(K, 0.0));",
+        "  vec3 f = 1.0 - exp(-fogParams.x * L * max(K, 0.0) * vec3(0.8, 0.96, 1.3));",
         // beyond the detailed world, extra aerial perspective so distant ranges recede
-        "  f = max(f, smoothstep(14000.0, 70000.0, L) * 0.75);",
+        "  f = max(f, vec3(smoothstep(14000.0, 70000.0, L) * 0.75));",
         "  float sg = pow(max(dot(N, fogSunDir), 0.0), 8.0) * fogParams.z;",
         "  gl_FragColor = vec4(mix(col, fogCol + fogSunCol * sg, clamp(f, 0.0, 1.0)), 1.0);",
         "}"

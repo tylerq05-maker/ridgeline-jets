@@ -3,7 +3,7 @@
  * forward scattering (bright when backlit), so vapor glows at sunset. */
 (function (RJ) {
   "use strict";
-  const FX = { time: 0 };
+  const FX = { time: 0, wind: new THREE.Vector3(4.8, 0, 3.6) };
   RJ.fx = FX;
 
   function puffTexture() {
@@ -87,7 +87,7 @@
       this.pts.layers.set(RJ.LATE);
       scene.add(this.pts);
     }
-    spawn(x, y, z, vx, vy, vz, life, s0, s1, r, g, b, alpha, accel = 0, drag = 0) {
+    spawn(x, y, z, vx, vy, vz, life, s0, s1, r, g, b, alpha, accel = 0, drag = 0, delay = 0) {
       const k = this.i;
       this.i = (this.i + 1) % this.max;
       if (this.i === 0) this.wrapped = true;
@@ -95,7 +95,7 @@
       this.dirtyCount++;
       this.p[k * 3] = x; this.p[k * 3 + 1] = y; this.p[k * 3 + 2] = z;
       this.v[k * 3] = vx; this.v[k * 3 + 1] = vy; this.v[k * 3 + 2] = vz;
-      this.a[k * 4] = FX.time; this.a[k * 4 + 1] = life; this.a[k * 4 + 2] = s0; this.a[k * 4 + 3] = s1;
+      this.a[k * 4] = FX.time + delay; this.a[k * 4 + 1] = life; this.a[k * 4 + 2] = s0; this.a[k * 4 + 3] = s1; // delay > 0: born later (the shader hides it until then)
       this.c[k * 4] = r; this.c[k * 4 + 1] = g; this.c[k * 4 + 2] = b; this.c[k * 4 + 3] = alpha;
       this.e[k * 2] = accel; this.e[k * 2 + 1] = drag;
     }
@@ -142,33 +142,244 @@
       }
       P.flush();
     }
+    // wind for drifting smoke (same direction as missile trails and contrails)
+    const wx = (W.WEATHER && W.env && W.WEATHER[W.env.weather]) || {};
+    FX.wind.set(0.8, 0, 0.6).multiplyScalar((wx.wind || 6) * 0.6);
+    tickGround(dt, camera);
+    tickDamage(dt, camera);
     if (FX.lightLevel > 0) { FX.lightLevel = Math.max(0, FX.lightLevel - dt * 3); FX.light.intensity = FX.lightLevel * 6; }
     // dusk/night factor shared by every jet exhaust shader (aircraft.js): flames and diamonds burn brighter in the dark
     if (RJ.FLAME_NIGHT && W.sunElev != null) RJ.FLAME_NIGHT.value = 1 - RJ.smooth(-6, 10, W.sunElev);
   };
-  FX.clear = () => { FX.smokeP.clear(); FX.fireP.clear(); };
+  FX.clear = () => {
+    FX.smokeP.clear(); FX.fireP.clear();
+    FIRES.length = 0; for (const m of SCORCHES) m.visible = false;
+  };
 
   const R = (a) => (Math.random() - 0.5) * 2 * a;
 
-  /** Fireball + smoke + sparks. s scales the blast (1 = fighter). */
+  /** Layered blast, s scales it (1 = fighter): a white-hot flash core, a fireball that swells and cools from yellow
+   * through orange to dull red, then dark rolling smoke that emerges from the dying fire (born late via `delay`)
+   * and keeps billowing upward, plus streaking embers. Near the ground it also throws a dirt fountain, leaves a
+   * scorch mark and a fire that burns on for a while (FX.groundBlast). Particle counts are capped for any s. */
   FX.explosion = function (p, s = 1, vel) {
     const vx = vel ? vel.x * 0.35 : 0, vy = vel ? vel.y * 0.35 : 0, vz = vel ? vel.z * 0.35 : 0;
-    const n = Math.round(30 * Math.sqrt(s));
+    const low = RJ.settings.quality === "low", k = Math.sqrt(s);
+    const n = Math.min(70, Math.round(30 * k * (low ? 0.55 : 1)));
+    // 1 flash: a few huge, very short-lived white-hot particles (the eye reads this as the detonation)
+    for (let i = 0; i < 4; i++) FX.fireP.spawn(p.x, p.y, p.z, vx, vy, vz, 0.07 + i * 0.035, 9 * s, (30 + i * 8) * s, 1, 0.97, 0.88, 1, 0, 0);
+    // 2 fireball: a dense yellow-white core that swells fast, then orange billows that rise and cool
     for (let i = 0; i < n; i++) {
       const sp = 14 * s;
-      FX.fireP.spawn(p.x + R(3 * s), p.y + R(3 * s), p.z + R(3 * s), vx + R(sp), vy + R(sp) + 4, vz + R(sp), 0.6 + Math.random() * 0.9, 6 * s, 28 * s, 1, 0.75, 0.4, 0.9, 6, 2.2);
+      FX.fireP.spawn(p.x + R(3 * s), p.y + R(3 * s), p.z + R(3 * s), vx + R(sp), vy + R(sp) + 4, vz + R(sp), 0.5 + Math.random() * 0.9, 6 * s, 28 * s, 1, 0.75, 0.4, 0.9, 6, 2.2);
+    }
+    for (let i = 0; i < n * 0.6; i++) {
+      const v = _ev.set(R(1), R(1), R(1)).normalize().multiplyScalar(5 + Math.random() * 10 * s);
+      FX.fireP.spawn(p.x + R(2 * s), p.y + R(2 * s), p.z + R(2 * s), vx + v.x, vy + v.y + 2, vz + v.z, 0.25 + Math.random() * 0.3, 4 * s, 18 * s, 1, 0.92, 0.7, 1, 2, 3);
+    }
+    // 3 smoke: a little at once (the blast cloud's dark edge), most of it born as the fire dies, so the
+    // fireball visibly turns into a dark, slowly rolling cloud that rises and drifts with the wind
+    const w = FX.wind;
+    for (let i = 0; i < n * 0.4; i++) {
+      const sp = 10 * s, d = 0.14 + Math.random() * 0.2;
+      FX.smokeP.spawn(p.x + R(4 * s), p.y + R(4 * s), p.z + R(4 * s), vx + R(sp), vy + R(sp) + 3, vz + R(sp), 4 + Math.random() * 4, 10 * s, 45 * s, d, d, d * 1.05, 0.6, 3, 0.8);
     }
     for (let i = 0; i < n; i++) {
-      const sp = 10 * s, d = 0.16 + Math.random() * 0.22;
-      FX.smokeP.spawn(p.x + R(4 * s), p.y + R(4 * s), p.z + R(4 * s), vx + R(sp), vy + R(sp) + 3, vz + R(sp), 4 + Math.random() * 5, 10 * s, 50 * s, d, d, d * 1.05, 0.8, 3, 0.8);
+      const dir = _ev.set(R(1), R(1) * 0.8 + 0.15, R(1)).normalize(), r = (4 + Math.random() * 9) * s, out = (3 + Math.random() * 6) * k;
+      const d = 0.05 + Math.random() * 0.13, warm = i < n * 0.35; // the first puffs out of the fire are fire-stained brown
+      FX.smokeP.spawn(p.x + dir.x * r, p.y + dir.y * r, p.z + dir.z * r, vx * 0.6 + dir.x * out + w.x, vy * 0.6 + dir.y * out + 4 + Math.random() * 4, vz * 0.6 + dir.z * out + w.z,
+        6 + Math.random() * 7, 12 * s, (45 + Math.random() * 40) * s, d * (warm ? 1.5 : 1), d * (warm ? 1.12 : 1), d * 1.02, 0.6 + Math.random() * 0.25, 1.2, 0.5, 0.2 + Math.random() * 0.65);
     }
-    for (let i = 0; i < n * 1.5; i++) {
+    // 4 embers: streaking sparks and burning bits arcing out and falling
+    for (let i = 0; i < Math.min(110, n * 1.5); i++) {
       const sp = 70 * s;
       FX.fireP.spawn(p.x, p.y, p.z, vx + R(sp), vy + R(sp) + 10, vz + R(sp), 0.6 + Math.random() * 1.0, 1.2, 0.6, 1, 0.8, 0.5, 1, -25, 0.6);
     }
     FX.light.position.copy(p); FX.light.color.setHex(0xffaa55); FX.lightLevel = Math.max(FX.lightLevel, Math.min(2, s));
     if (s >= 1.2) FX.smokeColumn(p, s);
+    const W = RJ.world, g = W && W.ground ? W.ground(p.x, p.z) : NaN;
+    if (isFinite(g) && p.y - g < 10 + 8 * s) FX.groundBlast(_ep.set(p.x, g, p.z), s, p.y - g);
   };
+  const _ev = new THREE.Vector3(), _ep = new THREE.Vector3();
+
+  /* ---------------- ground impacts: dirt fountain, scorch mark, a fire that burns on ----------------
+   * Pooled: at most SCORCH_N scorch decals and FIRE_N ground fires exist; the oldest is reused. */
+  const SCORCH_N = 14, FIRE_N = 6, SCORCHES = [], FIRES = [];
+  let scorchTex = null, scorchGeo = null;
+  function scorchTexture() {
+    const c = document.createElement("canvas"); c.width = c.height = 128;
+    const x = c.getContext("2d"), rnd = RJ.world.gen.mulberry32(17);
+    const g = x.createRadialGradient(64, 64, 0, 64, 64, 64);
+    g.addColorStop(0, "rgba(8,6,5,0.95)"); g.addColorStop(0.45, "rgba(14,11,9,0.8)"); g.addColorStop(0.8, "rgba(30,24,18,0.3)"); g.addColorStop(1, "rgba(40,32,24,0)");
+    x.fillStyle = g; x.fillRect(0, 0, 128, 128);
+    // ragged blast rays and soot blotches so it never reads as a perfect disc
+    for (let i = 0; i < 26; i++) {
+      const a = rnd() * Math.PI * 2, L = 34 + rnd() * 30, wd = 3 + rnd() * 6;
+      x.save(); x.translate(64, 64); x.rotate(a);
+      const lg = x.createLinearGradient(0, 0, L, 0); lg.addColorStop(0, "rgba(10,8,6,0.55)"); lg.addColorStop(1, "rgba(10,8,6,0)");
+      x.fillStyle = lg; x.beginPath(); x.moveTo(0, -wd); x.lineTo(L, 0); x.lineTo(0, wd); x.fill(); x.restore();
+    }
+    return new THREE.CanvasTexture(c);
+  }
+  /** Dirt and debris thrown up by a blast at or near ground level (p on the ground, h = blast height above it). */
+  FX.groundBlast = function (p, s = 1, h = 0) {
+    const W = RJ.world, low = RJ.settings.quality === "low", k = Math.sqrt(s), near = 1 - RJ.clamp(h / (10 + 8 * s), 0, 1);
+    const water = p.y < 1 && W.isWaterAt && W.isWaterAt(p.x, p.z);
+    if (water) { // a column of white water and spray instead of dirt
+      const nw = Math.min(70, Math.round(36 * k * (low ? 0.5 : 1) * (0.4 + near)));
+      for (let i = 0; i < nw; i++) FX.smokeP.spawn(p.x + R(4 * s), 1, p.z + R(4 * s), R(7 * k), (25 + Math.random() * 45) * k, R(7 * k), 1.6 + Math.random() * 1.4, 3 * s, 16 * s, 0.93, 0.96, 1, 0.8, -18, 0.35);
+      return;
+    }
+    const nd = Math.min(80, Math.round(40 * k * (low ? 0.5 : 1) * (0.4 + near)));
+    // 1 the fountain: a cone of dark earth flung up that arcs back down under gravity
+    for (let i = 0; i < nd; i++) {
+      const a = Math.random() * Math.PI * 2, sp = (6 + Math.random() * 18) * k, up = (22 + Math.random() * 45) * k;
+      const d = 0.16 + Math.random() * 0.14;
+      FX.smokeP.spawn(p.x + R(3 * s), p.y + 1, p.z + R(3 * s), Math.cos(a) * sp, up, Math.sin(a) * sp, 2.2 + Math.random() * 2, 2.5 * s, (10 + Math.random() * 10) * s, d * 1.25, d * 1.05, d * 0.8, 0.85, -16, 0.35);
+    }
+    // 2 clods: small, solid, fast, falling hard
+    for (let i = 0; i < nd * 0.8; i++) {
+      const a = Math.random() * Math.PI * 2, sp = (10 + Math.random() * 30) * k;
+      FX.smokeP.spawn(p.x, p.y + 1, p.z, Math.cos(a) * sp, (25 + Math.random() * 50) * k, Math.sin(a) * sp, 1.6 + Math.random() * 1.6, 0.9 * k, 0.7 * k, 0.09, 0.075, 0.06, 1, -30, 0.15);
+    }
+    // 3 the base surge: a low ring of dust rolling outward
+    const nr = Math.min(50, Math.round(26 * k * (low ? 0.5 : 1)));
+    for (let i = 0; i < nr; i++) {
+      const a = (i / nr) * Math.PI * 2 + R(0.2), sp = (14 + Math.random() * 18) * k;
+      FX.smokeP.spawn(p.x + Math.cos(a) * 3 * s, p.y + 1.5, p.z + Math.sin(a) * 3 * s, Math.cos(a) * sp, 2 + Math.random() * 4, Math.sin(a) * sp, 3.5 + Math.random() * 3, 5 * s, 26 * s, 0.5, 0.44, 0.36, 0.55, 0.4, 0.7);
+    }
+    if (near > 0.3) { FX.scorch(p, (5 + 6 * k) * (0.6 + 0.4 * near)); if (s >= 0.9) FX.groundFire(p, s); }
+  };
+  /** A blackened blast mark on the ground that fades away after a minute. */
+  FX.scorch = function (p, r) {
+    if (!FX.scene) return;
+    if (!scorchTex) { scorchTex = scorchTexture(); scorchGeo = new THREE.CircleGeometry(1, 20); scorchGeo.rotateX(-Math.PI / 2); }
+    let m;
+    if (SCORCHES.length < SCORCH_N) {
+      m = new THREE.Mesh(scorchGeo, new THREE.MeshBasicMaterial({ map: scorchTex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+      m.renderOrder = 2; FX.scene.add(m); SCORCHES.push(m);
+    } else { m = SCORCHES.shift(); SCORCHES.push(m); }
+    // sit on the terrain under the centre; lift a little on slopes so the disc doesn't vanish into the hillside
+    const W = RJ.world, g0 = W.ground(p.x, p.z), gx = W.ground(p.x + r * 0.7, p.z), gz = W.ground(p.x, p.z + r * 0.7);
+    const slope = Math.min(6, Math.max(Math.abs(gx - g0), Math.abs(gz - g0)));
+    m.position.set(p.x, g0 + 0.25 + slope * 0.6, p.z); m.rotation.y = Math.random() * 6.3;
+    m.scale.set(r * (0.9 + Math.random() * 0.25), 1, r * (0.9 + Math.random() * 0.25));
+    m.material.opacity = 0.92; m.visible = true; m.userData.t = 0;
+  };
+  /** Wreckage and fuel burning on the ground: licking flames and a thick black smoke plume that leans downwind. */
+  FX.groundFire = function (p, s = 1) {
+    const f = FIRES.length < FIRE_N ? {} : FIRES.shift();
+    f.x = p.x; f.y = p.y; f.z = p.z; f.s = Math.min(3, s); f.t = 0; f.life = 14 + Math.random() * 10 + Math.min(3, s) * 4; f.e = 0; f.e2 = 0;
+    FIRES.push(f);
+  };
+  function tickGround(dt, cam) {
+    for (const m of SCORCHES) {
+      if (!m.visible) continue;
+      const t = (m.userData.t += dt);
+      if (t > 50) { m.material.opacity = 0.92 * Math.max(0, 1 - (t - 50) / 25); if (t > 75) m.visible = false; }
+    }
+    const low = RJ.settings.quality === "low", w = FX.wind;
+    for (let i = FIRES.length - 1; i >= 0; i--) {
+      const f = FIRES[i]; f.t += dt;
+      if (f.t > f.life) { FIRES.splice(i, 1); continue; }
+      const dist = cam ? Math.hypot(cam.position.x - f.x, cam.position.y - f.y, cam.position.z - f.z) : 0;
+      if (dist > 12000) continue;
+      const k = 1 - RJ.smooth(f.life * 0.55, f.life, f.t), s = f.s; // dies down over the last half of its life
+      f.e += dt * (low ? 14 : 28) * k; f.e2 += dt * (low ? 3 : 6) * (0.4 + 0.6 * k);
+      while (f.e >= 1) { // flames licking up from the wreckage
+        f.e -= 1;
+        FX.fireP.spawn(f.x + R(4 * s), f.y + 0.5 + Math.random() * 1.5, f.z + R(4 * s), w.x * 0.3 + R(1.5), 5 + Math.random() * 6, w.z * 0.3 + R(1.5), 0.5 + Math.random() * 0.5, (2 + Math.random() * 2.5) * s, (5 + Math.random() * 4) * s, 1, 0.55, 0.2, 0.85 * k, 3, 1.2);
+      }
+      while (f.e2 >= 1) { // the plume: oily black, rising, spreading and leaning with the wind
+        f.e2 -= 1;
+        const d = 0.06 + Math.random() * 0.07;
+        FX.smokeP.spawn(f.x + R(3 * s), f.y + 3 + Math.random() * 3, f.z + R(3 * s), w.x * 0.8 + R(1.5), 9 + Math.random() * 7, w.z * 0.8 + R(1.5), 9 + Math.random() * 6, 5 * s, (30 + Math.random() * 25) * s, d, d * 0.96, d * 0.92, 0.55 * (0.5 + 0.5 * k), 0.3, 0.12);
+      }
+      // the fire flickers on the ground and anything nearby, when nothing brighter owns the light
+      if (dist < 1800 && FX.lightLevel < 0.4 * k) { FX.light.position.set(f.x, f.y + 6, f.z); FX.light.color.setHex(0xff8a3a); FX.lightLevel = (0.25 + Math.random() * 0.15) * k; }
+    }
+  }
+
+  /* ---------------- battle damage on live jets, and the burning fall of a dead one ----------------
+   * Every hit leaves a wound on the airframe (a point in the mesh's own space). A damaged jet vents fuel vapour
+   * from it, then grey smoke, then black smoke and fire, with sparks spitting out as it gets worse. A wreck
+   * leaves a continuous tail of fire and thick black smoke. Emission is interpolated along the path flown so the
+   * trails are unbroken at 300 m/s, and bounded per jet per frame. */
+  const _dw = new THREE.Vector3(), _dl = new THREE.Vector3();
+  RJ.on("damage", (e) => {
+    const ac = e.ac;
+    if (!ac || !ac.alive || !ac.mesh) return;
+    const pts = ac._wounds || (ac._wounds = []);
+    if (pts.length >= 3) return;
+    const vis = ac.vis, tip = vis && vis.tips && vis.tips[0], noz = vis && vis.nozzles && vis.nozzles[0];
+    const span = tip ? Math.abs(tip.x) : (ac.radius || 6) * 0.45, tail = noz ? noz.z : (ac.radius || 6) * 0.4;
+    // first wound in a wing root / fuel tank (vapour), later ones anywhere on the airframe
+    const side = Math.random() < 0.5 ? -1 : 1, wing = pts.length === 0 || Math.random() < 0.5;
+    const lp = wing ? new THREE.Vector3(side * span * (0.25 + Math.random() * 0.4), (tip ? tip.y : 0) + 0.1, (tip ? tip.z : 0) + R(0.6))
+      : new THREE.Vector3(R(span * 0.15), R(0.3) + 0.3, tail * (Math.random() * 0.9 - 0.3));
+    pts.push({ p: lp, wing, prev: null });
+  });
+  function tickDamage(dt, cam) {
+    const A = RJ.combat && RJ.combat.aircraft;
+    if (!A || !cam || dt <= 0) return;
+    const low = RJ.settings.quality === "low";
+    let budget = low ? 6 : 12; // jets per frame that get the full treatment
+    for (const ac of A) {
+      if (!ac.mesh || ac.lodFar || ac.mesh.visible === false) continue;
+      const falling = ac.state === "falling";
+      if (!falling && (!ac.alive || !ac._wounds || !(ac.hp >= 0))) continue;
+      const dist = cam.position.distanceTo(ac.pos);
+      if (dist > (falling ? 9000 : 5000) || budget <= 0) { if (ac._wounds) for (const w of ac._wounds) w.prev = null; ac._wreckPrev = null; continue; }
+      budget--;
+      if (falling) { tickWreck(ac, dt, dist, low); continue; }
+      const dmg = RJ.clamp(1 - ac.hp / (ac.maxHp || 100), 0, 1);
+      if (dmg < 0.04) continue;
+      const v = ac.vel, far = dist > 2000;
+      for (const wd of ac._wounds) {
+        const wp = ac.mesh.localToWorld(_dw.copy(wd.p));
+        const pp = wd.prev, seg = pp ? pp.distanceTo(wp) : 0;
+        const spacing = far ? 9 : 3.5 + (1 - dmg) * 3;
+        const n = pp && seg < 120 ? Math.min(far || low ? 3 : 8, Math.max(1, Math.floor(seg / spacing))) : 1;
+        for (let j = 1; j <= n; j++) {
+          const p = pp && n > 1 ? _dl.copy(pp).lerp(wp, j / n) : wp;
+          if (dmg < 0.35 && wd.wing) {
+            // leaking fuel: a thin white vapour stream that spreads and evaporates behind the wing
+            FX.smokeP.spawn(p.x + R(0.2), p.y + R(0.2), p.z + R(0.2), v.x * 0.04 + R(0.6), v.y * 0.04 + R(0.6), v.z * 0.04 + R(0.6), 0.9 + dmg * 2, 0.5, 3.5 + dmg * 6, 0.96, 0.97, 1, 0.22 + dmg * 0.4, 0, 1.2);
+          } else {
+            // smoke from the wound: grey when lightly hit, oily black and thicker as the jet is shot up
+            const d = RJ.lerp(0.55, 0.08, RJ.clamp((dmg - 0.3) / 0.5, 0, 1));
+            FX.smokeP.spawn(p.x + R(0.4), p.y + R(0.4), p.z + R(0.4), v.x * 0.05 + R(1), v.y * 0.05 + R(1) + 1, v.z * 0.05 + R(1), 2.2 + dmg * 3, 1 + dmg, 5 + dmg * 12, d, d, d * 1.04, 0.35 + dmg * 0.35, 0.6, 0.6);
+          }
+        }
+        wd.prev = wd.prev ? wd.prev.copy(wp) : wp.clone();
+        // fire licking from the wound once it's badly hit, streaming back like a torch
+        if (dmg > 0.6 && Math.random() < dt * (far ? 15 : 45) * dmg) {
+          FX.fireP.spawn(wp.x, wp.y, wp.z, v.x * 0.88 + R(3), v.y * 0.88 + R(3), v.z * 0.88 + R(3), 0.15 + Math.random() * 0.2, 1.2 + dmg * 1.4, 3 + dmg * 3, 1, 0.55, 0.2, 0.9, 0, 2);
+        }
+        // sparks and arcing from torn wiring and metal, more often the worse it gets
+        if (!far && Math.random() < dt * (0.6 + dmg * 5)) {
+          const ns = 3 + Math.floor(Math.random() * 5);
+          for (let i = 0; i < ns; i++) FX.fireP.spawn(wp.x, wp.y, wp.z, v.x * 0.9 + R(18), v.y * 0.9 + R(18), v.z * 0.9 + R(18), 0.2 + Math.random() * 0.3, 0.6, 0.2, 1, 0.85, 0.55, 1, -10, 1.5);
+        }
+      }
+    }
+  }
+  function tickWreck(ac, dt, dist, low) {
+    // a continuous tail of fire and black smoke behind the tumbling wreck (flight.js adds the big flames at the core)
+    const p = ac.pos, v = ac.vel, r = ac.radius || 8, pp = ac._wreckPrev, seg = pp ? pp.distanceTo(p) : 0;
+    const far = dist > 3000, burn = 1 - RJ.smooth(5, 11, ac.fallT || 0);
+    const n = pp && seg < 150 ? Math.min(far || low ? 3 : 7, Math.max(1, Math.floor(seg / 5))) : 1;
+    for (let j = 1; j <= n; j++) {
+      const q = pp && n > 1 ? _dl.copy(pp).lerp(p, j / n) : p;
+      if (burn > 0.05) FX.fireP.spawn(q.x + R(1), q.y + R(1), q.z + R(1), v.x * 0.1 + R(2), v.y * 0.1 + R(2) + 2, v.z * 0.1 + R(2), 0.35 + Math.random() * 0.35, (2.5 + r * 0.15) * burn, (6 + r * 0.3) * burn, 1, 0.5, 0.15, 0.8, 2, 1);
+      const d = 0.05 + Math.random() * 0.06;
+      if (j % 2 === 0 || n === 1) FX.smokeP.spawn(q.x + R(1.5), q.y + R(1.5), q.z + R(1.5), FX.wind.x * 0.5 + R(1.5), 1.5 + R(1.5), FX.wind.z * 0.5 + R(1.5), 7 + Math.random() * 5, 3 + r * 0.2, (16 + r) * (0.8 + Math.random() * 0.5), d, d, d * 1.02, 0.6, 0.3, 0.25);
+    }
+    ac._wreckPrev = ac._wreckPrev ? ac._wreckPrev.copy(p) : p.clone();
+    // bits keep tearing off: bursts of sparks and burning fragments
+    if (!far && Math.random() < dt * 2.5) for (let i = 0; i < 6; i++) FX.fireP.spawn(p.x, p.y, p.z, v.x * 0.8 + R(30), v.y * 0.8 + R(30) + 5, v.z * 0.8 + R(30), 0.5 + Math.random() * 0.8, 1.1, 0.35, 1, 0.75, 0.4, 1, -20, 0.5);
+  }
+
   /** A slow, dark column of smoke that keeps rising from a big blast (crash sites, kills) long after the fire. */
   FX.smokeColumn = function (p, s = 1) {
     const n = Math.round((RJ.settings.quality === "low" ? 5 : 11) * Math.min(1.6, Math.sqrt(s)));

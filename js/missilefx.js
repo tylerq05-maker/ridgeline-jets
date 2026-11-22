@@ -372,7 +372,6 @@
     MF.fireball(msl.pos, 6.5 * s, 0.9, vel, 1.1, hit || null);
     MF.shockRing(msl.pos, 16 * s);
     if (hit) MF.debris(msl.pos, hit.vel, 3 + Math.round(s * 2), true);
-    else if (msl.pos.y < RJ.world.ground(msl.pos.x, msl.pos.z) + 3) RJ.fx.dust(msl.pos, 0.9 * s);
   };
   /** Layered blast: white flash → expanding fireball → sparks and flaming debris → dark rolling smoke, plus a
    * shockwave (refraction ring + bright shell), a light that lights nearby aircraft and terrain, and camera shake. */
@@ -388,28 +387,83 @@
     for (let i = 0; i < 40 * s; i++) { const v = tv.set(R(1), R(1), R(1)).normalize().multiplyScalar(40 + Math.random() * 90 * s); fx.fireP.spawn(p.x, p.y, p.z, vx + v.x, vy + v.y + 8, vz + v.z, 0.5 + Math.random() * 0.9, 1.3, 0.4, 1, 0.82, 0.45, 1, -20, 0.5); }
     // 4 smoke: grey-black, rolling up and spreading, lingers long after the fire
     // (spread out, translucent and varied, so it billows like a cloud instead of reading as one dark ball)
-    for (let i = 0; i < 26 * Math.sqrt(s); i++) { const d = 0.13 + Math.random() * 0.22, v = tv.set(R(1), R(1), R(1)).normalize().multiplyScalar(5 + Math.random() * 14 * s); fx.smokeP.spawn(p.x + R(8 * s), p.y + R(8 * s), p.z + R(8 * s), vx + v.x, vy + v.y + 3, vz + v.z, 4 + Math.random() * 6, 8 * s, (30 + Math.random() * 30) * s, d * 1.05, d, d * 0.95, 0.42 + Math.random() * 0.2, 2.5, 0.7); }
+    for (let i = 0; i < 10 * Math.sqrt(s); i++) { const d = 0.13 + Math.random() * 0.22, v = tv.set(R(1), R(1), R(1)).normalize().multiplyScalar(5 + Math.random() * 14 * s); fx.smokeP.spawn(p.x + R(8 * s), p.y + R(8 * s), p.z + R(8 * s), vx + v.x, vy + v.y + 3, vz + v.z, 4 + Math.random() * 6, 8 * s, (30 + Math.random() * 30) * s, d * 1.05, d, d * 0.95, 0.42 + Math.random() * 0.2, 2.5, 0.7); }
+    // the fire's own smoke: born as each billow cools (0.2-0.9 s), out where the fireball reached, fire-stained
+    // brown at first then near black, rolling upward and leaning downwind for many seconds
+    const wd = fx.wind || tv3.set(0, 0, 0);
+    for (let i = 0, n = Math.min(60, 30 * Math.sqrt(s)); i < n; i++) {
+      const dir = tv.set(R(1), R(1) * 0.8 + 0.15, R(1)).normalize(), rr = (3 + Math.random() * 8) * s, out = (2 + Math.random() * 6) * Math.sqrt(s);
+      const d = 0.05 + Math.random() * 0.12, warm = !tint && i < n * 0.35;
+      fx.smokeP.spawn(p.x + dir.x * rr, p.y + dir.y * rr, p.z + dir.z * rr, vx * 0.6 + dir.x * out + wd.x, vy * 0.6 + dir.y * out + 4 + Math.random() * 4, vz * 0.6 + dir.z * out + wd.z,
+        6 + Math.random() * 7, 10 * s, (40 + Math.random() * 40) * s, d * (warm ? 1.5 : 1), d * (warm ? 1.12 : 1), d * 1.02, 0.55 + Math.random() * 0.25, 1.2, 0.5, 0.2 + Math.random() * 0.7);
+    }
     // 5 shockwave: screen-space refraction ring (shared with the sonic boom) and a light flash
     if (RJ.sonic && RJ.sonic.shocks) { RJ.sonic.shocks.push({ pos: p.clone(), t: 0, R0: 6 * s, vis: 0.7 }); if (RJ.sonic.shocks.length > 3) RJ.sonic.shocks.shift(); }
     fx.light.position.copy(p); fx.light.color.setHex(tint ? 0x8fdcff : 0xffb070); fx.lightLevel = Math.max(fx.lightLevel, Math.min(2.4, 1.1 * s));
+    // 6 at or near ground level: dirt fountain (or a water column), scorch mark and a fire that burns on
+    const g = RJ.world.ground(p.x, p.z);
+    if (fx.groundBlast && isFinite(g) && p.y - g < 10 + 8 * s) fx.groundBlast(tv.set(p.x, g, p.z), s, p.y - g);
   };
 
-  /* ---------------- debris: real tumbling fragments with smoke and flame trails ---------------- */
-  const DEB = []; let debMat = null, debGeo = null;
+  /* ---------------- debris: real tumbling fragments with smoke and flame trails ----------------
+   * Pooled meshes (never more than DEB_MAX live): torn skin panels in airframe grey, dark structure, and pieces of
+   * glowing hot metal that cool to soot. Burning ones trail flame and black smoke; they bounce once off the ground,
+   * then lie smouldering for a few seconds. */
+  const DEB = [], DEB_FREE = [], DEB_MAX = 64; let debMats = null, debGeo = null;
   MF.debris = function (p, vel, n = 10, burning = true) {
-    if (!debMat) {
-      debMat = new THREE.MeshStandardMaterial({ color: 0x3a3d41, roughness: 0.7, metalness: 0.6 });
-      debGeo = [new THREE.BoxGeometry(1, 0.08, 0.6), new THREE.BoxGeometry(0.5, 0.3, 0.9), new THREE.TetrahedronGeometry(0.6)];
+    if (!debMats) {
+      debMats = {
+        skin: new THREE.MeshStandardMaterial({ color: 0x8d939a, roughness: 0.55, metalness: 0.55 }),
+        dark: new THREE.MeshStandardMaterial({ color: 0x2e3135, roughness: 0.8, metalness: 0.5 }),
+        hot: new THREE.MeshStandardMaterial({ color: 0x2a2420, roughness: 0.7, metalness: 0.4, emissive: 0xff5a12, emissiveIntensity: 1.4 })
+      };
+      debGeo = [new THREE.BoxGeometry(1, 0.06, 0.7), new THREE.BoxGeometry(0.5, 0.3, 0.9), new THREE.TetrahedronGeometry(0.6), new THREE.BoxGeometry(1.6, 0.05, 0.45), new THREE.CylinderGeometry(0.18, 0.22, 1.2, 6)];
     }
     for (let i = 0; i < n; i++) {
-      if (DEB.length > 60) { const o = DEB.shift(); RJ.scene.remove(o.m); }
-      const m = new THREE.Mesh(debGeo[i % 3], debMat); m.scale.setScalar(0.5 + Math.random() * 1.6); m.castShadow = true;
+      let m;
+      if (DEB.length >= DEB_MAX) { const o = DEB.shift(); m = o.m; }
+      else m = DEB_FREE.pop() || null;
+      const burn = burning && Math.random() < 0.6, kind = burn && Math.random() < 0.5 ? "hot" : i % 3 === 0 ? "dark" : "skin";
+      if (!m) { m = new THREE.Mesh(debGeo[i % debGeo.length], debMats[kind]); m.castShadow = true; RJ.scene.add(m); }
+      else { m.geometry = debGeo[i % debGeo.length]; m.material = debMats[kind]; }
+      m.visible = true;
+      // mostly small bits, a few big panels
+      m.scale.setScalar(Math.random() < 0.15 ? 2 + Math.random() * 1.5 : 0.5 + Math.random() * 1.2);
       m.position.copy(p).add(tv.set(R(2), R(2), R(2)));
-      RJ.scene.add(m);
       const v = tv.set(R(1), R(1) + 0.4, R(1)).normalize().multiplyScalar(25 + Math.random() * 55).addScaledVector(vel || tv2.set(0, 0, 0), 0.5);
-      DEB.push({ m, v: v.clone(), w: V3(R(9), R(9), R(9)), t: 0, life: 6 + Math.random() * 4, burn: burning && Math.random() < 0.6, fxT: 0 });
+      DEB.push({ m, v: v.clone(), w: V3(R(9), R(9), R(9)), t: 0, life: 6 + Math.random() * 4, burn, hot: kind === "hot", fxT: 0, bounced: false, rest: false });
     }
   };
+  function tickDebris(dt) {
+    const fx = RJ.fx, low = RJ.settings.quality === "low", cam = RJ.camera;
+    for (let i = DEB.length - 1; i >= 0; i--) {
+      const d = DEB[i], m = d.m; d.t += dt;
+      if (d.hot && d.t > 3.5) { m.material = debMats.dark; d.hot = false; } // cooled to soot
+      if (!d.rest) {
+        d.v.y -= RJ.G0 * dt; d.v.multiplyScalar(Math.pow(0.96, dt)); // light air drag (panels flutter, chunks don't)
+        m.position.addScaledVector(d.v, dt);
+        m.rotation.x += d.w.x * dt; m.rotation.y += d.w.y * dt; m.rotation.z += d.w.z * dt;
+      }
+      const far = cam && cam.position.distanceToSquared(m.position) > 36e6;
+      d.fxT -= dt;
+      if (d.fxT <= 0 && d.t < (d.burn ? 9 : 3.5) && !far) {
+        d.fxT = low ? 0.09 : 0.05;
+        // a smoke trail that thickens as it falls; burning bits trail flame and blacker smoke
+        fx.smoke(m.position, tv.set(0, 1, 0), (d.burn ? 1.6 : 1.1) + Math.min(d.t, 5) * 0.5, d.burn ? 0.08 : 0.16, d.burn ? 5 : 3, d.rest ? 0.4 : 0.55);
+        if (d.burn && d.t < 5) fx.fire(m.position, tv.copy(d.v).multiplyScalar(0.1), (d.rest ? 1.1 : 1.8) - Math.min(d.t, 5) * 0.2);
+      }
+      const W = RJ.world, g = W.ground(m.position.x, m.position.z);
+      if (!d.rest && m.position.y < g + 0.3) {
+        const water = g < 0.6 && W.isWaterAt(m.position.x, m.position.z);
+        if (water) { fx.splash(m.position, 0.12); d.t = 1e9; }
+        else if (!d.bounced && d.v.y < -10) { // skip off the ground once, kicking up dirt
+          d.bounced = true; m.position.y = g + 0.3; d.v.y = -d.v.y * 0.3; d.v.x *= 0.5; d.v.z *= 0.5; d.w.multiplyScalar(0.5);
+          if (!far) fx.dust(m.position, 0.18);
+        } else { d.rest = true; m.position.y = g + 0.15; d.life = d.t + (d.burn ? 6 : 3); }
+      }
+      if (d.t > d.life + (d.rest ? 0 : 4)) { m.visible = false; DEB_FREE.push(m); DEB.splice(i, 1); }
+    }
+  }
   /* ---------------- jet kills: volumetric fireball, shock ring, secondary blasts ----------------
    * A real 3D fireball (noise-displaced sphere whose colour runs white-hot → orange → dull red → black smoke as it
    * swells and cools), a bright shock ring racing outward, and fuel tanks cooking off on the falling wreck. */
@@ -546,20 +600,7 @@
   MF.tick = function (dt) {
     MF.tickRibbons(dt);
     tickBlasts(dt);
-    for (let i = DEB.length - 1; i >= 0; i--) {
-      const d = DEB[i]; d.t += dt;
-      d.v.y -= RJ.G0 * dt; d.v.multiplyScalar(Math.pow(0.96, dt * 10 * 0.1));
-      d.m.position.addScaledVector(d.v, dt);
-      d.m.rotation.x += d.w.x * dt; d.m.rotation.y += d.w.y * dt; d.m.rotation.z += d.w.z * dt;
-      d.fxT -= dt;
-      if (d.fxT <= 0 && d.t < (d.burn ? 7 : 3.5)) {
-        d.fxT = RJ.settings.quality === "low" ? 0.09 : 0.05;
-        RJ.fx.smoke(d.m.position, tv.set(0, 1, 0), 1.2 + d.t * 0.5, 0.13, d.burn ? 4 : 3, 0.55);
-        if (d.burn && d.t < 4) RJ.fx.fire(d.m.position, tv.copy(d.v).multiplyScalar(0.1), 1.7 - d.t * 0.25);
-      }
-      const g = RJ.world.ground(d.m.position.x, d.m.position.z);
-      if (d.m.position.y < g + 0.3 || d.t > d.life) { if (d.m.position.y < g + 2) RJ.fx.dust(d.m.position, 0.25); RJ.scene.remove(d.m); DEB.splice(i, 1); }
-    }
+    tickDebris(dt);
   };
   /* ---------------- flares: burning magnesium decoys ----------------
    * Each flare is a blinding white-hot core inside a saturated orange fireball sprite (readable against white
@@ -623,7 +664,7 @@
   };
   MF.clear = function () {
     for (const b of BALLS) { b.k = 1; b.m.visible = false; } for (const r of RINGS) { r.k = 1; r.s.visible = false; } POPS.length = 0;
-    for (const d of DEB) RJ.scene.remove(d.m); DEB.length = 0;
+    for (const d of DEB) { d.m.visible = false; DEB_FREE.push(d.m); } DEB.length = 0;
     for (const r of RIBBONS) { RJ.scene.remove(r.mesh); r.g.dispose(); } RIBBONS.length = 0; MF.nCon = 0;
     for (const ac of WRECKS) ac._wrib = null; WRECKS.length = 0;
   };

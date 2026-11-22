@@ -155,38 +155,118 @@
     rainLP.frequency.setTargetAtTime(inPit ? 5200 : 2400, t, 0.4);
   }
 
-  /* ---------------- canopy droplets ---------------- */
-  let cv = null, cx = null; const drops = [];
-  function droplets(dt, amt, speed, inPit) {
+  /* ---------------- rain on the glass ----------------
+   * Cockpit: drops land on the canopy, bead, then the airflow tears them up and out across the glass,
+   * each dragging a thin wet trail and shedding tiny residue beads. Chase view: at speed, drops hit the
+   * "lens" and are blown out from the centre of the screen; slow, they bead and slide down.
+   * Each drop is a pre-rendered refractive sprite (a tiny inverted image of sky and ground, a dark
+   * meniscus rim and a specular glint), re-tinted to the live sky once a second, so a frame costs one
+   * drawImage per drop plus two short strokes per moving drop. */
+  let cv = null, cx = null, spr = null, sprT = 0, dropView = "";
+  const drops = [];
+  function dropSprite() {
+    const W = RJ.world, S = 64;
+    if (!spr) { spr = document.createElement("canvas"); spr.width = spr.height = S; }
+    const g = spr.getContext("2d"), hc = W.horizonColor || { r: 0.7, g: 0.75, b: 0.8 };
+    const lum = RJ.clamp(hc.r * 0.3 + hc.g * 0.59 + hc.b * 0.11, 0.05, 1);
+    const c8 = (v, k) => Math.round(RJ.clamp(v * k, 0, 1) * 255);
+    const sky = `${c8(hc.r, 1.25)},${c8(hc.g, 1.25)},${c8(hc.b, 1.3)}`, gnd = `${c8(hc.r, 0.32)},${c8(hc.g, 0.34)},${c8(hc.b, 0.36)}`;
+    g.clearRect(0, 0, S, S);
+    g.save(); g.beginPath(); g.arc(S / 2, S / 2, S / 2 - 1, 0, 6.283); g.clip();
+    // a drop is a lens that flips the world: ground refracted into its top, bright sky into its bottom
+    const body = g.createLinearGradient(0, 0, 0, S);
+    body.addColorStop(0, `rgba(${gnd},0.85)`); body.addColorStop(0.45, `rgba(${gnd},0.5)`);
+    body.addColorStop(0.62, `rgba(${sky},0.55)`); body.addColorStop(1, `rgba(${sky},0.95)`);
+    g.fillStyle = body; g.fillRect(0, 0, S, S);
+    // meniscus: a dark rim where light bends away from the eye
+    const rim = g.createRadialGradient(S / 2, S / 2, S * 0.3, S / 2, S / 2, S / 2);
+    rim.addColorStop(0, "rgba(0,0,0,0)"); rim.addColorStop(0.75, "rgba(10,14,20,0.25)"); rim.addColorStop(1, "rgba(5,8,12,0.75)");
+    g.fillStyle = rim; g.fillRect(0, 0, S, S);
+    g.restore();
+    // specular glint (upper left) and caustic (lower right), dimmer at night
+    const sp = 0.35 + 0.65 * lum;
+    const gl = g.createRadialGradient(S * 0.36, S * 0.3, 0, S * 0.36, S * 0.3, S * 0.16);
+    gl.addColorStop(0, `rgba(255,255,255,${0.95 * sp})`); gl.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = gl; g.fillRect(0, 0, S, S);
+    const ca = g.createRadialGradient(S * 0.6, S * 0.76, 0, S * 0.6, S * 0.76, S * 0.2);
+    ca.addColorStop(0, `rgba(255,255,250,${0.45 * sp})`); ca.addColorStop(1, "rgba(255,255,250,0)");
+    g.fillStyle = ca; g.fillRect(0, 0, S, S);
+    WX._dropLum = lum;
+  }
+  function droplets(dt, amt, speed, view) {
     if (!cv) {
       cv = document.createElement("canvas"); cv.id = "wx-drops";
       cv.style.cssText = "position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:4";
       document.body.appendChild(cv); cx = cv.getContext("2d");
     }
-    const w = Math.round(innerWidth / 2), h = Math.round(innerHeight / 2);
+    const w = Math.round(innerWidth / 2), h = Math.round(innerHeight / 2), pit = view === "cockpit";
     if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
-    if (inPit && amt > 0.02) {
-      let n = amt * dt * 90 * (speed > 60 ? 0.6 : 1);
-      while (n > 0) { if (Math.random() < n) drops.push({ x: Math.random() * w, y: Math.random() * h, r: RJ.rand(1.2, 3.6) * (0.6 + amt * 0.6), life: RJ.rand(1, 3) }); n--; }
+    if (view !== dropView) { drops.length = 0; dropView = view; }
+    if (!view && !drops.length) { if (cv.style.display !== "none") { cx.clearRect(0, 0, w, h); cv.style.display = "none"; } return; }
+    sprT -= dt;
+    if (!spr || sprT <= 0) { dropSprite(); sprT = 1; }
+    const flow = RJ.clamp(speed / 120, 0, 3); // airflow strength over the glass
+    // impacts: the canopy catches more rain the faster it flies; the chase "lens" mostly at speed
+    if (view && amt > 0.02 && dt > 0) {
+      const rate = pit ? amt * 70 * (1 + flow * 0.8) : amt * 26 * (0.25 + 0.75 * RJ.smooth(40, 160, speed));
+      let n = rate * dt;
+      while (n > 0) {
+        if (Math.random() < n) {
+          const r = (pit ? RJ.rand(1.1, 3.4) : RJ.rand(0.9, 2.6)) * (0.65 + amt * 0.5) * (h / 270);
+          drops.push({ x: Math.random() * w, y: Math.random() * h, r, life: RJ.rand(1.2, 3.2) * (flow > 0.5 ? 0.7 : 1.6), stick: RJ.rand(0.05, pit ? 0.7 : 0.25) * (flow > 0.3 ? 1 : 6), v: 0, tx: 0, ty: 1, trail: 0, res: 0 });
+        }
+        n--;
+      }
     }
-    if (drops.length > 220) drops.splice(0, drops.length - 220);
-    if (!inPit) drops.length = 0;
+    if (drops.length > 260) drops.splice(0, drops.length - 260);
     cx.clearRect(0, 0, w, h);
-    if (!drops.length) { cv.style.display = "none"; return; }
+    // a faint film of water around the edges of the canopy in steady rain
+    const film = pit ? RJ.clamp(amt * 1.3, 0, 1) : 0;
+    if (film > 0.05) {
+      const fg = cx.createRadialGradient(w / 2, h * 0.5, h * 0.35, w / 2, h * 0.5, Math.hypot(w, h) * 0.6);
+      fg.addColorStop(0, "rgba(160,175,190,0)"); fg.addColorStop(1, `rgba(150,165,180,${0.16 * film * (0.4 + 0.6 * (WX._dropLum || 0.5))})`);
+      cx.fillStyle = fg; cx.fillRect(0, 0, w, h);
+    }
+    if (!drops.length && film <= 0.05) { cv.style.display = "none"; return; }
     cv.style.display = "";
-    // airflow pushes drops outward from the windscreen centre and upward, faster at speed
-    const flow = RJ.clamp(speed / 120, 0, 3);
+    const cxp = w / 2, cyp = pit ? h * 0.55 : h * 0.5, night = 0.45 + 0.55 * (WX._dropLum || 0.5);
+    cx.lineCap = "round";
     for (let i = drops.length - 1; i >= 0; i--) {
       const d = drops[i];
       d.life -= dt;
-      const ox = d.x - w / 2, oy = d.y - h * 0.55, l = Math.hypot(ox, oy) || 1;
-      d.x += ox / l * flow * 60 * dt; d.y += (oy / l * 0.4 - 0.8) * flow * 60 * dt + (flow < 0.3 ? 8 * dt : 0);
-      if (d.life <= 0 || d.x < -10 || d.x > w + 10 || d.y < -10 || d.y > h + 10) { drops.splice(i, 1); continue; }
-      const a = Math.min(1, d.life * 2) * 0.55, r = d.r, sx = flow > 0.6 ? 1 + flow * 0.8 : 1;
-      cx.save(); cx.translate(d.x, d.y); cx.rotate(Math.atan2(oy, ox) * (flow > 0.6 ? 1 : 0)); cx.scale(sx, 1);
-      const g = cx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
-      g.addColorStop(0, `rgba(255,255,255,${a})`); g.addColorStop(0.5, `rgba(170,190,210,${a * 0.35})`); g.addColorStop(1, `rgba(40,50,60,${a * 0.5})`);
-      cx.fillStyle = g; cx.beginPath(); cx.arc(0, 0, r, 0, 6.283); cx.fill(); cx.restore();
+      if (d.life <= 0 || d.x < -20 || d.x > w + 20 || d.y < -20 || d.y > h + 20) { drops.splice(i, 1); continue; }
+      d.stick -= dt;
+      if (d.stick <= 0 && d.r > 0.8 && dt > 0) {
+        const ox = d.x - cxp, oy = d.y - cyp, l = Math.hypot(ox, oy) || 1;
+        let dx, dy;
+        if (flow > 0.3) {
+          // torn off by the airflow: accelerates outward (and up the canopy in the cockpit)
+          d.v = Math.min(d.v + dt * (pit ? 220 : 420) * flow, (pit ? 160 : 520) * flow);
+          dx = ox / l; dy = pit ? oy / l * 0.45 - 0.9 : oy / l;
+          const m = Math.hypot(dx, dy) || 1; dx /= m; dy /= m;
+        } else {
+          // no airflow: a heavy bead slides down under gravity, wandering a little
+          d.v = Math.min(d.v + dt * 30 * d.r, 18 * d.r);
+          dx = Math.sin(d.y * 0.37 + d.x * 0.11) * 0.25; dy = 1;
+        }
+        d.x += dx * d.v * dt; d.y += dy * d.v * dt;
+        d.tx = dx; d.ty = dy; d.trail = Math.min(d.trail + d.v * dt, d.r * (flow > 0.3 ? 14 : 8));
+        // moving drops leave tiny residue beads behind them
+        d.res += d.v * dt;
+        if (d.res > d.r * 6 && drops.length < 250 && Math.random() < 0.5) { d.res = 0; drops.push({ x: d.x - dx * d.r * 3, y: d.y - dy * d.r * 3, r: d.r * RJ.rand(0.25, 0.45), life: RJ.rand(0.4, 1.4), stick: 9, v: 0, tx: 0, ty: 1, trail: 0, res: 0 }); d.r *= 0.97; }
+      }
+      const a = Math.min(1, d.life * 2.5) * (pit ? 0.8 : 0.65) * night, r = d.r;
+      if (d.trail > r) {
+        cx.strokeStyle = `rgba(200,212,226,${a * 0.28})`; cx.lineWidth = r * 0.9;
+        cx.beginPath(); cx.moveTo(d.x - d.tx * d.trail, d.y - d.ty * d.trail); cx.lineTo(d.x, d.y); cx.stroke();
+        cx.strokeStyle = `rgba(255,255,255,${a * 0.22})`; cx.lineWidth = Math.max(0.6, r * 0.3);
+        cx.beginPath(); cx.moveTo(d.x - d.tx * d.trail * 0.7, d.y - d.ty * d.trail * 0.7); cx.lineTo(d.x, d.y); cx.stroke();
+      }
+      cx.globalAlpha = a;
+      // fast drops stretch along their path
+      if (d.v > 30) { cx.save(); cx.translate(d.x, d.y); cx.rotate(Math.atan2(d.ty, d.tx)); const s = 1 + Math.min(d.v / 200, 0.9); cx.drawImage(spr, -r * s, -r * 0.85, r * 2 * s, r * 1.7); cx.restore(); }
+      else cx.drawImage(spr, d.x - r, d.y - r, r * 2, r * 2);
+      cx.globalAlpha = 1;
     }
   }
 
@@ -240,7 +320,8 @@
     const pl = RJ.game && RJ.game.mode && RJ.game.mode.player, inPit = RJ.cam && RJ.cam.mode === "cockpit";
     const under = p.y < Math.max(W.cloudBase || 0, 300) + 300;
     rainAudio(under ? WX.rain : W.inCloud > 0.3 ? (+wx.rain || 0) * 0.5 : 0, inPit);
-    droplets(dt, under ? WX.rain : (W.inCloud || 0) * ((+wx.rain || 0) + 0.15), pl ? pl.speed || 0 : 0, inPit);
+    const view = RJ.cam && !RJ.cam.temp && (RJ.cam.mode === "cockpit" || RJ.cam.mode === "chase") ? RJ.cam.mode : "";
+    droplets(dt, under ? WX.rain : (W.inCloud || 0) * ((+wx.rain || 0) + 0.15), pl ? pl.speed || 0 : 0, view);
   };
 
   WX.strike = strike; // tests

@@ -12,6 +12,7 @@
   const glow = (r, g, b) => new THREE.MeshBasicMaterial({ color: new THREE.Color(r, g, b), fog: true });
   const LM = (L.lm = {});
   const lights = []; // {mat, base: Color, day: 0..1} brightened at night
+  const lifeHooks = () => L.lifeHooks || (L.lifeHooks = { beacons: [], lanes: [] });
   const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = V3(), _p = V3(), _e = new THREE.Euler();
 
   /* ---------------- placement helpers ---------------- */
@@ -477,6 +478,19 @@
     f.add(nl);
     f.traverse((o) => { if (o.isMesh && !o.isInstancedMesh) { o.castShadow = true; o.receiveShadow = true; } });
     grp.add(f);
+    // for the night-life layer (nyc-life.js): red beacons on the tower tops, and the roadway lanes for the traffic
+    {
+      f.updateMatrix();
+      const w = (lx, ly, lz) => { const v = V3(lx, ly, lz).applyMatrix4(f.matrix); return [v.x, v.y, v.z]; };
+      const H = lifeHooks();
+      for (const tx of [-half, half]) for (const s of [-1, 1]) H.beacons.push(w(tx, B.h + 4, s * (B.w / 2 + 2)));
+      const xa = x0 - B.appr[0], xb = x1 + B.appr[1], yg = L.GROUND + 0.9, yd = D + 0.9;
+      for (let z = 2.2; z < B.w / 2 - 1.5; z += 3.4) {
+        // +z lanes drive towards +x, −z lanes back: up the ramp, across the deck, down the far ramp
+        H.lanes.push([w(xa, yg, z), w(x0, yd, z)], [w(x0, yd, z), w(x1, yd, z)], [w(x1, yd, z), w(xb, yg, z)]);
+        H.lanes.push([w(xb, yg, -z), w(x1, yd, -z)], [w(x1, yd, -z), w(x0, yd, -z)], [w(x0, yd, -z), w(xa, yg, -z)]);
+      }
+    }
     // collision: the deck and the towers
     const cs = Math.cos(f.rotation.y), sn = Math.sin(f.rotation.y), cx = f.position.x, cz = f.position.z;
     L.solids.push((x, z) => {
@@ -518,6 +532,13 @@
     L.solids.push((x, z) => { const rx = x - ax, rz = z - az, lx = rx * cs - rz * sn, lz = rx * sn + rz * cs; if (Math.abs(lz) > W / 2 + 2 || lx < -150 || lx > len + 150) return -Infinity; for (const p of piers) if (Math.abs(lx - p) < 6) return topY(p) + 10; return -Infinity; });
     L.deckSolids.push((x, y, z) => { const rx = x - ax, rz = z - az, lx = rx * cs - rz * sn, lz = rx * sn + rz * cs; return Math.abs(lz) < W / 2 + 2 && lx > -150 && lx < len + 150 && y > D - 8 && y < D + 3; });
     grp.add(f);
+    {
+      f.updateMatrix();
+      const w = (lx, ly, lz) => { const v = V3(lx, ly, lz).applyMatrix4(f.matrix); return [v.x, v.y, v.z]; };
+      const H = lifeHooks();
+      for (const p of piers) for (const s of [-1, 1]) H.beacons.push(w(p, topY(p) + 23, s * (W / 2 + 1)));
+      for (let z = 2.2; z < W / 2 - 1.5; z += 3.4) H.lanes.push([w(-150, D + 0.9, z), w(len + 150, D + 0.9, z)], [w(len + 150, D + 0.9, -z), w(-150, D + 0.9, -z)]);
+    }
   }
 
   /* ======================= Times Square ======================= */

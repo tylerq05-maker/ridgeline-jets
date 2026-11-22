@@ -288,7 +288,8 @@
     "  }",
     // aerial perspective: distant clouds fade into the haze
     "  float dist = wsum > 1e-4 ? dsum / wsum : t0;",
-    "  float fogF = 1.0 - exp(-fogDen * dist);",
+    // (wavelength dependent, like the terrain fog: far cumulus go blue-grey before they melt into the horizon)
+    "  vec3 fogF = 1.0 - exp(-fogDen * dist * vec3(0.8, 0.96, 1.3));",
     "  col = mix(col, fogCol * (1.0 - T), clamp(fogF, 0.0, 0.92));",
     "  gl_FragColor = vec4(col, T);",
     "}"

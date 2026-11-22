@@ -469,14 +469,38 @@
     "  col *= mix(0.62, 1.0, smoothstep(0.0, 16.0, v));",
     "  fCol = col;",
     // ---------- night: lit rooms (offices by floor, homes by window), bright shopfronts ----------
+    // Every building keeps its own habits: some office towers burn on every floor, others have gone dark but for
+    // the cleaners working a floor or two; homes light window by window in warm tungsten, cooler LED and the odd
+    // flickering TV, and over the minutes lights go on and off here and there.
     "  if (uNight > 0.01) {",
-    "    float litP = style == 0.0 || style == 3.0 ? 0.24 : 0.3;",
-    "    float rh = style == 0.0 || style == 3.0 ? fh2(vec2(fl, floor(bi / 6.0)) + seed * 0.07) : wh;",
+    "    bool office = style == 0.0 || style == 3.0 || style == 7.0;",
+    "    float occ = fh1(seed + 3.71);",                                         // how busy this building is tonight
+    "    float litP = office ? mix(0.04, 0.62, occ * occ) : mix(0.12, 0.5, occ);",
+    "    float slot = floor(uTime / 45.0 + fh2(vec2(bi, fl) + seed * 0.3) * 9.0);", // lights switch now and then
+    "    float flip = step(0.93, fh2(vec2(bi * 0.71 + slot, fl * 1.37) + seed * 0.11));",
+    "    float rh = office ? fh2(vec2(fl, floor(bi / 6.0)) + seed * 0.07) : wh;",
     "    float lit = step(rh, litP * uNight);",
+    "    if (!office) lit = abs(lit - flip);",
+    "    if (office && fh2(vec2(fl * 0.37, seed)) > 0.96) lit = 1.0;",           // the late shift: a whole floor on
     "    float warm = fh2(vec2(bi * 1.3, fl * 0.7) + seed);",
-    "    vec3 lc = warm < 0.62 ? vec3(1.0, 0.72, 0.42) : warm < 0.85 ? vec3(0.86, 0.9, 1.0) : vec3(1.0, 0.86, 0.66);",
-    "    float k = v < gH ? (fh1(floor(u / 5.5) + seed) < 0.75 ? 1.5 : 0.0) : lit * (0.75 + warm * 0.6);",
-    "    fEmis = lc * k * mix(win, glassFrac * litP * 0.9, far) * uNight;",
+    "    vec3 lc;",
+    "    if (office) {",                                                            // fluorescent / LED office white, a tint per building
+    "      vec3 tint = pal5(hs2, vec3(0.82, 0.9, 1.0), vec3(0.95, 0.95, 0.92), vec3(1.0, 0.9, 0.72), vec3(0.78, 0.88, 1.0), vec3(0.9, 0.95, 1.0));",
+    "      lc = tint * (0.85 + warm * 0.3);",
+    "    } else {",
+    "      lc = warm < 0.66 ? vec3(1.0, 0.68, 0.36) : warm < 0.86 ? vec3(1.0, 0.84, 0.6) : warm < 0.96 ? vec3(0.84, 0.88, 1.0) : vec3(0.4, 0.55, 1.0) * (0.75 + 0.5 * fh1(floor(uTime * 3.0) + bi));",
+    "      lc *= 0.7 + 0.5 * fh2(vec2(bi, fl) * 0.9 + seed);",                       // lamps, curtains, shades
+    "    }",
+    "    float room = 0.7 + 0.5 * smoothstep(0.2, 0.95, fy);",                      // ceiling glow at the top of the window
+    "    float shop = fh1(floor(u / 5.5) + seed) < 0.75 ? 1.5 : 0.0;",
+    "    float k = v < gH ? shop : lit * (0.75 + warm * 0.6) * mix(room, 1.0, far);",
+    "    vec3 shopC = mix(vec3(1.0, 0.82, 0.6), vec3(0.85, 0.92, 1.0), step(0.6, fh1(floor(u / 5.5) + seed * 1.3)));",
+    "    fEmis = (v < gH ? shopC : lc) * k * mix(win, glassFrac * litP * 0.9, far) * uNight;",
+    // tall glass towers: some wash their crowns in light (white, blue or gold), the way Midtown's tops glow
+    "    if (top > 150.0 && v > top - 12.0 && hs3 > 0.55) {",
+    "      vec3 cc = pal5(fh1(seed + 9.1), vec3(1.0, 0.95, 0.85), vec3(0.55, 0.75, 1.0), vec3(1.0, 0.78, 0.45), vec3(0.85, 0.9, 1.0), vec3(0.7, 0.6, 1.0));",
+    "      fEmis += cc * (0.35 + 0.65 * smoothstep(top - 12.0, top - 1.5, v)) * 0.9 * uNight;",
+    "    }",
     "  }",
     "}"
   ].join("\n");
@@ -914,6 +938,7 @@
   NYC.inParkAt = (e, n) => { const g = gridAt(e, n), s = NY.sdfLocal(e, n); const [a, c] = g ? toGrid(g, e, n) : [0, 0]; return inPark(e, n, g, a, c, s); };
   NYC.zoneName = (e, n) => { const g = gridAt(e, n); if (!g) return ""; const [a, c] = toGrid(g, e, n); return zoneFor(g, e, n, a, c).name; };
   NYC.sdfLocal = (e, n) => NY.sdfLocal(e, n);
+  NYC.gridExtent = (g) => gridExtent(g); // for the night-life layer (nyc-life.js)
   NYC.build = function () {
     const gen = RJ.world.gen; NY = gen.nyc; RAS = NY.raster();
     RAS.names.forEach((nm, i) => (OWN[nm] = i + 1));
@@ -971,6 +996,7 @@
     const dusk = RJ.clamp(1 - RJ.smooth(2, 14, W.sunElev), 0, 1) * 0.35;
     NYC.night = Math.max(night, dusk * 0.6);
     NYC.massMat.userData.u.uNight.value = NYC.night;
+    NYC.massMat.userData.u.uTime.value = (NYC.massMat.userData.u.uTime.value + dt) % 7200;
     if (RJ.cityKit) RJ.cityKit.wetTick(dt);
     NYC.groundMat.userData.u.uNight.value = night; NYC.groundMat.userData.u.uTime.value = (NYC.groundMat.userData.u.uTime.value + dt) % 1000;
     const d = Math.hypot(cam.position.x - NY.cx, cam.position.z - NY.cz);
@@ -982,6 +1008,7 @@
     for (const m of TANKM) m.visible = (m.position.x - cp.x) ** 2 + (m.position.z - cp.z) ** 2 < tk2;
     if (NYC.updateDetail) NYC.updateDetail(dt, cam);
     if (NYC.updateLandmarks) NYC.updateLandmarks(dt, cam);
+    if (NYC.life) { try { NYC.life.update(dt, cam); } catch (e) { console.warn("NYC life", e); NYC.life.update = () => {}; } }
   };
   /** Build on demand (when the player starts in or approaches the city), not at every game start. */
   NYC.ensure = function () {
