@@ -143,15 +143,21 @@
   }
   /* Kill cam: the moment your shot lands, cut to a slow-motion side view of the burning wreck tumbling away,
    * drifting round it, then hand back to your own camera. The world runs at ~30% speed for the first part. */
-  const _kv = V3();
+  const _kv = V3(), _kv2 = V3();
   RJ.killCam = function (victim, player) {
     if (RJ.settings.killCam === false || cam.temp || !victim || !player || !player.alive) return false;
     if (player.agl < 150 || player.incoming.length || player.state !== "flying") return false; // never blind you when it's dangerous
     const d = Math.max(victim.vis.dims.len, victim.vis.dims.span), side = Math.random() < 0.5 ? -1 : 1;
     const v = _kv.copy(victim.vel).setY(0); if (v.lengthSq() < 1) v.copy(victim.fwd).setY(0); v.normalize();
     // the camera sits off the victim's flank, a little ahead and above, so the wreck streaks across the frame
-    const off = V3(-v.z * side, 0, v.x * side).multiplyScalar(d * 2.6 + 26).addScaledVector(v, d * 1.4 + 10);
-    off.y = d * 0.5 + 6;
+    // try the chosen flank, then the other one, then high above: keep the wreck in clear view of the camera
+    let off = null;
+    for (const [sd, up] of [[side, 0], [-side, 0], [side, 1], [-side, 1]]) {
+      const o = V3(-v.z * sd, 0, v.x * sd).multiplyScalar(d * 4 + 60).addScaledVector(v, d * 2 + 20);
+      o.y = up ? d * 2 + 40 : d * 0.5 + 6;
+      if (!terrainBlocks(_kv2.copy(victim.pos).add(o), victim.pos) && victim.pos.y + o.y > RJ.world.ground(victim.pos.x + o.x, victim.pos.z + o.z) + 4) { off = o; break; }
+    }
+    if (!off) return false;
     cam.temp = { kind: "kill", t: 2.7, dur: 2.7, victim, off, a: 0, side };
     cam.blend = 1;
     RJ.killSlow = 2.7;
@@ -340,7 +346,7 @@
     P.flash = Math.max(0, P.flash - dt * 2.2);
     P.chroma = RJ.damp(P.chroma, 0, 4, dt);
     // depth of field only for the cinematic and replay cameras
-    if (camMode === "cinematic" || camMode === "boom") { const dd = camera.position.distanceTo(focus.pos); P.dof = [dd, Math.max(30, dd * 0.7), 0.85]; }
+    if (camMode === "cinematic" || camMode === "boom" || camMode === "kill") { const dd = camera.position.distanceTo(focus.pos); P.dof = [dd, Math.max(30, dd * 0.7), 0.85]; }
     else P.dof = null;
   }
 
@@ -763,7 +769,7 @@
     if (player.alive && player.state === "flying" && player.agl < 25 && player.speed > 60 && player.gearT < 0.9) pullUp = pullUp || player.vel.y < 0;
     const extras = mode.hudExtras();
     if (spect) { RJ.hud.clear(); mode.hud(dt); RJ.ui.status(mode.status()); RJ.ui.objective(""); return; }
-    RJ.hud.draw(Object.assign({ player: focus === player ? player : focus, camera, camMode: camMode === "boom" ? "cinematic" : camMode, cockpit3d: !!overlays, others: RJ.combat.aircraft, pullUp }, focus === player ? extras : {}));
+    RJ.hud.draw(Object.assign({ player: focus === player ? player : focus, camera, camMode: camMode === "boom" || camMode === "kill" ? "cinematic" : camMode, cockpit3d: !!overlays, others: RJ.combat.aircraft, pullUp }, focus === player ? extras : {}));
     RJ.ui.status(mode.status());
     RJ.ui.objective(camMode === "cinematic" ? `Cinematic camera · ${RJ.keyLabel(RJ.settings.keys.camera)} to change view` : mode.objective());
     if (RJ.modes._dirty) { RJ.saveProgress(); RJ.modes._dirty = false; }
