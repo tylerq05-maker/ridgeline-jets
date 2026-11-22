@@ -145,8 +145,8 @@
    * drifting round it, then hand back to your own camera. The world runs at ~30% speed for the first part. */
   const _kv = V3(), _kv2 = V3();
   RJ.killCam = function (victim, player) {
-    if (RJ.settings.killCam === false || cam.temp || !victim || !player || !player.alive) return false;
-    if (player.agl < 150 || player.incoming.length || player.state !== "flying") return false; // never blind you when it's dangerous
+    if (RJ.settings.killCam === false || (cam.temp && cam.temp.kind !== "msl") || !victim || !player || !player.alive) return false;
+    if (player.agl < 150 || player.incoming.length || player.state !== "flying") { if (cam.temp && cam.temp.kind === "msl") { cam.temp = null; cam.set(cam.mode, true); } return false; } // never blind you when it's dangerous
     const d = Math.max(victim.vis.dims.len, victim.vis.dims.span), side = Math.random() < 0.5 ? -1 : 1;
     const v = _kv.copy(victim.vel).setY(0); if (v.lengthSq() < 1) v.copy(victim.fwd).setY(0); v.normalize();
     // the camera sits off the victim's flank, a little ahead and above, so the wreck streaks across the frame
@@ -163,6 +163,47 @@
     RJ.killSlow = 2.7;
     return true;
   };
+  /* Missile cam: ride behind your newest missile until it hits or goes dead, slow motion in the last second. */
+  const _mv = V3(), _mt = V3();
+  RJ.missileCam = function (pl) {
+    if (cam.temp && cam.temp.kind === "msl") { cam.temp = null; cam.set(cam.mode, true); RJ.camSlow = 1; return; }
+    if (cam.temp) return;
+    const ms = RJ.combat.missiles.filter((m) => m.owner === pl);
+    if (!ms.length) { RJ.ui.flash("NO MISSILE IN FLIGHT", "Fire one, then press " + RJ.keyLabel(RJ.settings.keys.mslcam), 1); return; }
+    const m = ms[ms.length - 1];
+    cam.temp = { kind: "msl", msl: m, t: 30, dur: 30, gone: 0, last: m.pos.clone(), dir: m.vel.clone().normalize() };
+    cam.blend = 1;
+  };
+  function missileShot(dt, outP, outQ) {
+    const T = cam.temp, m = T.msl, live = RJ.combat.missiles.includes(m);
+    RJ.camSlow = 1;
+    if (live && !T.hooked) {
+      // the motor's glow sprites are sized for watching from afar; from a few metres they fill the lens, so dim them
+      // while this camera rides this missile (per draw: the materials may be shared with other missiles)
+      T.hooked = true;
+      m.mesh.traverse((o) => {
+        if (!o.material || o.material.blending !== THREE.AdditiveBlending || !(o.isSprite || o.name === "mglow")) return;
+        o.onBeforeRender = function () { if (cam.temp && cam.temp.msl === m) { this.userData.op = this.material.opacity; this.material.opacity *= 0.12; } };
+        o.onAfterRender = function () { if (this.userData.op != null) { this.material.opacity = this.userData.op; this.userData.op = null; } };
+      });
+    }
+    if (live) {
+      T.last.copy(m.pos);
+      if (m.vel.lengthSq() > 1) T.dir.lerp(_mv.copy(m.vel).normalize(), 1 - Math.exp(-dt * 8)).normalize();
+      if (m.target && m.target.alive) {
+        const d = m.pos.distanceTo(m.target.pos), cl = Math.max(50, m.vel.length() - m.target.vel.dot(T.dir));
+        if (d / cl < 1.2) RJ.camSlow = 0.35;
+      }
+    } else if ((T.gone += dt) > 1.2) { T.t = 0; }
+    // a few metres behind and above the motor, looking down the flight path toward the target
+    // beside the missile and a touch behind, so the motor plume streams away from the lens instead of filling it
+    outP.copy(T.last).addScaledVector(T.dir, -6).add(_mt.set(-T.dir.z * 2.1, 0.9, T.dir.x * 2.1));
+    outP.y = Math.max(outP.y, RJ.world.ground(outP.x, outP.z) + 2);
+    const look = _mt.copy(T.last).addScaledVector(T.dir, 10);
+    if (live && m.target && m.target.alive) look.lerp(m.target.pos, 0.12);
+    outQ.setFromRotationMatrix(new THREE.Matrix4().lookAt(outP, look, V3(0, 1, 0)));
+    return 58;
+  }
   function killShot(outP, outQ) {
     const T = cam.temp, f = T.victim, k = 1 - T.t / T.dur;
     T.a = k * 0.9 * T.side; // slow drift round the wreck
@@ -177,7 +218,7 @@
     let fov = RJ.settings.fov;
     let mode = cam.mode;
     if (f.state === "falling" || f.state === "dead") mode = "death";
-    if (cam.temp) { cam.temp.t -= dt; if (cam.temp.t <= 0 || mode === "death") { cam.temp = null; cam.set(cam.mode); } else mode = cam.temp.kind === "kill" ? "kill" : "boom"; }
+    if (cam.temp) { cam.temp.t -= dt; if (cam.temp.t <= 0 || mode === "death") { cam.temp = null; cam.set(cam.mode); } else mode = cam.temp.kind === "kill" ? "kill" : cam.temp.kind === "msl" ? "msl" : "boom"; }
     if (mode === "chase") {
       chaseTarget(f, dt, cp, cq);
       fov += RJ.clamp((f.mach - 0.6) * 6, 0, 10) + f.abLevel * 5 + (f.isPlayer ? RJ.camFx.fov : 0);
@@ -190,6 +231,8 @@
       fov = boomShot(f, cp, cq);
     } else if (mode === "kill") {
       fov = killShot(cp, cq);
+    } else if (mode === "msl") {
+      fov = missileShot(dt, cp, cq);
     } else {
       cam.deathA = (cam.deathA || 0) + dt * 0.3;
       const r = 70 + f.radius * 3;
@@ -552,7 +595,7 @@
     RJ.audio.stopEngines();
     if (RJ.lever) RJ.lever.hideFx(); if (RJ.nav) RJ.nav.reset();
     if (RJ.companion) RJ.companion.stop();
-    cam.hidden = null; cam.temp = null; RJ.killSlow = 0; PIP.t = 0; PIP.target = null; CP.owner = null;
+    cam.hidden = null; cam.temp = null; RJ.killSlow = 0; RJ.camSlow = 1; PIP.t = 0; PIP.target = null; CP.owner = null;
   }
   RJ.startGame = async function (kind, opts) {
     if (RJ.intro && RJ.intro.active) RJ.intro.skip();
@@ -690,11 +733,14 @@
         }
       } else { I.action("missile"); I.action("target"); }
       if (I.action("flares")) RJ.combat.dropFlares(pl);
+      if (I.action("mslcam")) RJ.missileCam(pl);
+      if (cam.temp && cam.temp.kind === "msl" && (pl.incoming.length || pl.agl < 120)) { cam.temp = null; cam.set(cam.mode, true); RJ.camSlow = 1; RJ.ui.flash("MISSILE CAM OFF", pl.incoming.length ? "Missile inbound!" : "Low altitude", 1); }
     }
     // kill cam slow motion: 30% speed, easing back to real time over the last second
     let slow = 1;
     if (RJ.killSlow > 0) { RJ.killSlow = Math.max(0, RJ.killSlow - dt); slow = RJ.lerp(1, 0.3, RJ.clamp(RJ.killSlow / 1.0, 0, 1)); if (!cam.temp || cam.temp.kind !== "kill") RJ.killSlow = 0; }
-    simAcc += dt * (mode.timeScale || 1) * slow;
+    if (!cam.temp || cam.temp.kind !== "msl") RJ.camSlow = 1;
+    simAcc += dt * (mode.timeScale || 1) * Math.min(slow, RJ.camSlow || 1);
     let steps = 0;
     while (simAcc >= SIM_DT && steps < SIM_MAX) {
       snapPrev();
@@ -784,7 +830,7 @@
     if (player.alive && player.state === "flying" && player.agl < 25 && player.speed > 60 && player.gearT < 0.9) pullUp = pullUp || player.vel.y < 0;
     const extras = mode.hudExtras();
     if (spect) { RJ.hud.clear(); mode.hud(dt); RJ.ui.status(mode.status()); RJ.ui.objective(""); return; }
-    RJ.hud.draw(Object.assign({ player: focus === player ? player : focus, camera, camMode: camMode === "boom" || camMode === "kill" ? "cinematic" : camMode, cockpit3d: !!overlays, others: RJ.combat.aircraft, pullUp }, focus === player ? extras : {}));
+    RJ.hud.draw(Object.assign({ player: focus === player ? player : focus, camera, camMode: camMode === "boom" || camMode === "kill" || camMode === "msl" ? "cinematic" : camMode, cockpit3d: !!overlays, others: RJ.combat.aircraft, pullUp }, focus === player ? extras : {}));
     RJ.ui.status(mode.status());
     RJ.ui.objective(camMode === "cinematic" ? `Cinematic camera · ${RJ.keyLabel(RJ.settings.keys.camera)} to change view` : mode.objective());
     if (RJ.modes._dirty) { RJ.saveProgress(); RJ.modes._dirty = false; }
