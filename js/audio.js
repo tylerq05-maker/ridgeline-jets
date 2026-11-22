@@ -114,6 +114,15 @@
     st.N = N;
     return N;
   }
+  /** Two-spool lag: the core (N2, heard as the turbine whine) answers the throttle first; the big fan / exhaust
+   *  flow (N1, heard as the roar) follows a beat later, so a slam to full power is "whine rises, then the roar
+   *  arrives", and a chop is the roar falling away under a still-spinning core. */
+  function fanLag(st, p, N, dt) {
+    if (st.N1 == null || p.kind !== "jet") { st.N1 = N; return N; }
+    const k = N > st.N1 ? p.up * 1.9 : p.down * 1.5;
+    st.N1 += (N - st.N1) * (1 - Math.exp(-dt * k));
+    return st.N1;
+  }
 
   /* ---------------- engine voice: every layer exists once, the family sets the mix ---------------- */
   class EngineVoice {
@@ -125,6 +134,11 @@
       this.pan = ctx.createStereoPanner ? ctx.createStereoPanner() : null;
       this.out.connect(this.air);
       if (this.pan) this.air.connect(this.pan).connect(bus); else this.air.connect(bus);
+      // ground reflection: the same sound arriving a few ms later off the ground. Direct + reflected paths
+      // interfere into a comb filter that sweeps as the geometry changes: the "phasing" swoosh of a low pass.
+      this.refD = ctx.createDelay(0.15); this.refD.delayTime.value = 0.01;
+      this.refG = mkGain(ctx, 0);
+      this.air.connect(this.refD).connect(this.refG).connect(this.pan || bus);
       const layer = (buf, type, f, q) => { const fl = mkFilt(ctx, type, f, q), g = mkGain(ctx); loop(ctx, buf).connect(fl).connect(g).connect(this.out); return { f: fl, g }; };
       this.roar = layer(B.brown, "lowpass", 400, 0.7);
       this.deep = layer(B.pink, "lowpass", 190, 0.6);
@@ -137,6 +151,8 @@
       const w2g = mkGain(ctx, 0.42); this.w1.connect(this.wg); this.w2.connect(w2g).connect(this.wg);
       this.wob = mkOsc(ctx, "sine", 0.31 + Math.random() * 0.3); this.wobG = mkGain(ctx, 7);
       this.wob.connect(this.wobG); this.wobG.connect(this.w1.detune); this.wobG.connect(this.w2.detune);
+      // the blade-pass tone is never a pure sine: a narrow band of turbulent noise rides on it (the "hiss-whine")
+      this.wn = layer(B.white, "bandpass", 3000, 18);
       // fan buzz-saw: two slightly detuned saws through a band-pass
       this.bz1 = mkOsc(ctx, "sawtooth", 100); this.bz2 = mkOsc(ctx, "sawtooth", 100.7);
       this.bzF = mkFilt(ctx, "bandpass", 700, 1.3); this.bzG = mkGain(ctx);
@@ -161,6 +177,8 @@
       if (this.lastQ !== p.scream) { this.lastQ = p.scream; this.rasp.f.Q.setTargetAtTime(p.scream ? 6 : 0.9, t, 0.2); }
       T(this.air.frequency, s.air, 0.12);
       if (this.pan) T(this.pan.pan, s.pan, 0.08);
+      T(this.refG.gain, s.refl || 0, 0.1);
+      if (s.refl) this.refD.delayTime.setTargetAtTime(RJ.clamp(s.rdel || 0, 0.0002, 0.14), t, 0.05);
       const zero = (...gs) => gs.forEach((g) => T(g.gain, 0, 0.1));
       if (p.kind === "prop") {
         // V12 piston: firing note = rpm/10 (1100 rpm idle → 3000 rpm), 4-blade prop at 0.42 reduction
@@ -179,7 +197,7 @@
         this.popT = Math.max((this.popT || 0) * 0.96, pop);
         T(this.crk.f.frequency, 700); T(this.crk.g.gain, lit * (0.03 + this.popT * 0.4 + (1 - n) * 0.05));
         T(this.wobG.gain, 18);
-        zero(this.wg, this.bzG, this.abr.g);
+        zero(this.wg, this.bzG, this.abr.g, this.wn.g);
         return;
       }
       if (this.rum.type !== "triangle") this.rum.type = "triangle";
@@ -187,6 +205,7 @@
         const lit = RJ.clamp(N / p.idle, 0, 1), n = RJ.clamp((N - p.idle) / (1 - p.idle), 0, 1);
         if (p.kind === "space") { T(this.abr.f.frequency, (300 + s.ab * 900) * d, 0.1); T(this.abr.g.gain, s.ab * 0.85 * (0.7 + rear * 0.6), 0.1); T(this.crk.f.frequency, 1500); T(this.crk.g.gain, s.ab * 0.22, 0.1); }
         else zero(this.abr.g, this.crk.g);
+        zero(this.wn.g);
         if (p.kind === "heli") {
           // blade slap: a low saw at blade-pass frequency, heavier with collective; turbine whine on top
           const bp = p.blades * p.rotorHz * lit * d;
@@ -233,30 +252,40 @@
         T(this.abr.f.frequency, 900 * d); T(this.abr.g.gain, on * 0.5);
         T(this.crk.f.frequency, 1800); T(this.crk.g.gain, on * 0.3);
         T(this.deep.g.gain, on * 0.2);
-        zero(this.wg, this.bzG, this.pbG);
+        zero(this.wg, this.bzG, this.pbG, this.wn.g);
         return;
       }
-      const idle = p.idle, n = RJ.clamp((N - idle) / (1 - idle), 0, 1), lit = RJ.clamp(N / idle, 0, 1), ln = Math.pow(n, 0.8);
+      // N (core) drives the turbine whine; N1 (fan / exhaust flow, lagging a beat behind) drives the roar
+      const idle = p.idle, n = RJ.clamp((N - idle) / (1 - idle), 0, 1), lit = RJ.clamp(N / idle, 0, 1);
+      const N1 = s.N1 != null ? s.N1 : N, n1 = RJ.clamp((N1 - idle) / (1 - idle), 0, 1), lit1 = RJ.clamp(N1 / idle, 0, 1), ln = Math.pow(n1, 0.8);
+      // directivity: jet-mixing roar peaks ~40° off the tail (aft arc), the whine radiates from the inlet
+      const aft = s.aft != null ? s.aft : 0.7 + rear * 0.6;
       // starter whine climbs to idle, then the turbine tone tracks N2
       const wf = (N < idle ? p.whine[0] * (0.12 + 0.88 * lit) : lerp(p.whine[0], p.whine[1], n)) * p.pitch * d;
       T(this.w1.frequency, wf); T(this.w2.frequency, wf * p.partial);
-      T(this.wg.gain, lerp(p.wg[0], p.wg[1], n) * Math.min(1, N / 0.06) * (0.6 + fr * 0.8) * (s.interior ? 0.6 : 1));
+      const wgain = lerp(p.wg[0], p.wg[1], n) * Math.min(1, N / 0.06) * (0.45 + fr * 1.05) * (s.interior ? 0.6 : 1);
+      T(this.wg.gain, wgain);
+      T(this.wn.f.frequency, wf * 1.04); T(this.wn.g.gain, wgain * (0.5 + n * 0.6));
       T(this.wobG.gain, 7);
       T(this.roar.f.frequency, lerp(p.roarF[0], p.roarF[1], ln) * d);
-      T(this.roar.g.gain, lerp(p.roarG[0], p.roarG[1], Math.pow(n, 1.2)) * lit * lit * (0.7 + rear * 0.6));
-      T(this.deep.f.frequency, 190 * d); T(this.deep.g.gain, lerp(p.deepG[0], p.deepG[1], n) * lit * (0.8 + rear * 0.4));
+      T(this.roar.g.gain, lerp(p.roarG[0], p.roarG[1], Math.pow(n1, 1.2)) * lit1 * lit1 * aft);
+      T(this.deep.f.frequency, 190 * d); T(this.deep.g.gain, lerp(p.deepG[0], p.deepG[1], n1) * lit1 * (0.8 + rear * 0.4));
       T(this.rasp.f.frequency, lerp(p.rasp[0], p.rasp[1], ln) * d);
-      T(this.rasp.g.gain, lerp(p.raspG[0], p.raspG[1], n) * lit * (0.55 + rear * 0.8));
+      T(this.rasp.g.gain, lerp(p.raspG[0], p.raspG[1], n1) * lit1 * (0.35 + aft * 0.55));
       if (p.buzz) {
-        const bf = lerp(p.buzz.f[0], p.buzz.f[1], n) * p.pitch * d;
+        const bf = lerp(p.buzz.f[0], p.buzz.f[1], n1) * p.pitch * d;
         T(this.bz1.frequency, bf); T(this.bz2.frequency, bf * 1.007); T(this.bzF.frequency, bf * 6);
-        T(this.bzG.gain, RJ.smooth(p.buzz.on, 1, N) * p.buzz.g * (0.45 + fr * 1.0));
+        T(this.bzG.gain, RJ.smooth(p.buzz.on, 1, N1) * p.buzz.g * (0.45 + fr * 1.0));
       } else T(this.bzG.gain, 0, 0.1);
-      T(this.rum.frequency, lerp(p.rum[0], p.rum[1], n) * d); T(this.rumF.frequency, 140);
-      T(this.rumG.gain, lerp(p.rumG[0], p.rumG[1], n) * lit * (s.interior ? 1.5 : 1));
       const ab = s.ab;
-      T(this.abr.f.frequency, (260 + ab * 950) * d, 0.12); T(this.abr.g.gain, ab * p.abG * (0.65 + rear * 0.7), 0.12);
-      T(this.crk.f.frequency, 1300); T(this.crk.g.gain, ab * p.crk * (0.45 + rear * 0.9), 0.1);
+      T(this.rum.frequency, lerp(p.rum[0], p.rum[1], n1) * d); T(this.rumF.frequency, 140);
+      T(this.rumG.gain, (lerp(p.rumG[0], p.rumG[1], n1) * lit1 + ab * p.abG * 0.07) * (s.interior ? 1.5 : 1));
+      // reheat: a deep, unsteady roar that tears and flutters (random amplitude jitter at ~30 Hz writes) plus the
+      // shock "crackle" that low-bypass military engines also make at full dry power, heard mostly from behind
+      this.jit = lerp(this.jit || 1, 0.8 + Math.random() * 0.4, 0.6);
+      T(this.abr.f.frequency, (260 + ab * 950) * d, 0.12); T(this.abr.g.gain, ab * p.abG * aft * this.jit, 0.05);
+      const mil = p.crk ? RJ.smooth(0.82, 1, n1) * 0.3 : 0;
+      T(this.crk.f.frequency, 1300); T(this.crk.g.gain, (ab + mil) * p.crk * (0.25 + aft * 0.7) * (0.85 + (this.jit - 1) * 1.2), 0.06);
       T(this.pbG.gain, 0, 0.1);
     }
     silence() { this.out.gain.setTargetAtTime(0, this.ctx.currentTime, 0.12); }
@@ -386,13 +415,20 @@
   };
 
   /* ---------------- listener geometry ---------------- */
-  const _v = new THREE.Vector3(), _r = new THREE.Vector3(), _f = new THREE.Vector3();
-  function hear(ac, cam, p, out) {
-    _v.subVectors(cam.position, ac.pos);
+  const _v = new THREE.Vector3(), _r = new THREE.Vector3(), _f = new THREE.Vector3(), _e = new THREE.Vector3(), _ev = new THREE.Vector3();
+  const _P = new THREE.Vector3(), _V = new THREE.Vector3(), _zero = new THREE.Vector3();
+  /** What the listener hears from a source at `pos` (oriented by `q`): level, air absorption, pan, directivity
+   *  (front: 0 tail-on .. 1 nose-on; aft: the jet-noise lobe ~40° off the tail) and the ground reflection.
+   *  Leaves `_v` holding the unit vector source → listener. */
+  function hearAt(pos, q, cam, p, out) {
+    _v.subVectors(cam.position, pos);
     const d = Math.max(1, _v.length());
-    _v.divideScalar(d); // source → listener
-    _f.set(0, 0, -1).applyQuaternion(ac.q || ac.mesh.quaternion);
-    out.front = (_f.dot(_v) + 1) / 2;
+    _v.divideScalar(d);
+    _f.set(0, 0, -1).applyQuaternion(q);
+    const c = RJ.clamp(_f.dot(_v), -1, 1);
+    out.front = (c + 1) / 2;
+    const lobe = (Math.acos(c) - 2.44) / 0.5;
+    out.aft = 0.6 + 0.4 * (1 - out.front) + 0.45 * Math.exp(-lobe * lobe);
     _r.set(1, 0, 0).applyQuaternion(cam.quaternion);
     out.pan = RJ.clamp(-_v.dot(_r), -0.85, 0.85);
     const ref = 45 * p.size;
@@ -400,48 +436,164 @@
     // air absorbs the highs first: far aircraft become a deep, distant rumble
     out.air = RJ.clamp(19000 / (1 + d / (420 * p.size)), 260, 18000);
     out.d = d;
+    reflection(pos, cam.position, out);
     return out;
+  }
+  /** Ground reflection: path difference between the direct sound and its mirror image under the ground. While
+   *  it is short the two interfere (a comb filter that sweeps as the jet moves: the classic flanging roar of a
+   *  low fly-by); once it is long the terrain scatters it and it is dropped. */
+  function reflection(src, lis, out) {
+    let g = 0;
+    try { g = RJ.world && RJ.world.ground ? RJ.world.ground((src.x + lis.x) / 2, (src.z + lis.z) / 2) : 0; } catch (e) { g = 0; }
+    if (!(g > -1e5 && g < 1e5)) g = 0;
+    const hs = Math.max(0.5, src.y - g), hl = Math.max(0.5, lis.y - g);
+    const dx = src.x - lis.x, dz = src.z - lis.z, D2 = dx * dx + dz * dz;
+    const r1 = Math.sqrt(D2 + (hs - hl) * (hs - hl)), r2 = Math.sqrt(D2 + (hs + hl) * (hs + hl));
+    const tau = (r2 - r1) / 340;
+    out.refl = 0.6 * (r1 / Math.max(r2, 1)) * (1 - RJ.smooth(0.025, 0.07, tau));
+    out.rdel = tau;
+  }
+
+  /* ---------------- sound takes time to arrive ----------------
+   * Each audible aircraft keeps ~24 s of position / velocity / spool history (30 Hz). The listener hears what a jet
+   * was doing at the emission time t_e where |listener(now) − pos(t_e)| = c·(now − t_e): a distant jet's sound
+   * trails behind it, the roar swells after it has passed, and a jet faster than sound arrives in silence. */
+  const HN = 720, HK = ["x", "y", "z", "vx", "vy", "vz", "N", "N1", "ab"];
+  function track(o, now, N, N1, ab) {
+    let h = o._ah;
+    if (!h) {
+      const F = () => new Float32Array(HN);
+      h = o._ah = { t: new Float64Array(HN), x: F(), y: F(), z: F(), vx: F(), vy: F(), vz: F(), N: F(), N1: F(), ab: F(), i: -1, c: 0 };
+    }
+    const P = o.pos, V = o.vel;
+    if (h.c) {
+      const j = h.i, dx = P.x - h.x[j], dy = P.y - h.y[j], dz = P.z - h.z[j], age = now - h.t[j];
+      if (age < 0 || age > 0.5 || dx * dx + dy * dy + dz * dz > 4e6) h.c = 0; // teleport, respawn, replay scrub, or a gap
+      else if (age < 1 / 45) return; // already sampled this tick
+    }
+    const i = (h.i = (h.i + 1) % HN);
+    h.t[i] = now; h.x[i] = P.x; h.y[i] = P.y; h.z[i] = P.z;
+    h.vx[i] = V ? V.x : 0; h.vy[i] = V ? V.y : 0; h.vz[i] = V ? V.z : 0;
+    h.N[i] = N; h.N1[i] = N1; h.ab[i] = ab;
+    h.c = Math.min(HN, h.c + 1);
+  }
+  /** Search back from the newest sample for the first one whose sound has reached L; interpolate the crossing. */
+  function retarded(h, L, now, c, out) {
+    let pj = -1, pf = 0;
+    for (let k = 0; k < h.c; k++) {
+      const j = (h.i - k + HN) % HN;
+      const dx = L.x - h.x[j], dy = L.y - h.y[j], dz = L.z - h.z[j];
+      const f = c * (now - h.t[j]) - Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (f >= 0) {
+        // between the newer sample pj (not yet heard, f < 0) and this older one j (already heard)
+        const b = pj < 0 ? j : pj, a = pj < 0 ? 0 : -pf / (f - pf);
+        for (const key of HK) out[key] = lerp(h[key][b], h[key][j], a);
+        out.age = now - lerp(h.t[b], h.t[j], a);
+        return true;
+      }
+      pj = j; pf = f;
+    }
+    return false;
+  }
+  const _rs = {};
+  /** Everything a voice needs for one aircraft as heard from the camera, with propagation delay and Doppler. */
+  function listen(o, po, N, N1, ab, cam, camV, out) {
+    const c = RJ.soundSpeed ? RJ.soundSpeed(o.pos.y) : 340;
+    const dNow = o.pos.distanceTo(cam.position);
+    // close to the camera (chase views) the lag is a few ms: hear the jet as it is now
+    const w = RJ.smooth(60, 150, dNow), h = o._ah;
+    _P.copy(o.pos); if (o.vel) _V.copy(o.vel); else _V.set(0, 0, 0);
+    out.N = N; out.N1 = N1; out.ab = ab; out.lag = 0;
+    let mute = 0;
+    if (w > 0 && h && h.c > 2) {
+      if (retarded(h, cam.position, h.t[h.i], c, _rs)) {
+        _P.lerp(_e.set(_rs.x, _rs.y, _rs.z), w); _V.lerp(_ev.set(_rs.vx, _rs.vy, _rs.vz), w);
+        if (w > 0.5) { out.N = _rs.N; out.N1 = _rs.N1; out.ab = _rs.ab; }
+        out.lag = _rs.age * w;
+      } else {
+        // nothing it has emitted has reached us yet: only possible for a jet closing faster than sound
+        _e.subVectors(cam.position, o.pos).normalize();
+        if (_V.dot(_e) > c * 0.97) mute = w;
+      }
+    }
+    hearAt(_P, o.q || o.mesh.quaternion, cam, po, out);
+    // Doppler: f' = f (c + v_listener→source) / (c − v_source→listener)
+    const vs = _V.dot(_v), vl = -camV.dot(_v);
+    out.dopT = RJ.clamp((c + vl) / Math.max(40, c - vs), 0.55, 1.9);
+    out.gain *= 1 - mute;
+    out.mute = mute;
+    out.relV = _ev.subVectors(_V, camV).length();
+    return out;
+  }
+  /** Close pass: as the distance stops shrinking, the air the jet just tore through rushes past the camera. */
+  function passCheck(st, h, po) {
+    if (st.pd != null && h.d > st.pd + 0.3 && st.pd < 140 * po.size && !st.fly && h.relV > 70 && h.gain > 0.01) { st.fly = true; AU.jetFlyby(st.pd, h.pan, h.relV, po.size); }
+    if (h.d > 400 * po.size) st.fly = false;
+    st.pd = h.d;
   }
   const _h = {};
 
-  /** Per-frame: player engine (startup, spool, afterburner), up to three other aircraft with Doppler, environment. */
+  /** Per-frame: player engine (startup, spool, afterburner), up to three other aircraft with propagation delay,
+   *  Doppler and ground reflection, then wind and environment. */
   AU.update = function (pl, cam, inCockpit, others) {
     if (!AU.ctx || !AU.engine || !pl) return;
     AU._inPit = inCockpit;
     const now = performance.now() / 1000; // game clock: keeps spooling right even if the audio device is slow to start
     const dt = RJ.clamp(now - (AU._t || now), 0, 0.1); AU._t = now;
-    // listener velocity (the camera may ride the jet, orbit it, or stand still for a fly-by)
-    if (AU._camP) { const cv = _v.subVectors(cam.position, AU._camP).divideScalar(Math.max(dt, 1e-3)); if (cv.length() > 15000) cv.set(0, 0, 0); AU._camV = AU._camV || new THREE.Vector3(); if (dt > 0) AU._camV.lerp(cv, RJ.clamp(dt * 8, 0, 1)); }
+    // listener velocity (the camera may ride the jet, orbit it, or stand still for a fly-by). A camera cut is not
+    // speed: keep the previous estimate rather than hearing a Mach 10 lurch.
+    if (AU._camP && dt > 0) {
+      const cv = _v.subVectors(cam.position, AU._camP).divideScalar(Math.max(dt, 1e-3));
+      AU._camV = AU._camV || new THREE.Vector3();
+      if (cv.length() < 1400) AU._camV.lerp(cv, RJ.clamp(dt * 8, 0, 1));
+    }
     AU._camP = (AU._camP || new THREE.Vector3()).copy(cam.position);
-    const camV = AU._camV || _f.set(0, 0, 0);
+    const camV = AU._camV || _zero;
     const E = AU.engine, p = E.prof;
-    if (E.fresh) { E.fresh = false; E.st.N = pl.state === "ground" && pl.speed < 2 ? 0 : null; }
+    if (E.fresh) { E.fresh = false; E.st.N = pl.state === "ground" && pl.speed < 2 ? 0 : null; E.st.N1 = null; E.dop = 1; }
     const thr = pl.alive ? RJ.clamp(pl.throttle, 0, 1) : 0;
     let N = spool(E.st, p, thr, dt, pl.alive);
     if (pl.alive && pl.spool != null && p.kind !== "rocket" && E.st.N >= p.idle * 0.98) N = E.st.N = p.idle + (1 - p.idle) * pl.spool;
+    const N1 = fanLag(E.st, p, N, dt);
     if (E.st.lightoff) AU.lightOff(p, inCockpit);
     const ab = pl.alive && p.ab ? pl.abLevel : 0;
-    if (ab > 0.25 && E.abLast <= 0.25) AU.abLight(inCockpit);
+    if (ab > 0.25 && E.abLast <= 0.25) {
+      const dd = pl.pos ? pl.pos.distanceTo(cam.position) : 0;
+      if (inCockpit || dd < 70) AU.abLight(inCockpit);
+      else AU.abLight(false, dd, panOf(pl.pos, cam), Math.min(3, dd / 340)); // a camera out on the airfield hears it late
+    }
     E.abLast = ab;
     // parameter writes at ~30 Hz: smooth, and light on the audio thread
     AU._acc = (AU._acc || 0) + dt;
     const write = AU._acc >= 1 / 30;
     if (write) AU._acc = 0;
+    if (write && pl.pos) track(pl, now, N, N1, ab);
     if (write) {
       let s;
-      if (inCockpit) s = { gain: p.cock[0], air: 18000, front: 0.5, pan: 0 };
-      else { hear(pl, cam, p, _h); s = { gain: _h.gain, air: _h.air, front: _h.front, pan: _h.pan }; }
+      if (inCockpit || !pl.pos) s = { gain: p.cock[0], air: 18000, front: 0.5, aft: 1, pan: 0, refl: 0, N, N1, ab, dop: 1 };
+      else {
+        listen(pl, p, N, N1, ab, cam, camV, _h);
+        E.dop = lerp(E.dop || 1, _h.dopT, 0.5);
+        s = { gain: _h.gain, air: _h.air, front: _h.front, aft: _h.aft, pan: _h.pan, refl: _h.refl, rdel: _h.rdel, N: _h.N, N1: _h.N1, ab: _h.ab, dop: E.dop, d: _h.d, lag: _h.lag };
+        passCheck(E.st, _h, p);
+      }
       if (pl.spec.flight.glider) s.gain = 0; // no engine: only the wind
-      E.apply(p, Object.assign(s, { N, ab, thr, dop: 1, interior: inCockpit }));
+      E.apply(p, Object.assign(s, { thr, interior: inCockpit }));
       E.thrLast = thr;
+      E.dbg = s;
       P(AU.cabin.frequency, inCockpit ? p.cock[1] : 18000, 0.15);
     }
-    // other aircraft: the three loudest get a voice; assignments stick to avoid swapping mid-pass
+    // other aircraft: every one in earshot keeps spooling and leaves a sound trail; the three loudest get a voice
+    // (assignments stick to avoid swapping mid-pass)
     const cand = [];
     for (const o of others || []) {
       if (o === pl || !o.spec || o.state === "dead" || !o.pos) continue;
       const po = profOf(o.spec), d = o.pos.distanceTo(cam.position);
       if (d > 7000 * po.size) continue;
+      const st = o._aud || (o._aud = { N: null, N1: null, dop: 1 });
+      const n = spool(st, po, o.alive ? RJ.clamp(o.throttle || 0, 0, 1) : 0, dt, o.alive);
+      const n1 = fanLag(st, po, n, dt);
+      if (write) track(o, now, n, n1, o.alive && po.ab ? o.abLevel || 0 : 0);
       cand.push({ o, po, score: po.size / (d + 80) });
     }
     cand.sort((a, b) => b.score - a.score);
@@ -453,21 +605,19 @@
       const free = AU.pool.find((s) => !s.ac);
       if (free) free.ac = c.o;
     }
-    for (const slot of AU.pool) {
+    if (write) for (const slot of AU.pool) {
       const o = slot.ac;
-      if (!o) continue;
-      const po = profOf(o.spec);
-      const st = o._aud || (o._aud = { N: null, dop: 1 });
-      const n = spool(st, po, o.alive ? RJ.clamp(o.throttle || 0, 0, 1) : 0, dt, o.alive);
-      if (!write) continue;
-      hear(o, cam, po, _h);
-      // Doppler: f' = f (c + v_listener→source) / (c − v_source→listener)
-      const c = RJ.soundSpeed ? RJ.soundSpeed(o.pos.y) : 340;
-      const vs = o.vel ? o.vel.dot(_v) : 0;
-      const vl = -camV.dot(_v);
-      const dop = RJ.clamp((c + vl) / Math.max(40, c - vs), 0.55, 1.9);
-      st.dop = lerp(st.dop, dop, RJ.clamp(dt * 30 * 4, 0, 1));
-      slot.v.apply(po, { N: n, ab: o.alive && po.ab ? o.abLevel || 0 : 0, thr: o.throttle || 0, gain: _h.gain, air: _h.air, front: _h.front, pan: _h.pan, dop: st.dop, interior: false });
+      if (!o || !o._aud) continue;
+      const po = profOf(o.spec), st = o._aud;
+      listen(o, po, st.N, st.N1, o.alive && po.ab ? o.abLevel || 0 : 0, cam, camV, _h);
+      st.dop = lerp(st.dop || 1, _h.dopT, 0.5);
+      // a wingman or bandit lighting the burners nearby: the whump reaches you along with its roar
+      if (st.abL == null) st.abL = _h.ab;
+      if (_h.ab > 0.25 && st.abL <= 0.25 && _h.d < 3000 && _h.gain > 0.01) AU.abLight(false, _h.d, _h.pan, 0);
+      st.abL = _h.ab;
+      passCheck(st, _h, po);
+      slot.v.apply(po, { N: _h.N, N1: _h.N1, ab: _h.ab, thr: o.throttle || 0, gain: _h.gain, air: _h.air, front: _h.front, aft: _h.aft, pan: _h.pan, refl: _h.refl, rdel: _h.rdel, dop: st.dop, interior: false });
+      slot.v.dbg = { d: _h.d, lag: _h.lag, dop: st.dop, refl: _h.refl, rdel: _h.rdel, gain: _h.gain, aft: _h.aft, mute: _h.mute };
     }
     if (write) environment(pl, inCockpit, camV, p, N);
     missileVoices(cam, camV, dt, write);
@@ -539,10 +689,13 @@
     // transonic: shocks dancing on the skin make the flow roar and buffet (M 0.85–1.0); once supersonic it settles
     const M = pl.alive ? pl.mach || 0 : 0, tb = RJ.smooth(0.85, 0.98, M) * (1 - RJ.smooth(1.0, 1.1, M)), sup = RJ.smooth(1.0, 1.15, M);
     const buf = tb * (0.75 + 0.5 * Math.sin(performance.now() * 0.023) * Math.sin(performance.now() * 0.0071));
-    const lo = Math.pow(q, 0.8) * (inCockpit ? 0.32 : 0.45) * E.gust * (1 + buf * 0.7 - sup * (inCockpit ? 0.18 : 0)) + hyK * 0.5;
-    const hi = q * (inCockpit ? 0.1 : 0.3) * (1 + tb * 0.5 - sup * (inCockpit ? 0.25 : 0)) + hyK * 0.25;
-    P(E.windLo.g.gain, lo, 0.1); P(E.windLo.f.frequency, (120 + Math.sqrt(q) * 260) * (1 - tb * 0.25), 0.2);
-    P(E.windHi.g.gain, hi, 0.15); P(E.windHi.f.frequency, 700 + v * 6, 0.2);
+    // angle of attack: pulling hard, the flow over the canopy and wing roots goes rough (deeper, louder roar and a
+    // tearing vortex hiss) — scaled by q, so it only matters when the listener is riding the jet
+    const al = pl.alive && pl.state === "flying" ? RJ.smooth(0.08, 0.38, Math.abs(pl.aoa || 0)) : 0;
+    const lo = Math.pow(q, 0.8) * (inCockpit ? 0.32 : 0.45) * E.gust * (1 + buf * 0.7 + al * 0.45 - sup * (inCockpit ? 0.18 : 0)) + hyK * 0.5;
+    const hi = q * (inCockpit ? 0.1 : 0.3) * (1 + tb * 0.5 + al * 0.8 - sup * (inCockpit ? 0.25 : 0)) + hyK * 0.25;
+    P(E.windLo.g.gain, lo, 0.1); P(E.windLo.f.frequency, (120 + Math.sqrt(q) * 260) * (1 - tb * 0.25 - al * 0.2), 0.2);
+    P(E.windHi.g.gain, hi, 0.15); P(E.windHi.f.frequency, (700 + v * 6) * (1 - al * 0.25), 0.2);
     P(E.whistle.g.gain, inCockpit ? 0 : RJ.smooth(0.5, 1.2, q) * 0.025, 0.2); P(E.whistle.f.frequency, 1800 + v * 4, 0.2);
     // tyres on the runway: rumble that builds with speed, plus seams every ~25 m
     const ground = pl.alive && pl.state === "ground";
@@ -575,9 +728,31 @@
     thump(48, 0.6, g * 0.6);
   };
   /** Afterburner light: a deep thud and a tearing rush as the reheat catches. */
-  AU.abLight = function (inCockpit) {
-    thump(42, 0.55, inCockpit ? 0.45 : 0.35);
-    burst({ brown: true, f0: 1400, f1: 200, dur: 0.5, gain: inCockpit ? 0.35 : 0.45, attack: 0.01, bus: AU.engBus });
+  /** Afterburner light: unburnt fuel in the jet pipe catches all at once — a low pressure punch ("whump"), the
+   *  flame front ripping down the nozzle, then the reheat roar swelling in behind. With `dist` it is heard from
+   *  outside (another jet, or yours from a distant camera): quieter, darker with distance, panned and delayed. */
+  AU.abLight = function (inCockpit, dist, pan = 0, delay = 0) {
+    if (!AU.ctx) return;
+    const ext = dist != null;
+    const k = ext ? RJ.clamp(1.4 / (1 + dist / 150), 0, 1) : 1;
+    if (k < 0.02) return;
+    const hiCut = ext ? Math.max(450, 7000 / (1 + dist / 500)) : inCockpit ? 1100 : 5000;
+    const bus = ext ? AU.sfxBus : AU.engBus;
+    thump(36, 0.8, (inCockpit ? 0.5 : 0.42) * k, delay); thump(66, 0.22, 0.22 * k, delay);
+    burst({ brown: true, f0: Math.min(2400, hiCut), f1: 130, dur: 0.55, gain: (inCockpit ? 0.36 : 0.48) * k, attack: 0.006, bus, pan, delay });
+    burst({ f0: Math.min(1700, hiCut), f1: 260, dur: 0.6, gain: (inCockpit ? 0.06 : 0.14) * k, attack: 0.03, type: "bandpass", q: 0.7, bus, pan, delay: delay + 0.04 });
+    burst({ brown: true, f0: 560, f1: 140, dur: 1.5, gain: 0.28 * k, attack: 0.22, bus, pan, delay: delay + 0.06 });
+  };
+  /** A jet tearing past the camera: the ripped air rushing by after the closest point (louder the closer and
+   *  faster), panned to where it went. */
+  AU.jetFlyby = function (d, pan, rel, size = 1) {
+    if (!AU.ctx) return;
+    const g = RJ.clamp(Math.sqrt(size) * (1.3 / (1 + d / 35)) * RJ.smooth(60, 260, rel), 0, 0.85) * (AU._inPit ? 0.4 : 1);
+    if (g < 0.02) return;
+    burst({ brown: true, f0: 1500, f1: 110, dur: 1.7, gain: 0.55 * g, attack: 0.1, pan });
+    burst({ f0: 4200, f1: 380, dur: 1.1, gain: 0.26 * g, attack: 0.04, pan, type: "bandpass", q: 0.7 });
+    thump(48, 0.6, 0.3 * g);
+    if (d < 45 && RJ.camKick && !AU._inPit) RJ.camKick(0.15 * g);
   };
 
   AU.setGun = function (on) { if (AU.gunGain) P(AU.gunGain.gain, on ? 0.55 : 0, on ? 0.01 : 0.03); };
