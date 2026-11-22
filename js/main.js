@@ -34,6 +34,22 @@
   const CAM_MODES = ["chase", "cockpit", "cinematic"];
   const cam = { mode: "chase", blend: 1, fromP: V3(), fromQ: new THREE.Quaternion(), offs: V3(0, 5, 30), up: V3(0, 1, 0), shake: 0, fov: 68, shotT: 0, shot: null, hidden: null, punch: 0, temp: null, base: 0 };
   RJ.cam = cam;
+  /* Free look: hold and drag the mouse on the game view to turn your head in the cockpit (or swing round the jet in
+   * the chase view); let go and the view settles back to straight ahead. Touch input keeps its own controls. */
+  const LOOK = { yaw: 0, pitch: 0, drag: false, x: 0, y: 0 };
+  RJ.look = LOOK;
+  addEventListener("pointerdown", (e) => {
+    if (e.pointerType !== "mouse" || !RJ.state || RJ.state.mode !== "playing" || !e.target || e.target.tagName !== "CANVAS") return;
+    LOOK.drag = true; LOOK.x = e.clientX; LOOK.y = e.clientY;
+  });
+  addEventListener("pointermove", (e) => {
+    if (!LOOK.drag) return;
+    LOOK.yaw = RJ.clamp(LOOK.yaw - (e.clientX - LOOK.x) * 0.006, -2.6, 2.6);
+    LOOK.pitch = RJ.clamp(LOOK.pitch - (e.clientY - LOOK.y) * 0.006, -1.2, 1.0);
+    LOOK.x = e.clientX; LOOK.y = e.clientY;
+  });
+  addEventListener("pointerup", () => { LOOK.drag = false; });
+  addEventListener("blur", () => { LOOK.drag = false; });
   cam.set = function (mode, instant) {
     cam.fromP.copy(camera.position); cam.fromQ.copy(camera.quaternion);
     cam.mode = mode; cam.blend = instant ? 1 : 0; cam.shotT = 0; cam.shot = null;
@@ -219,11 +235,22 @@
     let mode = cam.mode;
     if (f.state === "falling" || f.state === "dead") mode = "death";
     if (cam.temp) { cam.temp.t -= dt; if (cam.temp.t <= 0 || mode === "death") { cam.temp = null; cam.set(cam.mode); } else mode = cam.temp.kind === "kill" ? "kill" : cam.temp.kind === "msl" ? "msl" : "boom"; }
+    if (!LOOK.drag) { const k = Math.exp(-dt * 3.5); LOOK.yaw *= k; LOOK.pitch *= k; if (Math.abs(LOOK.yaw) + Math.abs(LOOK.pitch) < 1e-3) LOOK.yaw = LOOK.pitch = 0; }
     if (mode === "chase") {
       chaseTarget(f, dt, cp, cq);
+      if (LOOK.yaw || LOOK.pitch) {
+        // swing round the jet: rotate the camera offset about the world vertical, then tilt it, and look back at the jet
+        const o = tv.copy(cp).sub(f.pos), r = o.length();
+        o.applyAxisAngle(V3(0, 1, 0), LOOK.yaw);
+        const h = Math.hypot(o.x, o.z), el = RJ.clamp(Math.atan2(o.y, h) - LOOK.pitch, -0.6, 1.3);
+        o.set(o.x / (h || 1) * Math.cos(el) * r, Math.sin(el) * r, o.z / (h || 1) * Math.cos(el) * r);
+        cp.copy(f.pos).add(o);
+        cq.setFromRotationMatrix(new THREE.Matrix4().lookAt(cp, f.pos, V3(0, 1, 0)));
+      }
       fov += RJ.clamp((f.mach - 0.6) * 6, 0, 10) + f.abLevel * 5 + (f.isPlayer ? RJ.camFx.fov : 0);
     } else if (mode === "cockpit") {
       cockpitTarget(f, cp, cq);
+      if (LOOK.yaw || LOOK.pitch) cq.multiply(tq.setFromEuler(new THREE.Euler(LOOK.pitch, LOOK.yaw, 0, "YXZ"))); // head turn
       fov += 4 + f.abLevel * 4 + (f.isPlayer ? RJ.camFx.fov * 0.6 : 0);
     } else if (mode === "cinematic") {
       fov = cinematicTarget(f, dt, cp, cq);
@@ -284,6 +311,7 @@
     }
     CP.pit.update(pl, dt);
     CP.cam.fov = camera.fov; CP.cam.updateProjectionMatrix();
+    CP.cam.quaternion.setFromEuler(new THREE.Euler(LOOK.pitch, LOOK.yaw, 0, "YXZ")); CP.cam.updateMatrixWorld(); // free look turns your head inside the cockpit too
     const W = RJ.world;
     CP.light.position.copy(W.sunDir).applyQuaternion(tq.copy(camera.quaternion).invert()).multiplyScalar(5);
     CP.light.color.copy(W.sun.color); CP.light.intensity = (W.sunIntensity || 1) * 0.9;
@@ -830,7 +858,7 @@
     if (player.alive && player.state === "flying" && player.agl < 25 && player.speed > 60 && player.gearT < 0.9) pullUp = pullUp || player.vel.y < 0;
     const extras = mode.hudExtras();
     if (spect) { RJ.hud.clear(); mode.hud(dt); RJ.ui.status(mode.status()); RJ.ui.objective(""); return; }
-    RJ.hud.draw(Object.assign({ player: focus === player ? player : focus, camera, camMode: camMode === "boom" || camMode === "kill" || camMode === "msl" ? "cinematic" : camMode, cockpit3d: !!overlays, others: RJ.combat.aircraft, pullUp }, focus === player ? extras : {}));
+    RJ.hud.draw(Object.assign({ player: focus === player ? player : focus, camera, camMode: camMode === "boom" || camMode === "kill" || camMode === "msl" || (camMode === "cockpit" && Math.abs(LOOK.yaw) + Math.abs(LOOK.pitch) > 0.3) ? "cinematic" : camMode, cockpit3d: !!overlays, others: RJ.combat.aircraft, pullUp }, focus === player ? extras : {}));
     RJ.ui.status(mode.status());
     RJ.ui.objective(camMode === "cinematic" ? `Cinematic camera · ${RJ.keyLabel(RJ.settings.keys.camera)} to change view` : mode.objective());
     if (RJ.modes._dirty) { RJ.saveProgress(); RJ.modes._dirty = false; }

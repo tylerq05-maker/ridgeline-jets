@@ -1341,8 +1341,6 @@
     add(new THREE.BoxGeometry(W * 0.95, 0.42, 0.05), mid, 0, -0.52, -0.74, -0.32);
     add(new THREE.BoxGeometry(0.42, 0.14, 1.1), mid, -W * 0.45, -0.62, -0.25);
     add(new THREE.BoxGeometry(0.42, 0.14, 1.1), mid, W * 0.45, -0.62, -0.25);
-    add(new THREE.CylinderGeometry(0.018, 0.022, 0.22, 8), dark, 0, -0.62, -0.42, 0.3);
-    add(new THREE.SphereGeometry(0.035, 10, 8), dark, 0, -0.52, -0.39);
     // displays (canvas textures redrawn a few times per second)
     const displays = [];
     const mkDisp = (kind, x, w, h) => {
@@ -1350,11 +1348,73 @@
       const tex = new THREE.CanvasTexture(c);
       const m = add(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }), x, -0.5, -0.715, -0.32);
       displays.push({ kind, c, g: c.getContext("2d"), tex, mesh: m });
+      if (!hist) bezel(m, w, h);
     };
+    // multifunction display bezels: a frame and option-select buttons round the edge, like the real thing
+    const btn = new THREE.MeshStandardMaterial({ color: 0x4d535b, roughness: 0.55, metalness: 0.25 });
+    const btnG = new THREE.BoxGeometry(0.024, 0.017, 0.012);
+    function bezel(m, w, h) {
+      const bz = new THREE.Group(); bz.position.copy(m.position); bz.rotation.copy(m.rotation); grp.add(bz);
+      const fr = new THREE.Mesh(new THREE.BoxGeometry(w + 0.075, h + 0.075, 0.022), dark); fr.position.z = -0.013; bz.add(fr);
+      for (let i = 0; i < 5; i++) for (const sy of [-1, 1]) { const b = new THREE.Mesh(btnG, btn); b.position.set((i - 2) * w * 0.2, sy * (h / 2 + 0.022), 0.002); bz.add(b); }
+      for (let i = 0; i < 4; i++) for (const sx of [-1, 1]) { const b = new THREE.Mesh(btnG, btn); b.rotation.z = Math.PI / 2; b.position.set(sx * (w / 2 + 0.022), (i - 1.5) * h * 0.24, 0.002); bz.add(b); }
+    }
     if (hist) { [-0.36, -0.12, 0.12, 0.36].forEach((x, i) => mkDisp("gauge" + i, x, 0.17, 0.17)); }
     else { mkDisp("radar", -0.37, 0.28, 0.24); mkDisp("adi", 0, 0.28, 0.24); mkDisp("eng", 0.37, 0.28, 0.24); }
     // HUD combiner glass
     if (!hist && !bomber) add(new THREE.PlaneGeometry(0.24, 0.17), new THREE.MeshStandardMaterial({ color: 0x9fd8b0, transparent: true, opacity: 0.12, roughness: 0.05, metalness: 0.6 }), 0, -0.13, -0.6, -0.25);
+    // ---- cockpit furniture: up-front controls, console knobs and switches, throttle, stick, legs, caution lights ----
+    const SIDESTICK = { f16: 1, f22: 1, f35a: 1, yf23: 1 };
+    const knob = new THREE.MeshStandardMaterial({ color: 0x1b1d20, roughness: 0.4, metalness: 0.5 });
+    const suit = new THREE.MeshStandardMaterial({ color: hist ? 0x5a4a32 : 0x4a5138, roughness: 0.9, metalness: 0 });
+    const yel = new THREE.MeshStandardMaterial({ color: 0xe8c21a, roughness: 0.5 });
+    if (!hist && !bomber) {
+      // up-front control panel under the HUD: a keypad and a scratchpad strip
+      const ufc = new THREE.Group(); ufc.position.set(0, -0.33, -0.7); ufc.rotation.x = -0.55; grp.add(ufc);
+      const ub = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.11, 0.03), mid); ufc.add(ub);
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 4; c++) { const k = new THREE.Mesh(btnG, btn); k.position.set(-0.07 + c * 0.047, -0.03 + r * 0.026, 0.017); ufc.add(k); }
+      const strip = new THREE.Mesh(new THREE.PlaneGeometry(0.16, 0.022), new THREE.MeshBasicMaterial({ color: 0x1c6b38, toneMapped: false })); strip.position.set(0, 0.04, 0.0161); ufc.add(strip);
+    }
+    // side consoles: rows of knobs and toggle switches
+    const knobG = new THREE.CylinderGeometry(0.016, 0.018, 0.022, 10), swG = new THREE.CylinderGeometry(0.004, 0.004, 0.035, 5);
+    for (const sx of [-1, 1]) for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) {
+      const x = sx * (W * 0.45) + (c - 1) * 0.11, z = -0.62 + r * 0.2, top = -0.55;
+      if ((r + c) % 2) add(knobG, knob, x, top + 0.011, z);
+      else { const sw = add(swG, btn, x, top + 0.017, z); sw.rotation.x = r % 3 ? 0.4 : -0.4; }
+    }
+    // throttle quadrant on the left console (slides forward with the throttle)
+    const thr = new THREE.Group(); thr.position.set(-W * 0.45 + 0.06, -0.5, -0.3); grp.add(thr);
+    add(new THREE.BoxGeometry(0.03, 0.02, 0.26), dark, -W * 0.45 + 0.06, -0.545, -0.36);
+    const tg = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.1, 0.075), knob); tg.position.y = 0.02; tg.rotation.x = 0.25; thr.add(tg);
+    const tb = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.012, 0.03), btn); tb.position.set(0.03, 0.05, 0); thr.add(tb);
+    // control stick: a centre stick, or the F-16 / F-22 / F-35 side stick on the right console
+    const side = !!SIDESTICK[id] && !hist && !bomber;
+    const stick = new THREE.Group(); grp.add(stick);
+    if (side) stick.position.set(W * 0.45 - 0.07, -0.55, -0.36); else stick.position.set(0, -0.72, -0.4);
+    const len = side ? 0.08 : 0.3;
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.016, len, 8), dark); shaft.position.y = len / 2; stick.add(shaft);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.11, 0.05), knob); grip.position.y = len + 0.05; grip.rotation.x = 0.15; stick.add(grip);
+    const trig = new THREE.Mesh(new THREE.BoxGeometry(0.012, 0.025, 0.01), new THREE.MeshStandardMaterial({ color: 0xa02a20 })); trig.position.set(0, len + 0.03, -0.03); stick.add(trig);
+    // the cockpit tub: floor, side walls and the footwell under the panel, so looking down never shows the sky or ground
+    const tubM = new THREE.MeshStandardMaterial({ color: hist ? 0x464c3e : 0x3a4048, roughness: 0.85, metalness: 0.15, side: THREE.DoubleSide });
+    const TW = W * 0.66;
+    add(new THREE.BoxGeometry(TW * 2, 0.04, 1.5), tubM, 0, -0.95, -0.2);
+    for (const sx of [-1, 1]) add(new THREE.BoxGeometry(0.04, 0.62, 1.5), tubM, sx * TW, -0.66, -0.2);
+    add(new THREE.BoxGeometry(TW * 2, 0.5, 0.04), tubM, 0, -0.72, -0.86);
+    add(new THREE.BoxGeometry(TW * 2, 0.04, 0.5), tubM, 0, -0.56, -0.95);
+    // seat pan and the front of the ejection seat
+    add(new THREE.BoxGeometry(0.5, 0.08, 0.42), dark, 0, -0.9, 0.12);
+    // the pilot's legs and the ejection handle between them
+    for (const sx of [-1, 1]) {
+      const thigh = add(new THREE.CylinderGeometry(0.06, 0.07, 0.5, 10), suit, sx * 0.14, -0.82, -0.18, Math.PI / 2 - 0.25);
+      const knee = add(new THREE.SphereGeometry(0.068, 10, 8), suit, sx * 0.14, -0.76, -0.44);
+      thigh.renderOrder = knee.renderOrder = 19;
+    }
+    add(new THREE.TorusGeometry(0.05, 0.009, 6, 14, Math.PI), yel, 0, -0.78, -0.08, Math.PI / 2 + 0.6);
+    // master caution (amber) and warning (red) lamps on the glare shield
+    const lamp = (c) => new THREE.MeshBasicMaterial({ color: c, toneMapped: false });
+    const caut = add(new THREE.BoxGeometry(0.05, 0.022, 0.01), lamp(0x2a2008), -W * 0.3, -0.255, -0.62, -0.08);
+    const warn = add(new THREE.BoxGeometry(0.05, 0.022, 0.01), lamp(0x2a0808), W * 0.3, -0.255, -0.62, -0.08);
     // canopy structure
     if (hist || bomber) {
       const px = bomber ? 0.75 : 0.36;
@@ -1370,7 +1430,17 @@
     // raise the panel so the displays sit inside the field of view, below the forward view
     grp.position.y = 0.1;
     let t = 0;
+    let blink = 0;
     const update = (ac, dt) => {
+      const inp = ac.input || {};
+      stick.rotation.x = RJ.damp(stick.rotation.x, -(inp.pitch || 0) * (side ? 0.12 : 0.3), 14, dt);
+      stick.rotation.z = RJ.damp(stick.rotation.z, -(inp.roll || 0) * (side ? 0.12 : 0.3), 14, dt);
+      thr.position.z = -0.3 - RJ.clamp(ac.throttle, 0, 1) * 0.12 - (ac.abLevel > 0.05 ? 0.03 : 0);
+      blink += dt;
+      const on = Math.floor(blink * 3) % 2 === 0;
+      const hurt = ac.hp / ac.maxHp < 0.5 || ac.fuel === 0, threat = ac.incoming && ac.incoming.length > 0;
+      caut.material.color.setHex(hurt && on ? 0xffb020 : 0x2a2008);
+      warn.material.color.setHex(threat && on ? 0xff2a1a : (ac.hp / ac.maxHp < 0.25 ? 0xff2a1a : 0x2a0808));
       t += dt;
       if (t < 0.12) return;
       t = 0;
