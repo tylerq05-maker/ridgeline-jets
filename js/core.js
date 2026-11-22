@@ -64,7 +64,7 @@ window.RJ = window.RJ || {};
     bloom: true, motionBlur: true, heatHaze: true, dof: true, fxaa: true, waterReflect: true, cloudShadows: true, volClouds: true, exposure: 1,
     master: 0.8, engineVol: 0.8, envVol: 0.7, sfxVol: 0.85, voiceVol: 0.9, voiceName: "", voiceRate: 0.95, voicePitch: 0.96, compOn: true, compChat: "normal", compVol: 0.9, compVoice: "", compMic: true, compFollow: true, novaServer: "", muted: false,
     invert: false, sens: 1, touchSens: 1, assist: true,
-    cam: "chase", fov: 68, shake: true, boomCam: "inset",
+    cam: "chase", fov: 68, shake: true, boomCam: "inset", killCam: true,
     hud: true, hudColor: "green", units: "mph", ghosts: true, fpsLimit: "0", showFps: false, dynRes: true, sunFx: true, musicVol: 0.5,
     unlockAll: true,
     aircraft: "f22", keys: { ...RJ.DEFAULT_KEYS }

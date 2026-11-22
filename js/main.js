@@ -127,12 +127,37 @@
     outQ.setFromRotationMatrix(new THREE.Matrix4().lookAt(outP, _ob.copy(f.pos).addScaledVector(f.fwd, -f.vis.dims.len * 0.6), V3(0, 1, 0)));
     return 46;
   }
+  /* Kill cam: the moment your shot lands, cut to a slow-motion side view of the burning wreck tumbling away,
+   * drifting round it, then hand back to your own camera. The world runs at ~30% speed for the first part. */
+  const _kv = V3();
+  RJ.killCam = function (victim, player) {
+    if (RJ.settings.killCam === false || cam.temp || !victim || !player || !player.alive) return false;
+    if (player.agl < 150 || player.incoming.length || player.state !== "flying") return false; // never blind you when it's dangerous
+    const d = Math.max(victim.vis.dims.len, victim.vis.dims.span), side = Math.random() < 0.5 ? -1 : 1;
+    const v = _kv.copy(victim.vel).setY(0); if (v.lengthSq() < 1) v.copy(victim.fwd).setY(0); v.normalize();
+    // the camera sits off the victim's flank, a little ahead and above, so the wreck streaks across the frame
+    const off = V3(-v.z * side, 0, v.x * side).multiplyScalar(d * 2.6 + 26).addScaledVector(v, d * 1.4 + 10);
+    off.y = d * 0.5 + 6;
+    cam.temp = { kind: "kill", t: 2.7, dur: 2.7, victim, off, a: 0, side };
+    cam.blend = 1;
+    RJ.killSlow = 2.7;
+    return true;
+  };
+  function killShot(outP, outQ) {
+    const T = cam.temp, f = T.victim, k = 1 - T.t / T.dur;
+    T.a = k * 0.9 * T.side; // slow drift round the wreck
+    const c = Math.cos(T.a), s = Math.sin(T.a);
+    outP.set(f.pos.x + T.off.x * c - T.off.z * s, f.pos.y + T.off.y + k * 8, f.pos.z + T.off.x * s + T.off.z * c);
+    outP.y = Math.max(outP.y, RJ.world.ground(outP.x, outP.z) + 4);
+    outQ.setFromRotationMatrix(new THREE.Matrix4().lookAt(outP, f.pos, V3(0, 1, 0)));
+    return RJ.clamp(2 * Math.atan(Math.max(f.vis.dims.len, f.vis.dims.span) * 2.2 / outP.distanceTo(f.pos)) / RJ.DEG, 20, 55);
+  }
   const cp = V3(), cq = new THREE.Quaternion();
   cam.update = function (dt, f) {
     let fov = RJ.settings.fov;
     let mode = cam.mode;
     if (f.state === "falling" || f.state === "dead") mode = "death";
-    if (cam.temp) { cam.temp.t -= dt; if (cam.temp.t <= 0 || mode === "death") { cam.temp = null; cam.set(cam.mode); } else mode = "boom"; }
+    if (cam.temp) { cam.temp.t -= dt; if (cam.temp.t <= 0 || mode === "death") { cam.temp = null; cam.set(cam.mode); } else mode = cam.temp.kind === "kill" ? "kill" : "boom"; }
     if (mode === "chase") {
       chaseTarget(f, dt, cp, cq);
       fov += RJ.clamp((f.mach - 0.6) * 6, 0, 10) + f.abLevel * 5 + (f.isPlayer ? RJ.camFx.fov : 0);
@@ -143,6 +168,8 @@
       fov = cinematicTarget(f, dt, cp, cq);
     } else if (mode === "boom") {
       fov = boomShot(f, cp, cq);
+    } else if (mode === "kill") {
+      fov = killShot(cp, cq);
     } else {
       cam.deathA = (cam.deathA || 0) + dt * 0.3;
       const r = 70 + f.radius * 3;
@@ -490,7 +517,7 @@
     RJ.audio.stopEngines();
     if (RJ.lever) RJ.lever.hideFx(); if (RJ.nav) RJ.nav.reset();
     if (RJ.companion) RJ.companion.stop();
-    cam.hidden = null; cam.temp = null; PIP.t = 0; PIP.target = null; CP.owner = null;
+    cam.hidden = null; cam.temp = null; RJ.killSlow = 0; PIP.t = 0; PIP.target = null; CP.owner = null;
   }
   RJ.startGame = async function (kind, opts) {
     if (RJ.intro && RJ.intro.active) RJ.intro.skip();
@@ -629,7 +656,10 @@
       } else { I.action("missile"); I.action("target"); }
       if (I.action("flares")) RJ.combat.dropFlares(pl);
     }
-    simAcc += dt * (mode.timeScale || 1);
+    // kill cam slow motion: 30% speed, easing back to real time over the last second
+    let slow = 1;
+    if (RJ.killSlow > 0) { RJ.killSlow = Math.max(0, RJ.killSlow - dt); slow = RJ.lerp(1, 0.3, RJ.clamp(RJ.killSlow / 1.0, 0, 1)); if (!cam.temp || cam.temp.kind !== "kill") RJ.killSlow = 0; }
+    simAcc += dt * (mode.timeScale || 1) * slow;
     let steps = 0;
     while (simAcc >= SIM_DT && steps < SIM_MAX) {
       snapPrev();
@@ -768,7 +798,11 @@
     RJ.on("flares", (ac) => { if (ac.isPlayer) RJ.audio.flare(); });
     RJ.on("damage", (e) => { if (e.ac.isPlayer) { dmgFlash = Math.min(1, dmgFlash + 0.25 + e.amount / 60); RJ.audio.hit(); cam.kick(0.3 + e.amount / 80); } });
     RJ.on("hitmarker", () => { RJ.hud.hitFlash = 0.25; RJ.audio.hitMarker(); });
-    RJ.on("destroyed", (d) => { if (RJ.game.mode && RJ.game.mode.onDestroyed) RJ.game.mode.onDestroyed(d); });
+    RJ.on("destroyed", (d) => {
+      if (RJ.game.mode && RJ.game.mode.onDestroyed) RJ.game.mode.onDestroyed(d);
+      const pl = RJ.game.mode && RJ.game.mode.player;
+      if (RJ.state.mode === "playing" && pl && d.by === pl && d.ac !== pl && !RJ.game.mode.spectator && RJ.killCam(d.ac, pl)) RJ.ui.flash("SPLASH", d.ac.spec ? d.ac.spec.short || d.ac.spec.name : null, 1.4);
+    });
     RJ.on("bomb", () => RJ.audio.bombWhistle());
     RJ.on("splash", (e) => RJ.audio.splash(e.pos.distanceTo(camera.position)));
     RJ.on("liftoff", (ac) => { if (ac.isPlayer) RJ.ui.flash("AIRBORNE", null, 1.2); });

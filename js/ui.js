@@ -421,6 +421,7 @@
       h += row("Field of view", null, range("fov", 55, 85, 1));
       h += row("Camera shake", "Afterburner, guns, G-load, turbulence, the sound barrier and explosions", toggle("shake"));
       h += row("Sonic boom camera", "Replay the boom from outside without taking control away", chipCtl("boomCam", [["inset", "Inset view"], ["full", "Full screen"], ["off", "Off"]]));
+      h += row("Kill cam", "Slow-motion shot of the wreck when your missile or guns score a kill (skipped when you're low or under attack)", toggle("killCam"));
       h += row("Speed units", "Mach is always shown", chipCtl("units", [["mph", "MPH"], ["kt", "Knots"], ["kmh", "km/h"]]));
       h += row("Show HUD", null, toggle("hud"));
       h += row("Challenge ghosts", `Your best run flown as a translucent jet (${RJ.keyLabel(RJ.settings.keys.ghost)} toggles in flight)`, toggle("ghosts"));
