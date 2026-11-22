@@ -126,6 +126,7 @@
     [/flap/i, "flaps", 0],
     [/rudder/i, "rudders", 0]
   ];
+  const comp = (A, i, k) => (k === 0 ? A.getX(i) : k === 1 ? A.getY(i) : k === 2 ? A.getZ(i) : A.getW(i)); // r128 has no getComponent
   /** World box of the vertices a bone carries (rigged files hinge their surfaces with bones). */
   function boneBox(root, bone) {
     const wb = new THREE.Box3(), v = new THREE.Vector3();
@@ -137,7 +138,7 @@
       if (!SI || !SW) return;
       for (let i = 0; i < P.count; i++) {
         let w = 0;
-        for (let k = 0; k < 4; k++) if (SI.getComponent(i, k) === bi) w += SW.getComponent(i, k);
+        for (let k = 0; k < 4; k++) if (comp(SI, i, k) === bi) w += comp(SW, i, k);
         if (w < 0.5) continue;
         v.fromBufferAttribute(P, i); m.boneTransform(i, v); wb.expandByPoint(v.applyMatrix4(m.matrixWorld));
       }
@@ -165,6 +166,7 @@
     const span = U.dims ? U.dims.span : 10, rigged = { stabs: [], ailerons: [], flaps: [], rudders: [] };
     for (const { q, list, at } of top) {
       const b = localBox(g, q, skin);
+      if (RJ.debugSurf) console.log("surf", q.name, q.isBone, b && b.getSize(new THREE.Vector3()).toArray().map((v) => v.toFixed(2)).join(","));
       if (!b) continue;
       const c = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3());
       if (sz.z < 0.05 || sz.z > U.dims.len * 0.5) continue; // not a surface (or a whole-airframe node)
