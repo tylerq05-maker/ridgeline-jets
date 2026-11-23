@@ -1324,7 +1324,12 @@
     const ok = !!(env && env.mapping === THREE.CubeUVReflectionMapping);
     m.uniforms.rjEnv.value = ok ? env : null;
     const d = m.defines || (m.defines = {}), had = !!d.RJ_ENV_UV;
-    if (ok) { d.RJ_ENV_UV = ""; d.ENVMAP_TYPE_CUBE_UV = ""; if (env.encoding === THREE.RGBEEncoding) d.RJ_ENV_RGBE = ""; else delete d.RJ_ENV_RGBE; }
+    if (ok && env.image && env.image.height) {
+      // three r137+ sizes its CubeUV lookups from defines that it only sets for built-in materials
+      const h = env.image.height, mm = Math.log2(h) - 2;
+      d.CUBEUV_MAX_MIP = mm.toFixed(1); d.CUBEUV_TEXEL_HEIGHT = (1 / h).toFixed(10); d.CUBEUV_TEXEL_WIDTH = (1 / (3 * Math.max(Math.pow(2, mm), 7 * 16))).toFixed(10);
+    }
+    if (ok) { d.RJ_ENV_UV = ""; d.ENVMAP_TYPE_CUBE_UV = ""; if (THREE.RGBEEncoding !== undefined && env.encoding === THREE.RGBEEncoding) d.RJ_ENV_RGBE = ""; else delete d.RJ_ENV_RGBE; }
     else { delete d.RJ_ENV_UV; delete d.ENVMAP_TYPE_CUBE_UV; delete d.RJ_ENV_RGBE; }
     if (had !== ok || ok) m.needsUpdate = true;
   };

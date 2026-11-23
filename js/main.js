@@ -1058,6 +1058,7 @@
     const canvas = $("gl");
     try {
       renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
+      if (THREE.LinearSRGBColorSpace) renderer.outputColorSpace = THREE.LinearSRGBColorSpace; // r128 output (three-boot.js keeps r128's look)
     } catch (e) { $("load-text").textContent = "WebGL isn't available in this browser, so the game can't run here."; return; }
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     scene = new THREE.Scene(); RJ.scene = scene;

@@ -252,7 +252,7 @@
       P[j * 3 + 3] = wx + _s.x * w; P[j * 3 + 4] = wy + _s.y * w; P[j * 3 + 5] = wz + _s.z * w;
       B[j] = B[j + 1] = p.t; L[j] = L[j + 1] = tr.life * p.l; A[j] = A[j + 1] = Math.min(0.95, tr.alpha * 1.7);
     }
-    for (const k of ["position", "born", "life", "alpha0"]) { const at = r.g.attributes[k]; at.updateRange.offset = 0; at.updateRange.count = N * 2 * at.itemSize; at.needsUpdate = true; }
+    for (const k of ["position", "born", "life", "alpha0"]) { const at = r.g.attributes[k]; if (at.addUpdateRange) { at.clearUpdateRanges(); at.addUpdateRange(0, N * 2 * at.itemSize); } else { at.updateRange.offset = 0; at.updateRange.count = N * 2 * at.itemSize; } at.needsUpdate = true; }
   }
   MF.tickRibbons = function (dt) {
     if (!RIBBONS.length || !RJ.camera) return;
