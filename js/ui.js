@@ -378,6 +378,7 @@
       h += row("Motion blur", "Subtle radial blur at very high speed", toggle("motionBlur"));
       h += row("Heat haze", "Exhaust distortion behind the engines", toggle("heatHaze"));
       h += row("Depth of field", "Cinematic camera and hangar only", toggle("dof"));
+      h += row("Realistic sky", "Physically based sky with multiple scattering (deep blue zenith, real twilight colours)", toggle("realSky"));
       h += row("Anti-aliasing", "SMAA: sharpest edges · FXAA: lighter on old computers", chipCtl("aa", [["smaa", "SMAA"], ["fxaa", "FXAA"], ["off", "Off"]]));
       h += row("Water reflections", "Mirror reflections on the sea (High and Ultra)", toggle("waterReflect"));
       h += row("Volumetric clouds", "Raymarched 3D clouds you can fly through (Medium and up, needs WebGL2)", toggle("volClouds"));

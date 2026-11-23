@@ -831,7 +831,14 @@ body.is-touch #lever { top: 22%; }
 <div class="disc" id="discover" hidden><div class="ic" id="disc-ic"></div><span class="k">LANDMARK DISCOVERED</span><span class="n" id="disc-n"></span><span class="d" id="disc-d"></span><span class="r" id="disc-r"></span></div>
 
 <div id="comp-status" hidden></div>
-<script type="importmap">{ "imports": { "three": "./js/vendor/three/build/three.module.min.js" } }</script>
+<script type="importmap">{ "imports": {
+  "three": "./js/vendor/three/build/three.module.min.js",
+  "three/addons/": "./js/vendor/three/addons/",
+  "postprocessing": "./js/vendor/postprocessing/index.js",
+  "@takram/three-geospatial": "./js/vendor/takram/geospatial/index.js",
+  "@takram/three-geospatial/shaders": "./js/vendor/takram/geospatial/shaders.js",
+  "@takram/three-atmosphere": "./js/vendor/takram/atmosphere/index.js"
+} }</script>
 <script type="module" src="js/three-boot.js"></script>
 <script defer src="js/vendor/SMAAShader.js"></script>
 <script defer src="js/vendor/smaa-textures.js"></script>

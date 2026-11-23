@@ -831,9 +831,28 @@
     if (camera.view && camera.view.enabled) fc.setViewOffset(camera.view.fullWidth, camera.view.fullHeight, camera.view.offsetX, camera.view.offsetY, camera.view.width, camera.view.height); else fc.clearViewOffset();
     fc.updateProjectionMatrix(); fc.updateMatrixWorld();
     W.farMat.uniforms.hole.value = Math.min(W.viewRange * 0.78, W.loadedR != null ? W.loadedR : 1e9);
+    // physically based sky (js/atmo-sky.js, three r170+ only): loaded once, drawn in place of the dome by day and
+    // through twilight; the fog takes its true horizon colour so terrain and sky meet without a seam
+    if (!W._atmoTried && RJ.settings.realSky !== false && THREE.REVISION_NUM >= 170) {
+      W._atmoTried = true;
+      import("./atmo-sky.js").then((m) => { W.atmoSky = m.createSky(renderer); }).catch((e) => console.warn("Realistic sky module unavailable", e));
+    }
+    const Ask = W.atmoSky, nowT = performance.now(), adt = W._atmoT ? Math.min(0.2, (nowT - W._atmoT) / 1000) : 0.016; W._atmoT = nowT;
+    const useSky = !!(Ask && Ask.ready && RJ.settings.realSky !== false && !W.underwater && W.sunDir && (W.sunElev == null || W.sunElev > -6));
+    if (W.skyMesh) W.skyMesh.visible = !useSky;
+    const fogC = W.scene.fog.color;
+    if (useSky) {
+      // the game's lighting model sets the fog; remember its choice (the brightness reference) before we tint it
+      if (!W._fogOut || !fogC.equals(W._fogOut)) W._gameFog = (W._gameFog || new THREE.Color()).copy(fogC);
+      Ask.render(renderer, fc, W._gameFog, W.sunDir, adt);
+      if (Ask.hasFog) { fogC.copy(W._gameFog).lerp(Ask.fog, 0.85); W._fogOut = (W._fogOut || new THREE.Color()).copy(fogC); }
+    } else if (W._fogOut && W._gameFog && fogC.equals(W._fogOut)) { fogC.copy(W._gameFog); W._fogOut = null; }
     W.farMat.uniforms.fogCol.value.copy(W.scene.fog.color);
     W.far2Mat.uniforms.hole.value = W.far.mesh ? (W.Q.farN || 150) * (W.Q.farSpacing || 650) * 0.46 : 0;
+    const acB = renderer.autoClear;
+    if (useSky) renderer.autoClear = false; // keep the sky just drawn
     renderer.render(W.scene, fc);
+    renderer.autoClear = acB;
     renderer.clearDepth();
   };
 
