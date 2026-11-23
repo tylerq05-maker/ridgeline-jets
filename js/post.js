@@ -15,7 +15,7 @@
     P.r = renderer;
     try {
       const gl = renderer.getContext();
-      const isGL2 = renderer.capabilities.isWebGL2;
+      const isGL2 = renderer.capabilities.isWebGL2 !== false; // r163+ is WebGL2-only and no longer reports it
       let type = THREE.UnsignedByteType;
       if (isGL2 && renderer.extensions.get("EXT_color_buffer_float")) type = THREE.HalfFloatType;
       else if (!isGL2 && renderer.extensions.get("OES_texture_half_float") && renderer.extensions.get("OES_texture_half_float_linear") && renderer.extensions.get("EXT_color_buffer_half_float")) type = THREE.HalfFloatType;

@@ -37,6 +37,8 @@ window.RJ = window.RJ || {};
 
   /* ---------------- Events ---------------- */
   const listeners = {};
+  // the shader chunk that writes gl_FragColor: output_fragment up to three r153, opaque_fragment after
+  RJ.OUT_CHUNK = THREE.ShaderChunk && THREE.ShaderChunk.opaque_fragment ? "#include <opaque_fragment>" : "#include <output_fragment>";
   RJ.on = (ev, fn) => { (listeners[ev] = listeners[ev] || []).push(fn); };
   RJ.emit = (ev, data) => { (listeners[ev] || []).forEach((fn) => { try { fn(data); } catch (e) { console.error(e); } }); };
 
