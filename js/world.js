@@ -831,9 +831,32 @@
     if (camera.view && camera.view.enabled) fc.setViewOffset(camera.view.fullWidth, camera.view.fullHeight, camera.view.offsetX, camera.view.offsetY, camera.view.width, camera.view.height); else fc.clearViewOffset();
     fc.updateProjectionMatrix(); fc.updateMatrixWorld();
     W.farMat.uniforms.hole.value = Math.min(W.viewRange * 0.78, W.loadedR != null ? W.loadedR : 1e9);
+    // physically based sky (js/atmo-sky.js, three r170+ only): loaded once, drawn in place of the dome by day and
+    // through twilight; the fog takes its true horizon colour so terrain and sky meet without a seam
+    if (!W._atmoTried && RJ.settings.realSky !== false && THREE.REVISION_NUM >= 170) {
+      W._atmoTried = true;
+      import("./atmo-sky.js").then((m) => { W.atmoSky = m.createSky(renderer); }).catch((e) => console.warn("Realistic sky module unavailable", e));
+    }
+    const Ask = W.atmoSky, nowT = performance.now(), adt = W._atmoT ? Math.min(0.2, (nowT - W._atmoT) / 1000) : 0.016; W._atmoT = nowT;
+    const useSky = !!(Ask && Ask.ready && RJ.settings.realSky !== false && !W.underwater && W.sunDir && (W.sunElev == null || W.sunElev > -6));
+    const fogC = W.scene.fog.color;
+    let skyDrawn = false;
+    if (useSky) {
+      // the game's lighting model sets the fog every frame; remember its choice before we tint it
+      if (!W._fogOut || !fogC.equals(W._fogOut)) W._gameFog = (W._gameFog || new THREE.Color()).copy(fogC);
+      if (!W._skyCmp) { W._skyCmp = new THREE.Scene(); }
+      const drawGameSky = (c) => { const par = W.skyMesh.parent, vis = W.skyMesh.visible; W._skyCmp.add(W.skyMesh); W.skyMesh.visible = true; c.layers.enableAll(); renderer.render(W._skyCmp, c); par.add(W.skyMesh); W.skyMesh.visible = vis; };
+      skyDrawn = W.skyMesh ? Ask.render(renderer, fc, drawGameSky, W.sunDir, adt) : false;
+      if (skyDrawn && Ask.hasFog) { fogC.copy(W._gameFog).lerp(Ask.fog, 0.8); W._fogOut = (W._fogOut || new THREE.Color()).copy(fogC); }
+    }
+    if (!skyDrawn && W._fogOut && W._gameFog && fogC.equals(W._fogOut)) { fogC.copy(W._gameFog); W._fogOut = null; }
+    if (W.skyMesh) W.skyMesh.visible = !skyDrawn;
     W.farMat.uniforms.fogCol.value.copy(W.scene.fog.color);
     W.far2Mat.uniforms.hole.value = W.far.mesh ? (W.Q.farN || 150) * (W.Q.farSpacing || 650) * 0.46 : 0;
+    const acB = renderer.autoClear;
+    if (skyDrawn) renderer.autoClear = false; // keep the sky just drawn
     renderer.render(W.scene, fc);
+    renderer.autoClear = acB;
     renderer.clearDepth();
   };
 
@@ -1324,7 +1347,12 @@
     const ok = !!(env && env.mapping === THREE.CubeUVReflectionMapping);
     m.uniforms.rjEnv.value = ok ? env : null;
     const d = m.defines || (m.defines = {}), had = !!d.RJ_ENV_UV;
-    if (ok) { d.RJ_ENV_UV = ""; d.ENVMAP_TYPE_CUBE_UV = ""; if (env.encoding === THREE.RGBEEncoding) d.RJ_ENV_RGBE = ""; else delete d.RJ_ENV_RGBE; }
+    if (ok && env.image && env.image.height) {
+      // three r137+ sizes its CubeUV lookups from defines that it only sets for built-in materials
+      const h = env.image.height, mm = Math.log2(h) - 2;
+      d.CUBEUV_MAX_MIP = mm.toFixed(1); d.CUBEUV_TEXEL_HEIGHT = (1 / h).toFixed(10); d.CUBEUV_TEXEL_WIDTH = (1 / (3 * Math.max(Math.pow(2, mm), 7 * 16))).toFixed(10);
+    }
+    if (ok) { d.RJ_ENV_UV = ""; d.ENVMAP_TYPE_CUBE_UV = ""; if (THREE.RGBEEncoding !== undefined && env.encoding === THREE.RGBEEncoding) d.RJ_ENV_RGBE = ""; else delete d.RJ_ENV_RGBE; }
     else { delete d.RJ_ENV_UV; delete d.ENVMAP_TYPE_CUBE_UV; delete d.RJ_ENV_RGBE; }
     if (had !== ok || ok) m.needsUpdate = true;
   };

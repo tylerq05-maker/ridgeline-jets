@@ -375,13 +375,13 @@
     C.weatherTex.wrapS = C.weatherTex.wrapT = THREE.RepeatWrapping;
     C.weatherTex.magFilter = C.weatherTex.minFilter = THREE.LinearFilter;
     C.weatherTex.needsUpdate = true;
-    if (!renderer.capabilities.isWebGL2 || !RJ.post.ok || !RJ.post.depthOK) { C.ok = false; return; }
+    if (renderer.capabilities.isWebGL2 === false || !RJ.post.ok || !RJ.post.depthOK) { C.ok = false; return; }
     try {
       const N = 64, D = 32;
       const tex3 = (arr, n) => {
         const u8 = new Uint8Array(arr.length);
         for (let i = 0; i < arr.length; i++) u8[i] = arr[i] * 255;
-        const t = new THREE.DataTexture3D(u8, n, n, n);
+        const t = new (THREE.Data3DTexture || THREE.DataTexture3D)(u8, n, n, n);
         t.format = THREE.RedFormat; t.type = THREE.UnsignedByteType;
         t.minFilter = t.magFilter = THREE.LinearFilter;
         t.wrapS = t.wrapT = t.wrapR = THREE.RepeatWrapping;
@@ -391,7 +391,7 @@
       };
       C.shapeTex = tex3(buildShape(N), N);
       C.detailTex = tex3(buildDetail(D), D);
-      const half = renderer.capabilities.isWebGL2 ? THREE.HalfFloatType : THREE.UnsignedByteType;
+      const half = renderer.capabilities.isWebGL2 !== false ? THREE.HalfFloatType : THREE.UnsignedByteType;
       C.rt = new THREE.WebGLRenderTarget(4, 4, { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, type: half, depthBuffer: false, stencilBuffer: false });
       C.rt.texture.generateMipmaps = false;
       const U = {

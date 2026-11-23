@@ -104,13 +104,13 @@
       const full = this.wrapped || this.dirtyCount >= this.max;
       const sizes = [3, 3, 4, 4, 2];
       this.attrs.forEach((at, n) => {
-        at.updateRange.offset = full ? 0 : this.dirtyFrom * sizes[n];
-        at.updateRange.count = full ? -1 : this.dirtyCount * sizes[n];
+        if (at.addUpdateRange) { at.clearUpdateRanges(); if (!full) at.addUpdateRange(this.dirtyFrom * sizes[n], this.dirtyCount * sizes[n]); } // three r159+
+        else { at.updateRange.offset = full ? 0 : this.dirtyFrom * sizes[n]; at.updateRange.count = full ? -1 : this.dirtyCount * sizes[n]; }
         at.needsUpdate = true;
       });
       this.dirtyFrom = -1; this.dirtyCount = 0; this.wrapped = false;
     }
-    clear() { for (let k = 0; k < this.max; k++) this.a[k * 4] = -1000; this.attrs[2].updateRange.offset = 0; this.attrs[2].updateRange.count = -1; this.attrs[2].needsUpdate = true; }
+    clear() { for (let k = 0; k < this.max; k++) this.a[k * 4] = -1000; if (this.attrs[2].clearUpdateRanges) this.attrs[2].clearUpdateRanges(); else { this.attrs[2].updateRange.offset = 0; this.attrs[2].updateRange.count = -1; } this.attrs[2].needsUpdate = true; }
   }
 
   FX.init = function (scene) {

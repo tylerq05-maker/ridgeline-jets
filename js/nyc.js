@@ -523,14 +523,14 @@
         .replace("#include <normal_fragment_maps>", "#include <normal_fragment_maps>\nnormal = normalize(normal + (viewMatrix * vec4(fNW, 0.0)).xyz);")
         .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance += fEmis * (1.0 - vBurn) + vec3(1.0, 0.32, 0.08) * vBurn * 2.5 * step(0.9, fract(sin(dot(floor(vWP.xz / 5.0) + floor(vWP.y / 7.0), vec2(12.9, 78.2))) * 43758.5));")
         // glass mirrors the real surroundings from the city probe (Fresnel-weighted, darker at normal incidence)
-        .replace("#include <output_fragment>", [
+        .replace(RJ.OUT_CHUNK, [
           "if (uProbeK > 0.5 && fGlass > 0.01) {",
           "  vec3 Nw = normalize((vec4(normal, 0.0) * viewMatrix).xyz); vec3 Vw = normalize(vWP - cameraPosition);",
           "  vec3 Rw = reflect(Vw, Nw); float F = 0.12 + 0.88 * pow(1.0 - max(dot(-Vw, Nw), 0.0), 5.0);",
           "  vec3 pr = textureCube(uProbe, Rw).rgb;",
           "  outgoingLight = mix(outgoingLight, pr * 0.9, clamp(fGlass * (0.25 + F * 0.7), 0.0, 0.85) * (1.0 - fRough));",
           "}",
-          "#include <output_fragment>"].join("\n"));
+          RJ.OUT_CHUNK].join("\n"));
       if (RJ.world.addCloudShadows) RJ.world.addCloudShadows(sh, "vWP");
     };
     return m;

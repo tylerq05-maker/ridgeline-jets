@@ -37,6 +37,8 @@ window.RJ = window.RJ || {};
 
   /* ---------------- Events ---------------- */
   const listeners = {};
+  // the shader chunk that writes gl_FragColor: output_fragment up to three r153, opaque_fragment after
+  RJ.OUT_CHUNK = THREE.ShaderChunk && THREE.ShaderChunk.opaque_fragment ? "#include <opaque_fragment>" : "#include <output_fragment>";
   RJ.on = (ev, fn) => { (listeners[ev] = listeners[ev] || []).push(fn); };
   RJ.emit = (ev, data) => { (listeners[ev] || []).forEach((fn) => { try { fn(data); } catch (e) { console.error(e); } }); };
 
@@ -61,7 +63,7 @@ window.RJ = window.RJ || {};
   };
   const DEFAULTS = {
     quality: "high", shadows: true, viewDist: 1, clouds: 1,
-    bloom: true, motionBlur: true, heatHaze: true, dof: true, fxaa: true, aa: "smaa", waterReflect: true, cloudShadows: true, volClouds: true, exposure: 1,
+    bloom: true, motionBlur: true, heatHaze: true, dof: true, fxaa: true, aa: "smaa", realSky: false, waterReflect: true, cloudShadows: true, volClouds: true, exposure: 1,
     master: 0.8, engineVol: 0.8, envVol: 0.7, sfxVol: 0.85, voiceVol: 0.9, voiceName: "", voiceRate: 0.95, voicePitch: 0.96, compOn: true, compChat: "normal", compVol: 0.9, compVoice: "", compMic: true, compFollow: true, novaServer: "", muted: false,
     invert: false, sens: 1, touchSens: 1, assist: true,
     cam: "chase", fov: 68, shake: true, boomCam: "inset", killCam: true,

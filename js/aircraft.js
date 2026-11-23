@@ -985,7 +985,7 @@
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", "#include <common>\nvarying vec3 vGP;\n" + RJ.world.GLSL_NOISE)
         .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor + rjVN(vGP.xz * 9.0) * 0.06 + smoothstep(0.93, 0.98, rjVN(vec2(vGP.x * 70.0, vGP.z * 3.0))) * 0.12, 0.02, 1.0);")
-        .replace("#include <output_fragment>", "float fres = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 3.0);\ndiffuseColor.a = clamp(diffuseColor.a * (0.75 + fres * 0.9), 0.0, 0.97);\n#include <output_fragment>\ngl_FragColor.a = diffuseColor.a;");
+        .replace(RJ.OUT_CHUNK, "float fres = pow(1.0 - abs(dot(normalize(vViewPosition), normal)), 3.0);\ndiffuseColor.a = clamp(diffuseColor.a * (0.75 + fres * 0.9), 0.0, 0.97);\n" + RJ.OUT_CHUNK + "\ngl_FragColor.a = diffuseColor.a;");
     };
     return mat;
   }
