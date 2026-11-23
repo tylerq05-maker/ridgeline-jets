@@ -66,6 +66,7 @@
       for (let i = 0; i < 3; i++) shock.push(new THREE.Vector4());
       P.comp = mk([
         "uniform sampler2D tScene; uniform sampler2D tDepth; uniform sampler2D tBloom1; uniform sampler2D tBloom2; uniform sampler2D tBlur; uniform float cine;",
+        "uniform float ao;",
         "uniform vec2 resolution; uniform float time; uniform float aspect;",
         "uniform float exposure; uniform float bloomStrength; uniform float saturation; uniform float contrast; uniform vec3 tint;",
         "uniform float vignette; uniform float grain; uniform float flash; uniform vec3 flashCol;",
@@ -76,6 +77,22 @@
         "varying vec2 vUv;",
         "float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }",
         "float linDepth(float d){ float z = d * 2.0 - 1.0; return 2.0 * camNear * camFar / (camFar + camNear - z * (camFar - camNear)); }",
+        // screen-space ambient occlusion from the depth buffer alone (no normal pass): 8 taps in a rotated ring whose
+        // radius shrinks with distance; a neighbour that sits 0.3-12 m in front darkens this pixel (contact shadows
+        // between buildings, under wings, in cockpit corners). Fades out with distance and never touches the sky.
+        "float ssao(vec2 uv){",
+        "  float dr = texture2D(tDepth, uv).x; if (dr > 0.99999) return 1.0;",
+        "  float d = linDepth(dr); if (d > 2500.0) return 1.0;",
+        // opposite pairs, and both must stand in front: a flat surface (even a steep one) never shades itself and the
+        // background behind a silhouette gets no halo; only real creases and contact areas darken. Eight fixed pairs and no noise keep it clean.
+        "  float a0 = 0.2;",
+        "  float r = clamp(14.0 / d, 0.0025, 0.03), occ = 0.0;",
+        "  for (int i = 0; i < 8; i++) { float fi = float(i); float an = a0 + fi * 0.3927; float rr = r * (0.5 + 0.5 * fract(fi * 0.618 + 0.3));",
+        "    vec2 o = vec2(cos(an) / aspect, sin(an)) * rr;",
+        "    float df = d - max(linDepth(texture2D(tDepth, uv + o).x), linDepth(texture2D(tDepth, uv - o).x));",
+        "    occ += smoothstep(0.15, 1.2 + d * 0.003, df) * (1.0 - smoothstep(6.0 + d * 0.02, 16.0 + d * 0.04, df)); }",
+        "  return 1.0 - occ / 8.0 * ao * (1.0 - smoothstep(900.0, 2500.0, d));",
+        "}",
         // ACES filmic (Narkowicz fit) applied in linear light; the buffer holds display-referred values
         "vec3 acesF(vec3 x){ return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }",
         "vec3 tone(vec3 c){ vec3 lin = pow(max(c, 0.0), vec3(2.2)) * 0.9; return pow(acesF(lin), vec3(1.0 / 2.2)); }",
@@ -103,6 +120,7 @@
         "    float coc = clamp(abs(z - dof.x) / dof.y, 0.0, 1.0) * dof.z;",
         "    col = mix(col, texture2D(tBlur, uv).rgb, coc);",
         "  }",
+        "  if (ao > 0.001 && useDepth > 0.5) col *= ssao(uv);",
         "  vec3 bloom = texture2D(tBloom1, uv).rgb * 0.55 + texture2D(tBloom2, uv).rgb * 0.75;",
         "  col += bloom * bloomStrength;",
         // sun shafts: march toward the sun through sky / bright-cloud pixels; lens flare ghosts along the optical axis
@@ -154,7 +172,7 @@
         motion: { value: 0 }, motionCenter: { value: new THREE.Vector2(0.5, 0.5) }, chroma: { value: 0 },
         heat: { value: heat }, shock: { value: shock }, shockWidth: { value: 0.035 },
         useDepth: { value: 0 }, dof: { value: new THREE.Vector3(100, 200, 0) }, camNear: { value: 0.5 }, camFar: { value: 20000 },
-        sunP: { value: new THREE.Vector3() }, sunC: { value: new THREE.Vector3(1, 0.9, 0.8) }, rays: { value: 0 }, flare: { value: 0 }, cine: { value: 0 }
+        ao: { value: 0 }, sunP: { value: new THREE.Vector3() }, sunC: { value: new THREE.Vector3(1, 0.9, 0.8) }, rays: { value: 0 }, flare: { value: 0 }, cine: { value: 0 }
       });
       P.fxaa = mk([
         "uniform sampler2D tDiffuse; uniform vec2 resolution; varying vec2 vUv;",
@@ -326,7 +344,10 @@
     for (let i = 0; i < 4; i++) { const h = S.heatHaze !== false && fx.heat[i]; if (h) U.heat.value[i].set(h[0], h[1], h[2], h[3]); else U.heat.value[i].set(0, 0, 0, 0); }
     for (let i = 0; i < 3; i++) { const s = fx.shocks[i]; if (s) U.shock.value[i].set(s[0], s[1], s[2], s[3]); else U.shock.value[i].set(0, 0, 0, 0); }
     const sunOn = S.sunFx !== false && fx.sun && P.depthOK;
-    U.useDepth.value = dofOn || sunOn ? 1 : 0;
+    // ambient occlusion: an Ultra-quality extra (or forced with settings.ao = true); needs the depth texture
+    const aoOn = P.depthOK && S.ao !== false && (S.ao === true || S.quality === "ultra") && !(opts && opts.noAO);
+    U.ao.value = aoOn ? 0.45 : 0;
+    U.useDepth.value = dofOn || sunOn || aoOn ? 1 : 0;
     if (!dofOn) U.dof.value.set(0, 1, 0);
     if (sunOn) { U.sunP.value.set(fx.sun[0], fx.sun[1], fx.sun[2]); U.sunC.value.set(fx.sun[3], fx.sun[4], fx.sun[5]); U.rays.value = fx.sun[6]; U.flare.value = fx.sun[7]; } else U.sunP.value.z = 0;
     if (dofOn) U.dof.value.set(fx.dof[0], fx.dof[1], fx.dof[2]);
