@@ -782,6 +782,27 @@
     F.k = top / (rr * F.vmax * F.vmax * (1 + RJ.waveK(F, F.machD)));
   }
   RJ.calibrateFlight = calibrate;
+  /* Real performance from the JSBSim flight dynamics models (github.com/JSBSim-Team/jsbsim, LGPL; numbers only,
+   * no code): engine military / afterburner thrust, combat weight (empty + half internal fuel + pilot), wing area and
+   * clean maximum lift coefficient. Thrust is stored as acceleration at combat weight (m/s^2) and scaled by one
+   * common game factor (JET_K) so the overall feel is unchanged while each jet keeps its real strength relative to
+   * the others; stall speed is the 1 G sea-level figure, v = sqrt(2 m g / (rho S CLmax)). Top speeds stay as they
+   * were: calibrate() fits each jet's drag to its thrust and its real top speed.
+   *   F-22  2 x F119-PW-1   26,950 / 37,000 lbf  24.0 t  78.0 m2  CLmax 2.0 (published)
+   *   F-15C 2 x F100-PW-229 17,800 / 29,000 lbf  15.8 t  56.5 m2  CLmax 1.19
+   *   F-16C 1 x F100-PW-229 17,800 / 29,000 lbf  10.9 t  27.9 m2  CLmax 1.6 (published)
+   *   F-4   2 x J79-GE-11A  10,000 / 15,800 lbf  15.7 t  49.2 m2  CLmax 1.0
+   *   737   2 x CFM56       20,000 lbf           52.5 t (stall speed left with flaps out, as the game models)    */
+  const JET_K = 1.05;
+  const REAL = { f22: [9.97, 13.69, 50], f15c: [10.04, 16.35, 61], f16: [7.24, 11.8, 63], f4: [5.67, 8.96, 71], b738: [3.39, 0, null] };
+  for (const id in REAL) {
+    const F = A[id] && A[id].flight, r = REAL[id];
+    if (!F) continue;
+    F.mil = +(r[0] * JET_K).toFixed(2);
+    if (r[1]) F.ab = +(r[1] * JET_K).toFixed(2);
+    if (r[2]) F.vstall = r[2];
+    F.jsbsim = true;
+  }
   for (const id in A) {
     const F = A[id].flight;
     calibrate(F);
