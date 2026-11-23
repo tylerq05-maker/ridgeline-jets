@@ -984,7 +984,7 @@
       else if (st === "photo") RJ.photo.frame(dt);
       else if (st === "hangar") HV.render(dt);
       else if (st === "menu") menuFrame(dt);
-      else if (st === "intro") RJ.intro.frame(dt);
+      else if (st === "intro") { try { RJ.intro.frame(dt); } catch (e) { console.warn("Intro crashed; opening the lobby", e); try { RJ.intro.finish(true); } catch (e2) { RJ.state.mode = "menu"; RJ.ui.show("scr-main"); } } }
     } catch (e) { console.error(e); }
     const musKey = st + (RJ.audio.ctx ? "+" : "") + (RJ.settings.muted ? "m" : "") + RJ.settings.musicVol + "|" + RJ.settings.master + "|" + (RJ.settings.musicSC || "");
     if (RJ.audio.music && musKey !== RJ._lastSt) { RJ.audio.music(st === "menu" || st === "hangar"); RJ._lastSt = musKey; }
@@ -1115,7 +1115,12 @@
       RJ.ui.show("scr-main");
       RJ.ui.checkInvite();
     };
-    if (!intro || !RJ.intro.start({ jets: show.jets, delta: DELTA, beach, render: showRender, done: openLobby })) openLobby();
+    // the new cinematic first; if it can't start on this machine (or throws), the classic one; else straight to the lobby
+    const api = { jets: show.jets, delta: DELTA, beach, render: showRender, done: openLobby };
+    const tryIntro = (X) => { if (!X || !X.start) return false; try { return !!X.start(api); } catch (e) { console.warn("Intro failed to start", e); try { X.active = false; if (X.finish) X.finish(true); } catch (e2) { /* torn down */ } return false; } };
+    let started = intro && tryIntro(RJ.intro);
+    if (intro && !started && RJ.introClassic && tryIntro(RJ.introClassic)) { RJ.intro = RJ.introClassic; started = true; }
+    if (!started) openLobby();
   }
   boot();
 })(window.RJ);

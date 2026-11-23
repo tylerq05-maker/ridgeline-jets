@@ -13,6 +13,7 @@
   "use strict";
   const V3 = RJ.V3;
   const I = { active: false };
+  if (RJ.intro && !RJ.introClassic) RJ.introClassic = RJ.intro; // the Fleet Week cinematic stays as the fallback
   RJ.intro = I;
   const sm = (a, b, x) => RJ.smooth(a, b, x);
   const lerp = (a, b, x) => a + (b - a) * x;
