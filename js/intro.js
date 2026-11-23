@@ -754,17 +754,20 @@
       if (d < nearD) { nearD = d; I.near = k; }
       // smoke on everywhere except the deck: long trails that linger, drift and spread
       const smokeOn = I.running && (k < 6 || js.mode !== "deck");
-      if (!smokeOn) { I.prev[k] = null; return; }
+      const rib = RJ.ribbons ? (I.rib || (I.rib = []))[k] || (I.rib[k] = RJ.ribbons.create({ life: 15, w0: 3.4, w1: 28, alpha: 0.72, spacing: 4 })) : null;
+      if (!smokeOn) { I.prev[k] = null; if (rib) rib.cut(); return; }
       const tail = v2.copy(j.pos).addScaledVector(v1, -9);
       const p = I.prev[k];
       if (p) {
-        const gap = p.distanceTo(tail), n = Math.min(40, Math.ceil(gap / 3));
+        // a continuous ribbon carries the trail; a thinner scatter of puffs keeps some billow and volume in it
+        if (rib) rib.add(tail);
+        const gap = p.distanceTo(tail), n = Math.min(40, Math.ceil(gap / (rib ? 9 : 3)));
         for (let i = 1; i <= n; i++) {
           const x = v1.clone().lerpVectors(p, tail, i / n);
-          RJ.fx.smokeP.spawn(x.x, x.y, x.z, (Math.random() - 0.5) * 1.5, 0.4 + Math.random() * 0.6, (Math.random() - 0.5) * 1.5, 15, 2.8, 20, 0.95, 0.95, 0.97, 0.5, 0.15, 0.4);
+          RJ.fx.smokeP.spawn(x.x, x.y, x.z, (Math.random() - 0.5) * 1.5, 0.4 + Math.random() * 0.6, (Math.random() - 0.5) * 1.5, 15, 2.8, 20, 0.95, 0.95, 0.97, rib ? 0.3 : 0.5, 0.15, 0.4);
         }
         p.copy(tail);
-      } else I.prev[k] = tail.clone();
+      } else { I.prev[k] = tail.clone(); if (rib) { rib.cut(); rib.add(tail); } }
       v1.set(0, 0, -1).applyQuaternion(j.q);
     });
     // the crowd and the deck crew of the hook (steam off the catapult track)
@@ -876,6 +879,7 @@
     for (const j of I.api.jets) j.mesh.visible = true;
     if (I.cv && I.cv.grp) { RJ.scene.remove(I.cv.grp); I.cv.grp.traverse((o) => { if (o.geometry) o.geometry.dispose(); }); }
     if (I.cloud) { RJ.scene.remove(I.cloud); I.cloud.userData.dispose(); }
+    if (I.rib) { for (const r of I.rib) if (r) r.release(); I.rib = null; } // let the smoke fade out on its own
     const el = I.el;
     if (el) {
       if (I.gate) { I.gate.remove(); I.gate = null; }
