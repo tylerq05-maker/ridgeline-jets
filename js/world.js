@@ -839,18 +839,22 @@
     }
     const Ask = W.atmoSky, nowT = performance.now(), adt = W._atmoT ? Math.min(0.2, (nowT - W._atmoT) / 1000) : 0.016; W._atmoT = nowT;
     const useSky = !!(Ask && Ask.ready && RJ.settings.realSky !== false && !W.underwater && W.sunDir && (W.sunElev == null || W.sunElev > -6));
-    if (W.skyMesh) W.skyMesh.visible = !useSky;
     const fogC = W.scene.fog.color;
+    let skyDrawn = false;
     if (useSky) {
-      // the game's lighting model sets the fog; remember its choice (the brightness reference) before we tint it
+      // the game's lighting model sets the fog every frame; remember its choice before we tint it
       if (!W._fogOut || !fogC.equals(W._fogOut)) W._gameFog = (W._gameFog || new THREE.Color()).copy(fogC);
-      Ask.render(renderer, fc, W._gameFog, W.sunDir, adt);
-      if (Ask.hasFog) { fogC.copy(W._gameFog).lerp(Ask.fog, 0.85); W._fogOut = (W._fogOut || new THREE.Color()).copy(fogC); }
-    } else if (W._fogOut && W._gameFog && fogC.equals(W._fogOut)) { fogC.copy(W._gameFog); W._fogOut = null; }
+      if (!W._skyCmp) { W._skyCmp = new THREE.Scene(); }
+      const drawGameSky = (c) => { const par = W.skyMesh.parent, vis = W.skyMesh.visible; W._skyCmp.add(W.skyMesh); W.skyMesh.visible = true; c.layers.enableAll(); renderer.render(W._skyCmp, c); par.add(W.skyMesh); W.skyMesh.visible = vis; };
+      skyDrawn = W.skyMesh ? Ask.render(renderer, fc, drawGameSky, W.sunDir, adt) : false;
+      if (skyDrawn && Ask.hasFog) { fogC.copy(W._gameFog).lerp(Ask.fog, 0.8); W._fogOut = (W._fogOut || new THREE.Color()).copy(fogC); }
+    }
+    if (!skyDrawn && W._fogOut && W._gameFog && fogC.equals(W._fogOut)) { fogC.copy(W._gameFog); W._fogOut = null; }
+    if (W.skyMesh) W.skyMesh.visible = !skyDrawn;
     W.farMat.uniforms.fogCol.value.copy(W.scene.fog.color);
     W.far2Mat.uniforms.hole.value = W.far.mesh ? (W.Q.farN || 150) * (W.Q.farSpacing || 650) * 0.46 : 0;
     const acB = renderer.autoClear;
-    if (useSky) renderer.autoClear = false; // keep the sky just drawn
+    if (skyDrawn) renderer.autoClear = false; // keep the sky just drawn
     renderer.render(W.scene, fc);
     renderer.autoClear = acB;
     renderer.clearDepth();

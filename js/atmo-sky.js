@@ -11,7 +11,7 @@ import { SkyMaterial, PrecomputedTexturesGenerator } from "@takram/three-atmosph
 import { Ellipsoid, Geodetic, radians } from "@takram/three-geospatial";
 
 export function createSky(renderer, lat = 40.7, lon = -74.0) {
-  const A = { ready: false, failed: false, k: 0.06, fog: new THREE.Color(), hasFog: false };
+  const A = { ready: false, failed: false, k: 20, fog: new THREE.Color(), hasFog: false };
   const mat = new SkyMaterial({ sun: true, moon: true });
   // exposure + the game's display-referred output (its post chain decodes with gamma 2.2)
   mat.uniforms.rjExposure = { value: A.k };
@@ -40,7 +40,7 @@ export function createSky(renderer, lat = 40.7, lon = -74.0) {
 
   // horizon sampler: a small low-resolution view sideways to the sun, read back once a second
   const rt = new THREE.WebGLRenderTarget(16, 8, { depthBuffer: false });
-  const sc = new THREE.PerspectiveCamera(30, 2, 1, 10);
+  const sc = new THREE.PerspectiveCamera(30, 2, 1, 1e8);
   const px = new Uint8Array(16 * 8 * 4);
   let sampleT = 0;
   const _d = new THREE.Vector3();
@@ -49,34 +49,47 @@ export function createSky(renderer, lat = 40.7, lon = -74.0) {
     mat.sunDirection.copy(_d.copy(sunDirWorld).applyMatrix3(rot).normalize());
     if (moonDirWorld) mat.moonDirection.copy(_d.copy(moonDirWorld).applyMatrix3(rot).normalize());
   };
-  /** Draw the sky into the current target with `cam`, after keeping exposure and fog in step with the game. */
-  A.render = (r, cam, gameFog, sunDirWorld, dt) => {
+  const lum3 = (R, G, B) => 0.2126 * R + 0.7152 * G + 0.0722 * B;
+  /** Average colour of a small view at elevation `el` (radians), 90 degrees round from the sun. */
+  function sample(r, from, sunDirWorld, el, draw) {
+    const az = Math.atan2(sunDirWorld.x, sunDirWorld.z) + Math.PI / 2;
+    sc.position.copy(from);
+    sc.lookAt(from.x + Math.sin(az) * Math.cos(el), from.y + Math.sin(el), from.z + Math.cos(az) * Math.cos(el));
+    sc.updateMatrixWorld(); sc.updateProjectionMatrix();
+    r.setRenderTarget(rt); r.setClearColor(0x000000, 1); r.clear(); draw(sc);
+    r.readRenderTargetPixels(rt, 0, 0, 16, 8, px);
+    let R = 0, G = 0, B = 0; for (let i = 0; i < px.length; i += 4) { R += px[i]; G += px[i + 1]; B += px[i + 2]; }
+    const n = px.length / 4 * 255; return [R / n, G / n, B / n];
+  }
+  /** Draw the sky into the current target with `cam`. Now and then: match its brightness to the game's own sky
+   *  in the same direction (25 degrees up), and take the fog colour from its horizon. drawGameSky(cam) renders the
+   *  game's dome for that comparison. */
+  A.render = (r, cam, drawGameSky, sunDirWorld, dt) => {
     if (!A.ready) return false;
     A.setSun(sunDirWorld);
-    sampleT -= dt || 0.016;
-    if (sampleT <= 0 && gameFog) {
-      sampleT = 1.0;
-      const prevT = r.getRenderTarget(), ac = r.autoClear;
-      sc.position.copy(cam.position);
-      // look horizontally, 90 degrees round from the sun, a degree above the horizon: the typical haze colour
-      const az = Math.atan2(sunDirWorld.x, sunDirWorld.z) + Math.PI / 2;
-      sc.lookAt(cam.position.x + Math.sin(az), cam.position.y + 0.02, cam.position.z + Math.cos(az));
-      sc.updateMatrixWorld(); sc.updateProjectionMatrix();
-      r.setRenderTarget(rt); r.autoClear = true; r.render(scene, sc);
-      r.readRenderTargetPixels(rt, 0, 0, 16, 8, px);
-      r.setRenderTarget(prevT); r.autoClear = ac;
-      let R = 0, G = 0, B = 0; for (let i = 0; i < px.length; i += 4) { R += px[i]; G += px[i + 1]; B += px[i + 2]; }
-      const n = px.length / 4 * 255; R /= n; G /= n; B /= n;
-      const lum = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
-      const ls = lum([R, G, B]), lg = lum([gameFog.r, gameFog.g, gameFog.b]);
-      if (ls > 0.002 && lg > 0.002) {
-        // displayed value ~ (radiance k)^(1/2.2): move k towards the brightness the game's own sky would have
-        const want = A.k * Math.pow(lg / ls, 2.2);
-        A.k = THREE.MathUtils.clamp(A.k + (want - A.k) * (A.hasFog ? 0.5 : 1), 1e-5, 50);
-      }
-      A.fog.setRGB(R, G, B); A.hasFog = true;
-    }
     mat.uniforms.rjExposure.value = A.k;
+    sampleT -= dt || 0.016;
+    if (sampleT <= 0 && drawGameSky) {
+      sampleT = A.settled ? 1.0 : 0.1;
+      const prevT = r.getRenderTarget(), ac = r.autoClear, cc = r.getClearColor(new THREE.Color()), ca = r.getClearAlpha();
+      r.autoClear = false;
+      const el = 25 * Math.PI / 180;
+      const s1 = sample(r, cam.position, sunDirWorld, el, (c) => r.render(scene, c));
+      const g1 = sample(r, cam.position, sunDirWorld, el, (c) => drawGameSky(c));
+      const ls = lum3(...s1), lg = lum3(...g1);
+      if (lg > 0.004) {
+        if (ls < 0.004) A.k = Math.min(400, A.k * 8);
+        else {
+          const want = A.k * Math.pow(lg / ls, 2.2);
+          A.k = THREE.MathUtils.clamp(A.k + (want - A.k) * (A.settled ? 0.5 : 1), 1e-4, 400);
+          if (Math.abs(ls / lg - 1) < 0.2) A.settled = true;
+        }
+        mat.uniforms.rjExposure.value = A.k;
+      }
+      if (A.settled) { const h = sample(r, cam.position, sunDirWorld, 0.5 * Math.PI / 180, (c) => r.render(scene, c)); A.fog.setRGB(h[0], h[1], h[2]); A.hasFog = true; }
+      r.setRenderTarget(prevT); r.autoClear = ac; r.setClearColor(cc, ca);
+    }
+    if (!A.settled) return false; // keep the game's sky until the brightness matches
     r.render(scene, cam);
     return true;
   };

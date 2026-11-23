@@ -831,6 +831,11 @@ body.is-touch #lever { top: 22%; }
 <div class="disc" id="discover" hidden><div class="ic" id="disc-ic"></div><span class="k">LANDMARK DISCOVERED</span><span class="n" id="disc-n"></span><span class="d" id="disc-d"></span><span class="r" id="disc-r"></span></div>
 
 <div id="comp-status" hidden></div>
+<script>
+/* browsers without import maps (Safari before 16.4, old Chromium) keep the r128 build the game was made on; the game's
+   code supports both, and js/three-boot.js (module) simply never runs there */
+if (!(window.HTMLScriptElement && HTMLScriptElement.supports && HTMLScriptElement.supports("importmap"))) document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script><script src="js/vendor/RGBELoader.js"><\/script>');
+</script>
 <script type="importmap">{ "imports": {
   "three": "./js/vendor/three/build/three.module.min.js",
   "three/addons/": "./js/vendor/three/addons/",

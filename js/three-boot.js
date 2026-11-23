@@ -37,4 +37,6 @@ if (C.lights_fragment_maps.indexOf("vec3 lightMapIrradiance = lightMapTexel.rgb 
 THREE.PointLight = class PointLight extends T.PointLight { constructor(color, intensity, distance, decay = 1) { super(color, intensity, distance, decay); } };
 THREE.SpotLight = class SpotLight extends T.SpotLight { constructor(color, intensity, distance, angle, penumbra, decay = 1) { super(color, intensity, distance, angle, penumbra, decay); } };
 
-window.THREE = THREE;
+// if index.html fell back to the r128 build (a browser without import maps that still ran this module somehow),
+// leave that build in place rather than mixing two versions
+if (!(window.THREE && window.THREE.REVISION === "128")) window.THREE = THREE;
