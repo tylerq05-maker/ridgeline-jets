@@ -180,6 +180,26 @@
         "}"
       ].join("\n"), { tDiffuse: { value: null }, resolution: { value: new THREE.Vector2() } });
 
+      // SMAA 1x (three.js r128 shaders, vendored): edge detection -> blend weights -> neighbourhood blend.
+      // Sharper and steadier than FXAA on wing edges, skyline and distant buildings; FXAA stays as the fallback.
+      if (THREE.SMAAEdgesShader && THREE.SMAATextures) {
+        const rtOpt = (f) => ({ depthBuffer: false, stencilBuffer: false, generateMipmaps: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: f });
+        P.smEdges = new THREE.WebGLRenderTarget(4, 4, rtOpt(THREE.RGBAFormat));
+        P.smWeights = new THREE.WebGLRenderTarget(4, 4, rtOpt(THREE.RGBAFormat));
+        const tex = (src, near) => {
+          const img = new Image(), t = new THREE.Texture(img);
+          img.onload = () => { t.needsUpdate = true; P.smReady = (P.smReady || 0) + 1; };
+          img.src = src;
+          t.flipY = false; t.generateMipmaps = false;
+          t.minFilter = near ? THREE.NearestFilter : THREE.LinearFilter; t.magFilter = near ? THREE.NearestFilter : THREE.LinearFilter;
+          return t;
+        };
+        const area = tex(THREE.SMAATextures.area, false), search = tex(THREE.SMAATextures.search, true);
+        const sm = (S) => new THREE.ShaderMaterial({ defines: Object.assign({}, S.defines), uniforms: THREE.UniformsUtils.clone(S.uniforms), vertexShader: S.vertexShader, fragmentShader: S.fragmentShader, depthTest: false, depthWrite: false });
+        P.smaaE = sm(THREE.SMAAEdgesShader); P.smaaW = sm(THREE.SMAAWeightsShader); P.smaaB = sm(THREE.SMAABlendShader);
+        P.smaaW.uniforms.tDiffuse.value = P.smEdges.texture; P.smaaW.uniforms.tArea.value = area; P.smaaW.uniforms.tSearch.value = search;
+        P.smaaB.uniforms.tDiffuse.value = P.smWeights.texture;
+      }
       P.quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), P.copy);
       P.quad.frustumCulled = false;
       P.qScene = new THREE.Scene(); P.qScene.add(P.quad);
@@ -201,6 +221,10 @@
     P.rtE1.setSize(Math.max(1, w >> 3), Math.max(1, h >> 3)); P.rtE2.setSize(Math.max(1, w >> 3), Math.max(1, h >> 3));
     P.rtD1.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2)); P.rtD2.setSize(Math.max(1, w >> 2), Math.max(1, h >> 2));
     P.rtComp.setSize(w, h);
+    if (P.smEdges) {
+      P.smEdges.setSize(w, h); P.smWeights.setSize(w, h);
+      for (const m of [P.smaaE, P.smaaW, P.smaaB]) m.uniforms.resolution.value.set(1 / w, 1 / h);
+    }
   };
 
   function pass(mat, target) {
@@ -307,8 +331,18 @@
     if (sunOn) { U.sunP.value.set(fx.sun[0], fx.sun[1], fx.sun[2]); U.sunC.value.set(fx.sun[3], fx.sun[4], fx.sun[5]); U.rays.value = fx.sun[6]; U.flare.value = fx.sun[7]; } else U.sunP.value.z = 0;
     if (dofOn) U.dof.value.set(fx.dof[0], fx.dof[1], fx.dof[2]);
     U.camNear.value = camera.near; U.camFar.value = camera.far;
-    const fxaaOn = S.fxaa !== false;
-    pass(P.comp, fxaaOn ? P.rtComp : null);
+    // anti-aliasing: SMAA (default), FXAA (also while the SMAA lookup textures load), or off
+    const want = S.aa || (S.fxaa === false ? "off" : "smaa");
+    const aa = want === "off" ? "off" : want === "fxaa" || !P.smaaE || (P.smReady || 0) < 2 ? "fxaa" : "smaa";
+    const fxaaOn = aa === "fxaa";
+    pass(P.comp, aa !== "off" ? P.rtComp : null);
+    if (aa === "smaa") {
+      P.smaaE.uniforms.tDiffuse.value = P.rtComp.texture;
+      pass(P.smaaE, P.smEdges);
+      pass(P.smaaW, P.smWeights);
+      P.smaaB.uniforms.tColor.value = P.rtComp.texture;
+      pass(P.smaaB, null);
+    }
     if (fxaaOn) {
       P.fxaa.uniforms.tDiffuse.value = P.rtComp.texture;
       P.fxaa.uniforms.resolution.value.set(P.w, P.h);
