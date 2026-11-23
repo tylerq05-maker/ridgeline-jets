@@ -284,7 +284,16 @@
   font-family: var(--font-mono); font-size: 13px; letter-spacing: .22em; text-transform: uppercase; backdrop-filter: blur(4px); transition: background .2s, border-color .2s; }
 #intro .skip:hover, #intro .skip:focus-visible { background: rgba(255,184,28,.92); color: #161006; border-color: #ffb81c; outline: none; }
 #intro .skip kbd { font-family: inherit; font-size: 10px; letter-spacing: .1em; padding: 1px 5px; border: 1px solid currentColor; border-radius: 2px; opacity: .75; }
-#intro .gate { pointer-events: auto; position: absolute; inset: 0; display: grid; place-items: center; cursor: pointer; background: #000; z-index: 1; }
+#intro .gate { pointer-events: auto; position: absolute; inset: 0; display: grid; place-items: center; cursor: pointer; z-index: 1;
+  background: radial-gradient(ellipse 70% 55% at 50% 58%, #13202e 0%, #070b11 55%, #000 100%); overflow: hidden; }
+#intro .gate::before { content: ""; position: absolute; left: -30%; right: -30%; top: 56%; height: 1px; background: linear-gradient(90deg, transparent, rgba(255,184,28,.0) 20%, rgba(255,214,140,.9) 50%, rgba(255,184,28,0) 80%, transparent);
+  filter: blur(.4px); box-shadow: 0 0 18px 2px rgba(255,170,60,.45); animation: gateStreak 3.6s cubic-bezier(.5,0,.3,1) infinite; }
+@keyframes gateStreak { 0% { transform: translateX(-60%) scaleX(.4); opacity: 0; } 25% { opacity: 1; } 70% { opacity: .8; } 100% { transform: translateX(60%) scaleX(1.2); opacity: 0; } }
+#intro .gate .gw { font-family: var(--font-display); font-size: clamp(54px, 11vw, 150px); line-height: .9; letter-spacing: .03em; margin: 0 0 2.2vh; white-space: nowrap;
+  background: linear-gradient(100deg, #8d98a6 0%, #e9eef3 35%, #fff3d6 50%, #e9eef3 65%, #8d98a6 100%); background-size: 240% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: gateSheen 5s ease-in-out infinite; filter: drop-shadow(0 10px 30px rgba(0,0,0,.8)); }
+@keyframes gateSheen { 0%, 100% { background-position: 100% 0; } 50% { background-position: 0% 0; } }
+#intro .gate .gt { font-family: var(--font-mono); font-size: clamp(10px, 1.1vw, 13px); letter-spacing: .45em; text-transform: uppercase; color: #c9d3dd; opacity: .7; margin: 0 0 5vh; }
 #intro .gate div { text-align: center; color: #f3ead2; }
 #intro .gate p { margin: 0; font-family: var(--font-mono); letter-spacing: .4em; text-transform: uppercase; }
 #intro .gate .g1 { font-size: 12px; color: #ffb81c; margin-bottom: 18px; }
@@ -309,6 +318,10 @@
   // radio calls: subtitles always; the browser's speech voice when sound is on (it can't go through Web Audio)
   const CALLS = [[0.45, "BOSS", "Angels, Boss. Smoke on — let's give 'em a show."], [2.35, "ANGEL 7", "Seven, burners. Ready for the shot."],
     [S_END, "", ""]];
+  // team calls on show time, just ahead of each maneuver (spaced so one line finishes before the next)
+  const SHOW_CALLS = [[5.9, "BOSS", "Delta, smoke on. Hold it low."], [8.25, "BOSS", "Up we go — hit it."],
+    [13.5, "BOSS", "Diamond, rolling — now."], [16.25, "BOSS", "Echelon, down to the deck."],
+    [18.6, "ANGEL 5", "Five and Six, knife-edge. Hit it."], [21.35, "ANGEL 7", "Seven, burners. Sneak pass."]];
   function sayLine(who, text) {
     const r = I.q.radio;
     r.innerHTML = `<b>${who}</b>${text}`; r.classList.add("on");
@@ -573,7 +586,7 @@
     const ctx = RJ.audio.ctx;
     if (!(ctx && ctx.state === "running") && !RJ.settings.muted && !I.noGate) {
       I.gate = document.createElement("div"); I.gate.className = "gate";
-      I.gate.innerHTML = `<div><p class="g1">Jet City Air Range</p><p class="g2">Click or press any key to begin</p><p class="g3">Sound on · Esc skips the intro</p></div>`;
+      I.gate.innerHTML = `<div><p class="g1">Fleet Week · Jet City Air Range</p><p class="gw">JET CITY</p><p class="gt">Real jets · real cities · real sky</p><p class="g2">Click or press any key to begin</p><p class="g3">🔊 Sound on · Esc skips the intro</p></div>`;
       I.gate.addEventListener("pointerdown", () => I.begin());
       I.el.appendChild(I.gate);
     } else I.begin();
@@ -767,6 +780,15 @@
     cam.position.copy(cpos);
     const gy = RJ.world.ground(cam.position.x, cam.position.z) + 1.2;
     if (cam.position.y < gy && id !== 0 && id !== 1) cam.position.y = gy;
+    // never film the jets through a hill: lift this shot's camera until the line of sight clears (the lift only grows
+    // within a shot, so the camera rises once instead of bobbing)
+    if (id > 1) {
+      const L = I.lift || (I.lift = {});
+      let lift = L[id] || 0;
+      v1.copy(cam.position); v1.y += lift;
+      for (let k = 0; k < 24 && !losClear(v1, look); k++) { lift += 12; v1.y += 12; }
+      L[id] = lift; cam.position.y += lift;
+    }
     if (I.camUp > 0) cam.up.set(0, 1, 0).lerp(up, I.camUp).normalize(); else cam.up.set(0, 1, 0);
     cam.lookAt(look); cam.up.set(0, 1, 0);
     if (I.shake > 0) { cam.rotateX(Math.sin(T * 63) * I.shake * 0.01); cam.rotateY(Math.sin(T * 51 + 1) * I.shake * 0.008); }
@@ -787,6 +809,7 @@
     const q = I.q;
     q.curtain.style.opacity = 1 - sm(T_OPEN - 0.1, T_OPEN + 0.45, t);
     while (I.callI < CALLS.length && T >= CALLS[I.callI][0]) { const c = CALLS[I.callI++]; if (c[1]) sayLine(c[1], c[2]); }
+    while ((I.scI || 0) < SHOW_CALLS.length && t >= SHOW_CALLS[I.scI || 0][0]) { const c = SHOW_CALLS[I.scI || 0]; I.scI = (I.scI || 0) + 1; sayLine(c[1], c[2]); }
     if (T >= I.Tof(SB) - 0.75 && !I.breakCall) { I.breakCall = true; sayLine("BOSS", "Delta break — now!"); }
     const cap = T < I.LOGO_T - 0.3 ? CAPS.find((c) => t >= c[0] && t < c[1]) : null;
     if (cap !== I.cap) {
