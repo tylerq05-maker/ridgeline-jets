@@ -1195,7 +1195,7 @@
     }
     const t = todAt(W.sunElev);
     // daylight and twilight colours come from the physical atmosphere; the keyframes only cover deep night
-    const physW = RJ.smooth(-14, -4, W.sunElev), mieB = 9e-6 * (1 + wx.haze * 3), K = 1.2 * (0.8 + 0.2 * RJ.smooth(5, 30, W.sunElev)) * (1 + 2.2 * RJ.smooth(18, 0, W.sunElev) * RJ.smooth(-8, -1, W.sunElev)); // eye adaptation: the low-sun sky stays blue overhead instead of going black
+    const physW = RJ.smooth(-14, -4, W.sunElev), mieB = 9e-6 * (1 + wx.haze * 3), K = 1.2 * (0.8 + 0.2 * RJ.smooth(5, 30, W.sunElev)) * (1 + 1.2 * RJ.smooth(12, 0, W.sunElev) * RJ.smooth(-8, -1, W.sunElev)); // eye adaptation: the low-sun sky stays blue overhead instead of going black
     W.physSky = { w: physW, mie: mieB, k: K };
     if (physW <= 0) W.cloudSun = null;
     if (physW > 0) {
