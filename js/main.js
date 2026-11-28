@@ -995,7 +995,7 @@
   addEventListener("keydown", (e) => {
     if (e.key !== "Escape" || RJ.input.capture) return;
     const cur = RJ.ui.current;
-    const back = { "scr-free": "free-back", "scr-fight": "fight-back", "scr-hangar": "hg-back", "scr-settings": "set-back", "scr-career": "car-back", "scr-chal": "chal-back", "scr-atlas": "atlas-back", "scr-mp": "mp-back" }[cur];
+    const back = { "scr-free": "free-back", "scr-fight": "fight-back", "scr-hangar": "hg-back", "scr-settings": "set-back", "scr-career": "car-back", "scr-chal": "chal-back", "scr-atlas": "atlas-back", "scr-mp": "mp-back", "scr-controls": "ctl-back" }[cur];
     if (back) { e.preventDefault(); $(back).click(); RJ.input.edges.delete("escape"); }
   });
   // start (or wake) sound on any gesture: kept registered, because a context can be suspended again later

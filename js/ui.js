@@ -5,7 +5,7 @@
   const UI = {};
   RJ.ui = UI;
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const SCREENS = ["scr-loading", "scr-main", "scr-free", "scr-fight", "scr-hangar", "scr-settings", "scr-career", "scr-pause", "scr-results", "scr-chal", "scr-atlas", "scr-mp"];
+  const SCREENS = ["scr-loading", "scr-main", "scr-free", "scr-fight", "scr-hangar", "scr-settings", "scr-career", "scr-pause", "scr-results", "scr-chal", "scr-atlas", "scr-mp", "scr-controls"];
 
   UI.show = function (id) {
     SCREENS.forEach((s) => ($(s).hidden = s !== id));
@@ -13,6 +13,129 @@
     const f = $(id) && $(id).querySelector(".btn, .mode, button");
     if (f && !RJ.isTouch) f.focus({ preventScroll: true });
   };
+  /* ---------------- How to fly: every control on one simple page (keys follow the player's own bindings) ---------------- */
+  const CTL_TABS = [["keys", "Keyboard"], ["start", "First flight"], ["touch", "Phone & tablet"], ["pad", "Gamepad"]];
+  UI.ctlTab = "keys";
+  UI.renderControls = function () {
+    const K = RJ.settings.keys, kb = (a) => `<kbd>${esc(RJ.keyLabel(K[a] || "?"))}</kbd>`, k = (t) => `<kbd>${esc(t)}</kbd>`;
+    const row = (keys, what) => `<div class="ctl-row"><span>${keys}</span><span class="what">${what}</span></div>`;
+    const card = (title, rows) => `<div class="ctl-card"><h3>${title}</h3>${rows.join("")}</div>`;
+    $("ctl-tabs").innerHTML = CTL_TABS.map(([id, nm]) => `<button role="tab" data-ctl="${id}" aria-selected="${UI.ctlTab === id}">${nm}</button>`).join("");
+    let h = "";
+    if (UI.ctlTab === "keys") {
+      h = `<div class="ctl-grid">` +
+        card("Fly the jet", [
+          row(kb("pitchUp") + kb("pitchDown"), "<b>Nose up / down</b> (or ↑ ↓)"),
+          row(kb("rollLeft") + kb("rollRight"), "<b>Roll left / right</b> to turn (or ← →)"),
+          row(kb("yawLeft") + kb("yawRight"), "<b>Rudder</b>: swing the nose left / right"),
+          row(kb("throttleUp") + kb("throttleDown"), "<b>Throttle up / down</b> (or PgUp PgDn)"),
+          row(kb("afterburner"), "<b>Afterburner</b>: hold for a big burst of speed"),
+          row(kb("airbrake"), "<b>Air brake</b>: hold to slow down (wheel brakes on the ground)"),
+          row(kb("gear"), "<b>Landing gear</b> up / down")]) +
+        card("Fight", [
+          row(kb("guns"), "<b>Guns</b>: hold to fire"),
+          row(kb("missile"), "<b>Missile</b>: fires at your locked target"),
+          row(kb("target"), "<b>Next target</b>: switch your lock"),
+          row(kb("flares"), "<b>Flares</b>: drop them when a missile is coming"),
+          row(kb("mslcam"), "<b>Missile cam</b>: ride your last missile to the target"),
+          row(kb("weapon") + kb("dodge"), "<b>X-99 only</b>: next special weapon / vector-dodge")]) +
+        card("Stunts", [
+          row(kb("cobra"), "<b>Pugachev's Cobra</b> (F-22, Super Hornet, YF-23)"),
+          row(kb("kulbit"), "<b>Kulbit</b>: backflip in place (F-22)"),
+          row(kb("psm"), "<b>Post-stall mode</b> on / off (F-22)")]) +
+        card("Camera & view", [
+          row(kb("camera"), "<b>Change camera</b>: chase, cockpit, cinematic"),
+          row(k("Hold + drag mouse"), "<b>Look around</b> from the cockpit or around the jet"),
+          row(kb("hud"), "<b>Hide / show the HUD</b>"),
+          row(kb("photo"), "<b>Photo mode</b>"),
+          row(kb("replay"), "<b>Replay</b> the last 60 seconds")]) +
+        card("Map & travel", [
+          row(kb("map"), "<b>Map</b>: see landmarks and set waypoints"),
+          row(kb("autopilot"), "<b>Autopilot</b> to your waypoint"),
+          row(kb("hyper"), "<b>HYPERSONIC / HYPERBOOST</b> (Star Wars craft, X-99)"),
+          row(kb("timeflow"), "<b>Pause / resume time of day</b> (Free Flight)")]) +
+        card("Wingmen", [
+          row(kb("wingAttack"), "<b>Attack</b> my target"),
+          row(kb("wingCover"), "<b>Cover</b> me"),
+          row(kb("wingForm"), "<b>Form up</b> on me"),
+          row(kb("wingDefend"), "<b>Defend</b> the objective")]) +
+        card("Nova, your co-pilot", [
+          row(kb("talk"), "<b>Hold and talk</b>, then let go. She answers out loud."),
+          `<p class="ctl-note">Try "Where are we?" or "How fast am I going?". Allow the microphone when the browser asks. Works in Chrome and Edge.</p>`]) +
+        card("Game", [
+          row(kb("pause") + k("Esc"), "<b>Pause</b> menu"),
+          row(kb("mute"), "<b>Sound</b> on / off"),
+          row(kb("retry"), "<b>Instant retry</b> (challenges)"),
+          row(kb("ghost"), "<b>Show / hide your ghost</b> (challenges)")]) +
+        `</div>`;
+    } else if (UI.ctlTab === "start") {
+      h = `<div class="ctl-grid">` +
+        card("Your first flight", [`<ol class="ctl-steps">
+          <li>On the main menu pick <b>Free Flight</b>, choose a jet and a place, then <b>Start</b>.</li>
+          <li>Push the throttle up with ${kb("throttleUp")} (or hold ${kb("afterburner")} for full power).</li>
+          <li>Steer with ${kb("pitchUp")}${kb("pitchDown")} (nose) and ${kb("rollLeft")}${kb("rollRight")} (roll). To turn, roll a little, then pull the nose up.</li>
+          <li>Let go of the keys and the jet levels its wings by itself (Flight assist, in Settings).</li>
+          <li>Press ${kb("pause")} or ${k("Esc")} any time to pause.</li></ol>`]) +
+        card("Take off from a runway", [`<ol class="ctl-steps">
+          <li>Throttle all the way up (${kb("throttleUp")}) and hold ${kb("afterburner")}.</li>
+          <li>When the speed passes about 150 mph, gently pull the nose up with ${kb("pitchUp")}.</li>
+          <li>Once you're climbing, raise the gear with ${kb("gear")}.</li></ol>`]) +
+        card("Land", [`<ol class="ctl-steps">
+          <li>Line up with the runway from far out and slow down (${kb("throttleDown")}, ${kb("airbrake")}).</li>
+          <li>Lower the gear with ${kb("gear")}.</li>
+          <li>Descend slowly and touch down gently, nose slightly up.</li>
+          <li>Hold ${kb("airbrake")} to brake on the ground.</li></ol>`]) +
+        card("Win a dogfight", [`<ol class="ctl-steps">
+          <li>Press ${kb("target")} to lock the nearest enemy (the box on the HUD).</li>
+          <li>Get behind it and fire a missile with ${kb("missile")}, or close in and use guns (${kb("guns")}).</li>
+          <li>Missile warning? Drop flares (${kb("flares")}) and turn hard.</li></ol>`]) +
+        card("Handy tips", [
+          `<p class="ctl-note">Speed is life: turn too hard and you'll lose speed and stall. Ease off and let the nose drop to recover.</p>`,
+          `<p class="ctl-note">Fly low between buildings in the cities, or find all the landmarks on the map (${kb("map")}).</p>`,
+          `<p class="ctl-note">Sensitivity, inverted pitch and every key can be changed in Settings → Controls.</p>`]) +
+        `</div>`;
+    } else if (UI.ctlTab === "touch") {
+      h = `<div class="ctl-grid">` +
+        card("Fly", [
+          row(k("Left thumb"), "<b>Stick</b>: drag anywhere on the left side to steer"),
+          row(k("Right slider"), "<b>Throttle</b>: slide up for more power"),
+          row(k("AB"), "<b>Afterburner</b>: hold"),
+          row(k("BRK"), "<b>Air brake</b>"),
+          row(k("GEAR"), "<b>Landing gear</b>")]) +
+        card("Fight", [
+          row(k("GUN"), "<b>Guns</b>: hold"),
+          row(k("MSL"), "<b>Missile</b>"),
+          row(k("TGT"), "<b>Next target</b>"),
+          row(k("FLR"), "<b>Flares</b>")]) +
+        card("Everything else", [
+          row(k("CAM"), "<b>Change camera</b>"),
+          row(k("🎙"), "<b>Talk to Nova</b>"),
+          row(k("II"), "<b>Pause</b>"),
+          row(k("ATK COV FORM DEF"), "<b>Wingmen</b> orders (when you have wingmen)"),
+          `<p class="ctl-note">Turn your phone sideways for the best view. Stick sensitivity is in Settings → Controls.</p>`]) +
+        `</div>`;
+    } else {
+      h = `<div class="ctl-grid">` +
+        card("Fly", [
+          row(k("Left stick"), "<b>Steer</b>: nose and roll"),
+          row(k("RT") + k("LT"), "<b>Throttle up / down</b>"),
+          row(k("RB"), "<b>Afterburner</b>")]) +
+        card("Fight", [
+          row(k("A"), "<b>Guns</b>"),
+          row(k("B"), "<b>Missile</b>"),
+          row(k("X"), "<b>Flares</b>"),
+          row(k("Y"), "<b>Next target</b>")]) +
+        card("Other", [
+          row(k("Back"), "<b>Change camera</b>"),
+          row(k("Start"), "<b>Pause</b>"),
+          `<p class="ctl-note">Plug in an Xbox or PlayStation controller and press any button. Everything else stays on the keyboard.</p>`]) +
+        `</div>`;
+    }
+    $("ctl-body").innerHTML = h;
+    $("ctl-tabs").querySelectorAll("button").forEach((b) => (b.onclick = () => { UI.click(); UI.ctlTab = b.dataset.ctl; UI.renderControls(); }));
+  };
+  UI.openControls = function (from) { UI.ctlReturn = from; if (RJ.isTouch && UI.ctlTab === "keys") UI.ctlTab = "touch"; UI.renderControls(); UI.show("scr-controls"); };
+
   UI.hideAll = () => { SCREENS.forEach((s) => ($(s).hidden = true)); UI.current = null; };
   UI.click = () => RJ.audio.click();
 
@@ -661,11 +784,15 @@
       RJ.settings[k] = parseFloat(e.target.value);
       if (k === "viewDist" || k === "clouds") { clearTimeout(UI._gt); UI._gt = setTimeout(() => applySetting(k), 350); } else applySetting(k);
     });
-    $("set-back").onclick = () => { UI.click(); RJ.input.capture = null; UI.show(UI.settingsReturn || "scr-main"); if (UI.settingsReturn === "scr-main") UI.refreshMain(); };
+    $("set-back").onclick = () => { UI.click(); RJ.input.capture = null; UI.show(UI.settingsReturn || "scr-main"); if (UI.settingsReturn === "scr-main") UI.refreshMain(); if (UI.settingsReturn === "scr-controls") UI.renderControls(); };
 
     // pause / results
     $("pz-resume").onclick = () => RJ.resume();
     $("pz-restart").onclick = () => { UI.click(); RJ.restartGame(); };
+    $("btn-controls").onclick = () => { UI.click(); UI.openControls("scr-main"); };
+    $("pz-controls").onclick = () => { UI.click(); UI.openControls("scr-pause"); };
+    $("ctl-back").onclick = () => { UI.click(); UI.show(UI.ctlReturn || "scr-main"); if ((UI.ctlReturn || "scr-main") === "scr-main") UI.refreshMain(); };
+    $("ctl-keys").onclick = () => { UI.click(); UI.settingsReturn = "scr-controls"; UI.setTab = "controls"; UI.renderSettings(); UI.show("scr-settings"); };
     $("pz-settings").onclick = () => { UI.click(); UI.settingsReturn = "scr-pause"; UI.renderSettings(); UI.show("scr-settings"); };
     $("pz-quit").onclick = () => { UI.click(); RJ.quitToMenu(); };
     $("res-again").onclick = () => { UI.click(); if (UI.resMP) { if (RJ.mp.isHost()) RJ.mp.startMatch(); return; } RJ.restartGame(); };
