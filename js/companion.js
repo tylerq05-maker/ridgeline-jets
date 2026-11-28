@@ -431,14 +431,16 @@
     nospeech: "I didn't catch that. Hold Y and try again, or press Enter to type.",
     off: "The microphone is turned off in Settings → Audio. Press Enter to type to Arthur."
   };
-  let heard = "", tapMode = false, tapT = 0;
+  let heard = "", tapMode = false, tapT = 0, capT = 0;
+  const silence = (ms) => { clearTimeout(tapT); tapT = setTimeout(() => C.stopTalk(), ms); };
   function wireDictation(d) {
-    d.onPartial(({ text }) => { if (C.listening) status("listening", `🎙 ${(heard + " " + text).trim()}`); if (tapMode) { clearTimeout(tapT); tapT = setTimeout(() => C.stopTalk(), 1800); } });
-    d.onFinal(({ text }) => { heard = (heard + " " + text).trim(); if (C.listening) status("listening", `🎙 ${heard}`); if (tapMode) { clearTimeout(tapT); tapT = setTimeout(() => C.stopTalk(), 1300); } });
+    // two seconds of silence after you've said something sends it, in every mode (no Stop click needed)
+    d.onPartial(({ text }) => { if (!C.listening) return; status("listening", `🎙 ${(heard + " " + text).trim()}`); if (text.trim()) silence(2000); });
+    d.onFinal(({ text }) => { heard = (heard + " " + text).trim(); if (C.listening) { status("listening", `🎙 ${heard}`); silence(2000); } });
     d.onState(({ state, reason }) => {
       if (state === "listening") { C.listening = true; status("listening"); return; }
       if (state !== "idle") return;
-      const was = C.listening; C.listening = false; clearTimeout(tapT);
+      const was = C.listening; C.listening = false; clearTimeout(tapT); clearTimeout(capT);
       const said = heard.trim(); heard = "";
       if (C.state === "listening") status(null);
       if (said) C.ask(said);
@@ -453,6 +455,7 @@
     pending = null;
     if (DICT) {
       heard = ""; tapMode = !!tap;
+      silence(8000); clearTimeout(capT); capT = setTimeout(() => C.stopTalk(), 30000); // nothing said for 8 s, or 30 s total: stop
       DICT.start().catch((e) => { C.listening = false; if (e && e.code !== "stopped") status("error", e.code === "not_granted" ? "Voice input was declined. Press Enter to type to Arthur." : e.code === "no_gesture" ? "Tap the mic to talk, or press Enter to type." : MIC_HELP.nosr); });
       C.listening = true; status("listening");
       return;
@@ -460,8 +463,8 @@
     if (!SR || window.claude) { status("error", MIC_HELP.nosr); return; }
     let said = "";
     const rec = (C.rec = new SR());
-    rec.lang = "en-GB"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
-    rec.onresult = (e) => { said = ""; for (const r of e.results) said += r[0].transcript; status("listening", `🎙 ${said}`); };
+    rec.lang = "en-GB"; rec.interimResults = true; rec.continuous = true; rec.maxAlternatives = 1;
+    rec.onresult = (e) => { said = ""; for (const r of e.results) said += r[0].transcript; status("listening", `🎙 ${said}`); if (said.trim()) silence(2000); };
     rec.onerror = (e) => {
       const map = { "not-allowed": "denied", "service-not-allowed": "denied", "audio-capture": "nomic", network: "network", "no-speech": "nospeech" };
       if (map[e.error]) status("error", MIC_HELP[map[e.error]]);
@@ -484,8 +487,8 @@
   });
   addEventListener("keyup", (e) => {
     if (!isTalkKey(e) || typing(e)) return;
-    if (performance.now() - (C._heldAt || 0) > 450) C.stopTalk(); // a quick tap keeps listening until you pause
-    else if (DICT) { tapMode = true; clearTimeout(tapT); tapT = setTimeout(() => C.stopTalk(), 6000); }
+    if (performance.now() - (C._heldAt || 0) > 450) C.stopTalk(); // releasing a held key sends at once
+    // a quick tap keeps listening; two seconds of silence sends it
   });
   function openChat() {
     let box = document.getElementById("arthur-chat");
