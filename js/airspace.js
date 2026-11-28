@@ -422,6 +422,7 @@
       act.slice(0, Math.max(0, act.length - keep)).forEach(disengage);
     }
   }
+  A.setWanted = (l, why) => setLevel(l, why);
   const target = (l) => (l >= 5 ? 6 + Math.max(0, Math.round((scale() - 1) * 4)) : Math.max(l ? 1 : 0, Math.round(A.WANTED_COUNTS[l] * scale())));
   const responders = () => A.list.filter((a) => a.alive && a.air.resp && !a.air.leaving);
   /** The player did something hostile to `ac`. kind: missile (launched at it) | hit | kill */

@@ -59,9 +59,10 @@
           row(kb("wingCover"), "<b>Cover</b> me"),
           row(kb("wingForm"), "<b>Form up</b> on me"),
           row(kb("wingDefend"), "<b>Defend</b> the objective")]) +
-        card("Nova, your co-pilot", [
-          row(kb("talk"), "<b>Hold and talk</b>, then let go. She answers out loud."),
-          `<p class="ctl-note">Try "Where are we?" or "How fast am I going?". Allow the microphone when the browser asks. Works in Chrome and Edge.</p>`]) +
+        card("Arthur, your flight AI", [
+          row(kb("talk"), "<b>Hold and talk</b>, then let go. He answers out loud."),
+          row(k("Enter"), "<b>Type to Arthur</b> (Enter sends, Esc closes)"),
+          `<p class="ctl-note">Ask him anything, in the game or not. Try "Take me to Tokyo", "Make it night", "Call in some bandits", "Put me in the F-22", "Remember my favourite jet is the F-22". Voice works in Claude on Chrome; in the Claude app, press Enter or tap ⌨ to type.</p>`]) +
         card("Game", [
           row(kb("pause") + k("Esc"), "<b>Pause</b> menu"),
           row(kb("mute"), "<b>Sound</b> on / off"),
@@ -109,7 +110,8 @@
           row(k("FLR"), "<b>Flares</b>")]) +
         card("Everything else", [
           row(k("CAM"), "<b>Change camera</b>"),
-          row(k("🎙"), "<b>Talk to Nova</b>"),
+          row(k("🎙"), "<b>Talk to Arthur</b> (hold for typing)"),
+          row(k("⌨"), "<b>Type to Arthur</b>"),
           row(k("II"), "<b>Pause</b>"),
           row(k("ATK COV FORM DEF"), "<b>Wingmen</b> orders (when you have wingmen)"),
           `<p class="ctl-note">Turn your phone sideways for the best view. Stick sensitivity is in Settings → Controls.</p>`]) +
@@ -522,15 +524,15 @@
         "Paste a soundcloud.com track link (the full address from your browser). It streams in SoundCloud's player on the menus; nothing is downloaded.",
         `<span style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;max-width:380px"><input class="txt" id="sc-url" style="width:230px;flex:0 1 auto" placeholder="https://soundcloud.com/artist/track" value="${esc(RJ.settings.musicSC || "")}"><button class="ghost small" id="sc-save" style="flex:0 0 auto;width:auto">Save</button>${RJ.settings.musicSC ? `<button class="ghost small" id="sc-clear" style="flex:0 0 auto;width:auto">Remove</button>` : ""}</span>`);
       h += row("Weapons and effects", null, range("sfxVol", 0, 1, 0.05));
-      h += row("Nova (flight companion)", "Greets you in Free Flight, talks during flights and answers anything you ask. Hold " + RJ.keyLabel(RJ.settings.keys.talk) + " or tap 🎙 to talk.", toggle("compOn"));
-      h += row("Nova's volume", null, range("compVol", 0, 1, 0.05));
+      h += row("Arthur (flight AI)", "Greets you, coaches you in combat, runs the jet on command and answers anything you ask. Hold " + RJ.keyLabel(RJ.settings.keys.talk) + " or tap 🎙 to talk, Enter to type.", toggle("compOn"));
+      h += row("Arthur's volume", null, range("compVol", 0, 1, 0.05));
       const cl = RJ.companion.voiceList();
-      h += row("Nova's voice", cl.length ? "Natural voices (Edge: Ava, Emma, Jenny) sound the most human" : "Your browser hasn't listed its voices yet. Reopen this tab in a moment.", `<select class="txt" id="comp-voice" style="max-width:320px"><option value="">Auto (most natural female voice)</option>${cl.map((v) => `<option value="${esc(v.name)}" ${RJ.settings.compVoice === v.name ? "selected" : ""}>${v.female ? "♀ " : ""}${esc(v.name)} (${esc(v.lang)})</option>`).join("")}</select>`);
+      h += row("Arthur's voice", cl.length ? "British voices sound best (Edge: Ryan or Thomas; Chrome: Google UK English Male; Mac: Daniel). Auto picks the best one." : "Your browser hasn't listed its voices yet. Reopen this tab in a moment.", `<select class="txt" id="comp-voice" style="max-width:320px"><option value="">Auto (most natural female voice)</option>${cl.map((v) => `<option value="${esc(v.name)}" ${RJ.settings.compVoice === v.name ? "selected" : ""}>${v.female ? "♀ " : ""}${esc(v.name)} (${esc(v.lang)})</option>`).join("")}</select>`);
       h += row("How much she talks", null, chipCtl("compChat", [["quiet", "Quiet"], ["normal", "Normal"], ["chatty", "Chatty"]]));
-      h += row("Microphone", "Talk to Nova with your voice", toggle("compMic"));
-      h += row("Listen after her questions", "When Nova asks you something, the mic opens on its own for your answer", toggle("compFollow"));
-      h += row("Nova's AI server", "Lets her talk about anything on the website version. Paste your server address (see the setup guide).", `<input class="txt" id="nova-server" style="max-width:320px" placeholder="https://nova-server.yourname.workers.dev" value="${esc(RJ.settings.novaServer || "")}">`);
-      h += row("Test Nova", "Checks her AI connection and has her say hi", `<button class="ghost small" id="comp-test">Test</button> <span class="hint" id="comp-test-out"></span>`);
+      h += row("Microphone", "Talk to Arthur with your voice", toggle("compMic"));
+      h += row("Listen after his questions", "When Arthur asks you something, the mic opens on its own for your answer (website only)", toggle("compFollow"));
+      h += row("Arthur's AI server (website only)", "Not needed in Claude: there Arthur thinks with your Claude plan.", `<input class="txt" id="nova-server" style="max-width:320px" placeholder="https://nova-server.yourname.workers.dev" value="${esc(RJ.settings.novaServer || "")}">`);
+      h += row("Test Arthur", "Checks his AI connection and has him say hello", `<button class="ghost small" id="comp-test">Test</button> <span class="hint" id="comp-test-out"></span>`);
       h += row("Mute", null, toggle("muted"));
     } else if (t === "controls") {
       h += row("Flight assist", "Holds altitude in banked turns and levels the wings when you let go", toggle("assist"));
