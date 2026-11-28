@@ -185,6 +185,28 @@
     return n;
   }
 
+  /* Some files' "paint" is unusable: the F-22's skin texture is a photo of a jet against the sky, which samples as
+   * near-black, and several parts are 0x040404-0x1e1e1e. Files registered with repaint get the game's own livery
+   * paint (colour, roughness, metalness of the procedural body) on their textured and near-black surfaces. */
+  const paintCache = new WeakMap();
+  function repaint(mt, o, M) {
+    if (!o.repaint || !M || !M.body || !mt || mt.userData.rjGlass || !mt.isMeshStandardMaterial) return mt;
+    const lum = mt.color ? mt.color.r * 0.3 + mt.color.g * 0.59 + mt.color.b * 0.11 : 1;
+    const glow = mt.emissive && (mt.emissive.r + mt.emissive.g + mt.emissive.b) > 0.05;
+    if (glow || !(mt.map || lum < 0.13)) return mt;
+    let per = paintCache.get(M.body); if (!per) paintCache.set(M.body, (per = new Map()));
+    const key = mt.map ? "skin" : "dark";
+    if (!per.has(key)) {
+      const b = M.body, c = b.color.clone();
+      if (key === "dark") c.multiplyScalar(0.72); // intakes, bays and trim read a shade darker than the skin
+      const p = new THREE.MeshStandardMaterial({ name: "rjPaint-" + key, color: c, roughness: b.roughness, metalness: b.metalness, side: THREE.DoubleSide, envMapIntensity: b.envMapIntensity });
+      if (b.userData.rjPat) p.userData.rjPat = b.userData.rjPat;
+      p.userData.rjPBR = true;
+      per.set(key, p);
+    }
+    return per.get(key);
+  }
+
   /** Called by RJ.buildAircraft after the procedural build. Never throws; the procedural model stays on failure. */
   Mo.apply = function (g, id, livery) {
     const o = REG[id + ":" + livery] || REG[id]; // a paint-specific model (e.g. "fa18e:blueangels") wins
@@ -211,8 +233,8 @@
       skin.traverse((m) => {
         if (!m.isMesh) return;
         m.castShadow = true; m.receiveShadow = true;
-        if (Array.isArray(m.material)) m.material = m.material.map((mt) => pbr(mt, ac));
-        else m.material = pbr(m.material, ac);
+        if (Array.isArray(m.material)) m.material = m.material.map((mt) => repaint(pbr(mt, ac), o, M));
+        else m.material = repaint(pbr(m.material, ac), o, M);
         const mats = Array.isArray(m.material) ? m.material : [m.material];
         if (mats.some((mt) => mt.userData.rjGlass)) m.castShadow = false;
         if (RJ.lighting && RJ.lighting.track) RJ.lighting.track(mats);
@@ -238,7 +260,7 @@
   /* Airframes from Sketchfab, all CC BY 4.0 (credits in assets/CREDITS-A.md and on the main menu). Textures were
      downscaled to <= 2048 px. rotY turns each file's nose onto -Z (measured from the meshes). */
   const SF = "assets/aircraft/";
-  Mo.register("f22", { url: SF + "f22.glb", rotY: -Math.PI / 2, hideMat: /plume/i, credit: "Lockheed Martin F-22 Raptor by andertan (CC BY 4.0)" });
+  Mo.register("f22", { url: SF + "f22.glb", rotY: -Math.PI / 2, hideMat: /plume/i, repaint: true, credit: "Lockheed Martin F-22 Raptor by andertan (CC BY 4.0)" });
   Mo.register("su57", { url: SF + "su57.glb", rotY: -Math.PI / 2, credit: "Sukhoi Su-57 Felon by andertan (CC BY 4.0)" });
   Mo.register("sr71", { url: SF + "sr71.glb", rotY: -0.9146, credit: "SR-71 by manilov.ap (CC BY 4.0)" });
   Mo.register("b2", { url: SF + "b2.glb", rotY: 0, credit: "Lowpoly B-2 Spirit bomber by SIpriv (CC BY 4.0)" });

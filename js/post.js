@@ -345,8 +345,8 @@
     for (let i = 0; i < 3; i++) { const s = fx.shocks[i]; if (s) U.shock.value[i].set(s[0], s[1], s[2], s[3]); else U.shock.value[i].set(0, 0, 0, 0); }
     const sunOn = S.sunFx !== false && fx.sun && P.depthOK;
     // ambient occlusion: an Ultra-quality extra (or forced with settings.ao = true); needs the depth texture
-    const aoOn = P.depthOK && S.ao !== false && (S.ao === true || S.quality === "ultra") && !(opts && opts.noAO);
-    U.ao.value = aoOn ? 0.45 : 0;
+    const aoOn = P.depthOK && S.ao !== false && (S.ao === true || S.quality === "ultra" || S.quality === "high") && !(opts && opts.noAO);
+    U.ao.value = aoOn ? 0.6 : 0;
     U.useDepth.value = dofOn || sunOn || aoOn ? 1 : 0;
     if (!dofOn) U.dof.value.set(0, 1, 0);
     if (sunOn) { U.sunP.value.set(fx.sun[0], fx.sun[1], fx.sun[2]); U.sunC.value.set(fx.sun[3], fx.sun[4], fx.sun[5]); U.rays.value = fx.sun[6]; U.flare.value = fx.sun[7]; } else U.sunP.value.z = 0;

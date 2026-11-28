@@ -114,8 +114,8 @@
   W.QUALITY = {
     low: { radius: 3, lods: [40, 24, 16], bake: 10, treeR: 0, treeSpacing: 60, shadow: 0, clouds: 0.55, mist: 0, pixel: 1, post: false, std: false, reflect: false, cloudShadow: false, farN: 110, farSpacing: 880 },
     medium: { radius: 4, lods: [64, 32, 20], bake: 14, treeR: 1, treeSpacing: 50, shadow: 2048, clouds: 1, mist: 140, pixel: 1.25, post: true, std: true, reflect: false, cloudShadow: true, farN: 140, farSpacing: 700 },
-    high: { radius: 6, lods: [96, 48, 24], bake: 16, treeR: 2, treeSpacing: 44, shadow: 2048, clouds: 1.3, mist: 220, pixel: 1.5, post: true, std: true, reflect: true, cloudShadow: true, farN: 170, farSpacing: 600 },
-    ultra: { radius: 7, lods: [128, 64, 32], bake: 20, treeR: 2, treeSpacing: 38, shadow: 4096, clouds: 1.5, mist: 300, pixel: 2, post: true, std: true, reflect: true, cloudShadow: true, farN: 200, farSpacing: 520 }
+    high: { radius: 6, lods: [96, 48, 24], bake: 16, treeR: 2, treeSpacing: 38, shadow: 2048, clouds: 1.3, mist: 220, pixel: 1.5, post: true, std: true, reflect: true, cloudShadow: true, farN: 170, farSpacing: 600 },
+    ultra: { radius: 7, lods: [128, 64, 32], bake: 20, treeR: 2, treeSpacing: 32, shadow: 4096, clouds: 1.5, mist: 300, pixel: 2, post: true, std: true, reflect: true, cloudShadow: true, farN: 200, farSpacing: 520 }
   };
 
   /* ======================= INIT ======================= */
@@ -205,7 +205,7 @@
           "diffuseColor.rgb *= mix(1.0, 0.93 + 0.1 * rjStrata, smoothstep(0.5, 0.85, rjSteep) * rjFade);",
           // rain-washed vertical streaks down cliff faces
           "float rjCl = rjVN(vec2((vWP.x + vWP.z) * 0.06, vWP.y * 0.01)) * 0.7 + rjVN(vec2((vWP.x - vWP.z) * 0.21, vWP.y * 0.03)) * 0.3;",
-          "diffuseColor.rgb *= mix(1.0, 0.86 + 0.24 * rjCl, smoothstep(0.45, 0.8, rjSteep) * (0.5 + 0.5 * rjFade));",
+          "diffuseColor.rgb *= mix(1.0, 0.93 + 0.12 * rjCl, smoothstep(0.45, 0.8, rjSteep) * (0.5 + 0.5 * rjFade));",
           // snowfields: rock buttresses and outcrops break through wherever the slope steepens (per pixel, so detail
           // survives far beyond the mesh resolution), and wind-packed snow gets a faint cold tone
           "float rjSnowV = smoothstep(0.68, 0.8, min(diffuseColor.r, min(diffuseColor.g, diffuseColor.b)));",
@@ -270,20 +270,59 @@
     geo.computeBoundingSphere();
     return geo;
   }
+  /* Foliage shading baked into the tree meshes: leaf vertices get rounded "canopy" normals (pointing out from the
+   * crown's core, so a tree lights like a soft volume instead of a faceted cone), self-occlusion darkening toward the
+   * inside and the bottom of each tier, a lighter sunlit crown, and per-vertex jitter so the facets break up. */
+  function foliage(geo, cores) {
+    const P = geo.attributes.position, N = geo.attributes.normal, Cc = geo.attributes.color;
+    let seed = 7;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+    for (let i = 0; i < P.count; i++) {
+      if (Cc.getX(i) < 0.99) continue; // trunk
+      const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+      let best = cores[0], bd = Infinity;
+      for (const c of cores) { const d = (x - c[0]) ** 2 + (y - c[1]) ** 2 + (z - c[2]) ** 2; if (d < bd) { bd = d; best = c; } }
+      let nx = x - best[0], ny = (y - best[1]) * 0.7 + best[3] * 0.35, nz = z - best[2];
+      const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+      const fx = N.getX(i), fy = N.getY(i), fz = N.getZ(i);
+      let mx = nx * 0.75 + fx * 0.25, my = ny * 0.75 + fy * 0.25, mz = nz * 0.75 + fz * 0.25; const ml = Math.hypot(mx, my, mz) || 1;
+      N.setXYZ(i, mx / ml, my / ml, mz / ml);
+      const rad = Math.min(1, Math.sqrt(bd) / best[3]);
+      const ao = (0.5 + 0.5 * rad) * (0.78 + 0.22 * Math.min(1, Math.max(0, (y - best[1]) / best[3] + 0.6))) * (0.9 + rnd() * 0.2);
+      const top = 1 + 0.12 * Math.max(0, ny);
+      Cc.setXYZ(i, ao * top, ao * top * (1.0 + (rnd() - 0.5) * 0.06), ao * (0.96 + rnd() * 0.06));
+    }
+  }
+  function jag(geo, amt, seed) {
+    // ragged foliage: push vertices in/out with a deterministic hash so silhouettes aren't perfect cones and spheres
+    const P = geo.attributes.position;
+    for (let i = 0; i < P.count; i++) {
+      const x = P.getX(i), y = P.getY(i), z = P.getZ(i), h = Math.sin(x * 12.9898 + y * 78.233 + z * 37.719 + seed) * 43758.5453, r = (h - Math.floor(h)) - 0.5;
+      const k = 1 + r * amt; P.setXYZ(i, x * k, y + r * amt * 1.2, z * k);
+    }
+    return geo;
+  }
   function initVegetation() {
     const trunk = [0.32, 0.22, 0.14], leaf = [1, 1, 1];
-    const t1 = new THREE.CylinderGeometry(0.45, 0.7, 5, 5); t1.translate(0, 2.5, 0);
-    const c1 = new THREE.ConeGeometry(4.6, 9, 7); c1.translate(0, 7.5, 0);
-    const c2 = new THREE.ConeGeometry(3.6, 8, 7); c2.translate(0, 11.5, 0);
-    const c3 = new THREE.ConeGeometry(2.2, 6, 7); c3.translate(0, 15.5, 0);
-    W.conifer = mergeGeos([{ geo: t1, color: trunk }, { geo: c1, color: leaf }, { geo: c2, color: leaf }, { geo: c3, color: leaf }]);
-    const t2 = new THREE.CylinderGeometry(0.5, 0.8, 6, 5); t2.translate(0, 3, 0);
-    const b1 = new THREE.IcosahedronGeometry(4.8, 1); b1.scale(1, 0.85, 1); b1.translate(0, 9, 0);
-    const b2 = new THREE.IcosahedronGeometry(3.2, 0); b2.translate(2.2, 11, 1);
-    W.broadleaf = mergeGeos([{ geo: t2, color: trunk }, { geo: b1, color: leaf }, { geo: b2, color: leaf }]);
+    // conifer: six ragged tiers narrowing to a spire
+    const con = [], coresC = [];
+    const t1 = new THREE.CylinderGeometry(0.35, 0.65, 6, 6); t1.translate(0, 3, 0); con.push({ geo: t1, color: trunk });
+    const tiers = [[5.0, 5.2, 5.0], [4.3, 4.8, 7.6], [3.6, 4.4, 10.0], [2.9, 4.0, 12.3], [2.1, 3.6, 14.4], [1.2, 3.4, 16.4]];
+    tiers.forEach(([r, h, y], k) => { const c = jag(new THREE.ConeGeometry(r, h, 9, 2), 0.22, k * 3.1); c.translate(0, y, 0); con.push({ geo: c, color: leaf }); coresC.push([0, y - h * 0.15, 0, r]); });
+    W.conifer = mergeGeos(con); foliage(W.conifer, coresC);
+    // broadleaf: a crown of overlapping lumpy blobs on a forked trunk
+    const brd = [], coresB = [];
+    const t2 = new THREE.CylinderGeometry(0.4, 0.75, 7, 6); t2.translate(0, 3.5, 0); brd.push({ geo: t2, color: trunk });
+    const blobs = [[0, 10, 0, 4.4], [2.6, 9, 1.2, 3.2], [-2.4, 9.4, -1.0, 3.3], [0.8, 12.6, -1.6, 3.0], [-1.0, 12.2, 1.8, 2.8], [1.6, 7.6, -2.2, 2.6]];
+    blobs.forEach(([x, y, z, r], k) => { const b = jag(new THREE.IcosahedronGeometry(r, 1), 0.28, k * 5.7); b.scale(1, 0.85, 1); b.translate(x, y, z); brd.push({ geo: b, color: leaf }); coresB.push([0, 10, 0, 6.2]); });
+    W.broadleaf = mergeGeos(brd); foliage(W.broadleaf, coresB);
     const r1 = new THREE.DodecahedronGeometry(1, 0); r1.scale(1.3, 0.7, 1);
     W.rockGeo = mergeGeos([{ geo: r1, color: [1, 1, 1] }]);
-    W.treeMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+    W.treeMat = new THREE.MeshLambertMaterial({ vertexColors: true });
+    // backlit leaves glow a little (light through the canopy edge), and distant forest keeps some texture
+    W.treeMat.onBeforeCompile = (sh) => {
+      sh.fragmentShader = sh.fragmentShader.replace("#include <lights_fragment_end>", "#include <lights_fragment_end>\n#if NUM_DIR_LIGHTS > 0\n{ vec3 rjV = -normalize(vViewPosition); float rjBl = pow(max(dot(rjV, directionalLights[0].direction), 0.0), 4.0); reflectedLight.indirectDiffuse += directionalLights[0].color * diffuseColor.rgb * rjBl * 0.35; }\n#endif");
+    };
     W.rockMat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   }
 
@@ -1156,7 +1195,7 @@
     }
     const t = todAt(W.sunElev);
     // daylight and twilight colours come from the physical atmosphere; the keyframes only cover deep night
-    const physW = RJ.smooth(-14, -4, W.sunElev), mieB = 9e-6 * (1 + wx.haze * 3), K = 1.2 * (0.8 + 0.2 * RJ.smooth(5, 30, W.sunElev));
+    const physW = RJ.smooth(-14, -4, W.sunElev), mieB = 9e-6 * (1 + wx.haze * 3), K = 1.2 * (0.8 + 0.2 * RJ.smooth(5, 30, W.sunElev)) * (1 + 2.2 * RJ.smooth(18, 0, W.sunElev) * RJ.smooth(-8, -1, W.sunElev)); // eye adaptation: the low-sun sky stays blue overhead instead of going black
     W.physSky = { w: physW, mie: mieB, k: K };
     if (physW <= 0) W.cloudSun = null;
     if (physW > 0) {
@@ -1172,6 +1211,7 @@
         for (let k = 0; k < 3; k++) hz[k] += c[k] * w; wsum += w;
       }
       for (let k = 0; k < 3; k++) hz[k] /= wsum;
+      { const l = hz[0] * 0.3 + hz[1] * 0.59 + hz[2] * 0.11, w = 0.45 * RJ.smooth(20, 2, W.sunElev); const cool = [l * 0.86, l * 0.95, l * 1.12]; for (let k = 0; k < 3; k++) hz[k] = RJ.lerp(hz[k], cool[k], w); }
       const tr = W.sunTransmit(S, mieB);
       const cl = RJ.clouds ? RJ.clouds.layer() : null;
       W.cloudSun = W.sunTransmit(S, mieB, cl ? cl.base + (cl.top - cl.base) * 0.4 : 3000, true);
@@ -1179,7 +1219,7 @@
       t.top = mixIn(t.top, up.map((v) => v * K), physW);
       t.hor = mixIn(t.hor, hz.map((v) => Math.min(v * K, 1.4)), physW);
       // sunlight tint: the atmosphere's transmittance, kept a little warm-neutral so terrain never goes neon
-      if (W.sunElev > -1) t.sun = mixIn(t.sun, tr.map((v) => 0.25 + 0.75 * v), physW * 0.85);
+      if (W.sunElev > -1) t.sun = mixIn(t.sun, tr.map((v) => 0.4 + 0.6 * v), physW * 0.85);
       t.hs = mixIn(t.hs, up.map((v, k) => (v * K * 1.2 + hz[k] * K * 0.5)), physW * 0.45);
     }
     const gray = wx.gray || 0;
@@ -1207,14 +1247,14 @@
     W.sunIntensity = t.si * wx.sun * 1.05;
     W.sun.intensity = W.sunIntensity;
     W.hemi.color.setRGB(...g(t.hs, gray)); W.hemi.groundColor.setRGB(...t.hg);
-    W.hemiIntensity = t.hi * (1 - wx.dark * 0.35) * (W.Q && W.Q.std ? 0.45 : 1);
+    W.hemiIntensity = t.hi * (1 - wx.dark * 0.35) * (W.Q && W.Q.std ? 0.8 : 1);
     W.hemi.intensity = W.hemiIntensity;
     W.sunVisible = W.sunElev > -2;
     // grading: warm at golden hours, cool and flat in storms
     const warm = RJ.smooth(30, 2, W.sunElev) * RJ.smooth(-6, 0, W.sunElev);
     W.grade = {
       tint: [1 + warm * 0.05 - wx.dark * 0.03, 1 - warm * 0.01, 1 - warm * 0.06 + wx.dark * 0.02],
-      sat: 1.06 + warm * 0.06 - wx.dark * 0.25, contrast: 1.05 + warm * 0.03 - wx.dark * 0.05,
+      sat: 1.04 + warm * 0.02 - wx.dark * 0.25, contrast: 1.05 + warm * 0.03 - wx.dark * 0.05,
       // eyes adapt in the blue hour: lift exposure through twilight, settling back to the night level
       exposure: 1.0 + RJ.smooth(0, -8, W.sunElev) * 0.45 + RJ.smooth(2, -5, W.sunElev) * (1 - RJ.smooth(-6, -12, W.sunElev)) * 1.1, bloom: 0.55 + warm * 0.25
     };

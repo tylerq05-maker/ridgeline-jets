@@ -501,7 +501,7 @@
           "float n1 = fract(sin(dot(floor(sp * 0.9), vec2(12.99, 78.23))) * 43758.5);",
           "float n2 = fract(sin(dot(floor(sp * 0.06), vec2(39.3, 11.7))) * 24634.6);",
           // asphalt: patched, worn darker in the wheel tracks; concrete sidewalk slabs with a bright curb
-          "vec3 asp = vec3(0.12, 0.125, 0.135) * (0.86 + 0.22 * n2) * (1.0 + (n1 - 0.5) * 0.12 * fine);",
+          "vec3 asp = vec3(0.19, 0.195, 0.2) * (0.86 + 0.22 * n2) * (1.0 + (n1 - 0.5) * 0.12 * fine);",
           "float trackS = roadS * (1.0 - inter) * (1.0 - smoothstep(0.4, 1.0, abs(abs(dEdge.x - wS * 0.25) - 1.0)));",
           "float trackP = roadP * (1.0 - inter) * (1.0 - smoothstep(0.4, 1.0, abs(abs(dEdge.y - wP * 0.25) - 1.0)));",
           "asp *= 1.0 - 0.12 * max(trackS, trackP) * fine;",

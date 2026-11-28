@@ -124,7 +124,7 @@
     scattered: { cov: -0.06, base: 2200, top: 3900, den: 1.0, storm: 0, flat: 0.1, tow: 2300 },
     overcast: { cov: 0.34, base: 1700, top: 3500, den: 1.2, storm: 0, flat: 0.55, tow: 600 },
     storm: { cov: 0.36, base: 1300, top: 5200, den: 1.45, storm: 1, flat: 0.25 },
-    cloudsea: { cov: 0.42, base: 1500, top: 2700, den: 1.1, storm: 0, flat: 0.8 },
+    cloudsea: { cov: 0.36, base: 1500, top: 3000, den: 1.25, storm: 0, flat: 0.35 },
     // stormTop: anvil height (m); sq: squall-line strength (a moving band of storm cells)
     lightrain: { cov: 0.38, base: 1200, top: 3300, den: 1.25, storm: 0, flat: 0.6 },
     heavyrain: { cov: 0.44, base: 900, top: 4300, den: 1.4, storm: 0.35, flat: 0.5, stormTop: 7500 },
@@ -172,11 +172,12 @@
     "float remap(float v, float a, float b, float c, float d){ return c + (v - a) * (d - c) / (b - a); }",
     // detail erosion: wispy near the base, billowy (rounded puffs) higher up; a finer octave close to the camera
     "float erode(float d, vec3 dp, float hf, float t){",
-    "  float det = texture(tDetail, dp * detailScale).r;",
-    "  float nf = 1.0 - smoothstep(900.0, 4500.0, t);",
+    "  vec3 wq = dp * detailScale; wq += (texture(tDetail, wq * 0.31 + 0.17).r - 0.5) * 0.35;",
+    "  float det = texture(tDetail, wq).r;",
+    "  float nf = 1.0 - smoothstep(2500.0, 9000.0, t);",
     "  if (nf > 0.01) det = mix(det, det * 0.6 + texture(tDetail, dp * (detailScale * 3.71) + 0.37).r * 0.4, nf);",
     "  float m = mix(det, 1.0 - det, smoothstep(0.04, 0.35, hf));",
-    "  return remap(d, m * mix(0.42, 0.3, hf), 1.0, 0.0, 1.0);",
+    "  return remap(d, m * mix(0.5, 0.38, hf), 1.0, 0.0, 1.0);",
     "}",
     "float layerD(vec3 p, bool cheap, float t, out float hfo){",
     "  hfo = 0.0;",
@@ -247,7 +248,7 @@
     "  vec2 tt = slabT(camPos, rd);",
     "  float t0 = tt.x, t1 = min(min(tt.y, sd), slab.w);",
     "  if (t1 <= t0) { gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0); return; }",
-    "  t1 = min(t1, t0 + 36000.0);",
+    "  t1 = min(t1, t0 + 28000.0);",
     "  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))) + frame * 0.6180339);",
     "  float cosT = dot(rd, sunDir);",
     "  float sigma = 0.016 * wx.y;",
@@ -258,7 +259,7 @@
     "  int empty = 4;",
     "  for (int i = 0; i < STEPS; i++) {",
     "    if (t > t1 || T < 0.012) break;",
-    "    float lod = max(clamp(t * LODK, MINSTEP, 900.0), (t1 - t) / float(STEPS - i) * 0.5);",
+    "    float lod = max(clamp(t * LODK, MINSTEP, 600.0), (t1 - t) / float(STEPS - i) * 0.3);",
     "    vec3 p = camPos + rd * t;",
     "    if (empty >= 4) {",
     "      if (density(p, true, t, hd) <= 0.0) { t += lod * 3.0; continue; }",
@@ -277,7 +278,7 @@
     "      float powder = mix(1.0 - exp(-dens * 5.0), 1.0, clamp(cosT, 0.0, 1.0) * 0.6);",
     // sky light: flat bases sit in their own shadow, crowns see the whole sky
     "      vec3 amb = mix(ambBot, ambTop, hf) * mix(0.32, 1.0, smoothstep(0.0, 0.6, hf)) * (1.0 - 0.3 * dens);",
-    "      vec3 S = sunCol * lum * mix(0.45, 1.0, powder) * 4.3 + amb;",
+    "      vec3 S = sunCol * lum * mix(0.3, 1.0, powder) * 3.4 + amb * 0.9;",
     "      if (fl.w > 0.0) S += vec3(0.78, 0.82, 1.0) * fl.w * 3.5 * exp(-distance(p, fl.xyz) / 1800.0);",
     "      float Ts = exp(-dens * sigma * lod);",
     "      col += T * S * (1.0 - Ts);",
@@ -377,7 +378,7 @@
     C.weatherTex.needsUpdate = true;
     if (renderer.capabilities.isWebGL2 === false || !RJ.post.ok || !RJ.post.depthOK) { C.ok = false; return; }
     try {
-      const N = 64, D = 32;
+      const N = 64, D = 64;
       const tex3 = (arr, n) => {
         const u8 = new Uint8Array(arr.length);
         for (let i = 0; i < arr.length; i++) u8[i] = arr[i] * 255;
@@ -437,8 +438,8 @@
   const QUAL = {
     low: null,
     medium: { scale: 0.34, maxW: 620, steps: 48, lsteps: 4, lodk: 0.018, minStep: 26 },
-    high: { scale: 0.45, maxW: 860, steps: 64, lsteps: 5, lodk: 0.013, minStep: 18 },
-    ultra: { scale: 0.55, maxW: 1180, steps: 88, lsteps: 6, lodk: 0.0095, minStep: 13 }
+    high: { scale: 0.5, maxW: 960, steps: 96, lsteps: 6, lodk: 0.011, minStep: 16 },
+    ultra: { scale: 0.6, maxW: 1280, steps: 128, lsteps: 6, lodk: 0.008, minStep: 12 }
   };
   C.active = () => C.ok && C.enabled;
   C.setQuality = function (q) {
@@ -612,8 +613,8 @@
       // hue from the transmittance at cloud height; brightness follows the scene's sun, plus an afterglow term
       // that keeps the cloud layer lit (pink/red) after the sun has set for the ground
       const T = W.cloudSun, m = Math.max(T[0], T[1], T[2], 1e-4);
-      const k = (W.sunIntensity || 1) * 1.05 * sunUp + (W.sunElev < 2 ? Math.min(m, 0.6) * RJ.smooth(-6, 0, W.sunElev) * 0.9 * (1 - sunUp) : 0);
-      U.sunCol.value.setRGB(T[0] / m * k + 0.02, T[1] / m * k + 0.02, T[2] / m * k + 0.02);
+      const k = (W.sunIntensity || 1) * 1.05 * sunUp * (1 + 0.9 * RJ.smooth(14, 0, W.sunElev)) + (W.sunElev < 2 ? Math.min(m, 0.6) * RJ.smooth(-6, 0, W.sunElev) * 0.9 * (1 - sunUp) : 0);
+      U.sunCol.value.setRGB(Math.pow(T[0] / m, 0.6) * k + 0.02, Math.pow(T[1] / m, 0.6) * k + 0.02, Math.pow(T[2] / m, 0.6) * k + 0.02); // softened: sunset clouds go gold-pink, not blood red
     }
     const sky = W.skyMat.uniforms;
     U.ambTop.value.copy(sky.top.value).lerp(sky.horizon.value, 0.35).multiplyScalar(0.95);
