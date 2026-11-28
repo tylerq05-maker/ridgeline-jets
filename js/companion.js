@@ -457,7 +457,7 @@
       C.listening = true; status("listening");
       return;
     }
-    if (!SR || window.claude) { status("error", MIC_HELP.nosr); openChat(); return; }
+    if (!SR || window.claude) { status("error", MIC_HELP.nosr); return; }
     let said = "";
     const rec = (C.rec = new SR());
     rec.lang = "en-GB"; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
@@ -479,7 +479,7 @@
   const typing = (e) => e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.isContentEditable);
   addEventListener("keydown", (e) => {
     if (typing(e) || !RJ.state || RJ.state.mode !== "playing") return;
-    if (isTalkKey(e) && !e.repeat) { C._heldAt = performance.now(); C.startTalk(false); }
+    if (isTalkKey(e)) { e.preventDefault(); if (!e.repeat) { C._heldAt = performance.now(); C.startTalk(false); } }
     else if (e.key === "Enter" && !e.repeat) { e.preventDefault(); openChat(); }
   });
   addEventListener("keyup", (e) => {
